@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import json
 import math
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from docx import Document
 
 # ============================
