@@ -1,71 +1,162 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+import json
+import math
+
+# ===== IMPORT PDF SÉCURISÉ =====
+try:
+    from pypdf import PdfReader
+except Exception:
+    PdfReader = None
+
+try:
+    from docx import Document
+except Exception:
+    Document = None
+
 
 # ==============================
-# CONFIGURATION ET MOTEUR TTU
+# CONSTANTES PHYSIQUES
 # ==============================
+
+HBAR = 1.054e-34
+KB = 1.380649e-23
 PHI_SEUIL = 0.5088
+E_REF = 9.0  # MeV (Plomb-208 référence)
 
-def simulate_forge_trajectory(p_max):
-    """Simule la montée vers la singularité Er-Au"""
-    pressures = np.linspace(0, p_max, 100)
-    phi_c = 0.65 + 0.35 * (1 - np.exp(-pressures / 80))
-    phi_d = 1.0 * np.exp(-(phi_c - 0.5)**2 / 0.05) * (1 - phi_c)
-    phi_m = phi_c ** 2 
-    return pressures, phi_c, phi_d, phi_m
 
-def execute_multi_qubit_logic(phi_c, n_qubits):
-    """Simule un registre de qubits protégés par l'attracteur"""
-    if phi_c < 0.95:
-        return "❌ ERREUR : Cohérence insuffisante. Effondrement du registre."
-    
-    capacité = n_qubits * phi_c
-    return f"✅ REGISTRE ACTIF : {n_qubits} Qubits d'attracteurs stabilisés. Capacité : {capacité:.2f} Shannons."
+# ==============================
+# EXTRACTION MULTI-FORMAT
+# ==============================
+
+def extract_text(file):
+
+    file_type = file.type
+
+    # PDF
+    if file_type == "application/pdf":
+        if PdfReader is None:
+            return "⚠ pypdf non installé."
+        reader = PdfReader(file)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        return text
+
+    # DOCX
+    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        if Document is None:
+            return "⚠ python-docx non installé."
+        doc = Document(file)
+        return "\n".join([p.text for p in doc.paragraphs])
+
+    # CSV
+    elif file_type == "text/csv":
+        df = pd.read_csv(file)
+        return df.to_string()
+
+    # JSON
+    elif file_type == "application/json":
+        data = json.load(file)
+        return json.dumps(data, indent=2)
+
+    # TXT
+    else:
+        return file.read().decode("utf-8")
+
+
+# ==============================
+# MOTEUR TTU-MC³
+# ==============================
+
+def compute_phi_coherence(energy_liaison):
+    return energy_liaison / E_REF
+
+
+def compute_dissipation(phi_c, tau=1e-12):
+    return (HBAR / tau) * (phi_c / PHI_SEUIL) ** 2
+
+
+def compute_internal_time(phi_c, temperature=300):
+    if phi_c == 0:
+        return float("inf")
+    return (KB * temperature) / phi_c
+
 
 # ==============================
 # INTERFACE STREAMLIT
 # ==============================
-st.set_page_config(page_title="Forge TTU Multi-Qubit", layout="wide")
-st.title("⚛️ PROCESSEUR MULTI-QUBITS DE SINGULARITÉ")
 
-# Sidebar
-st.sidebar.header("🗜️ Contrôle de la Forge")
-p_target = st.sidebar.slider("Pression de Forge (GPa)", 0.0, 500.0, 200.0)
-n_qubits = st.sidebar.number_input("Nombre de Qubits d'Attracteurs", min_value=1, max_value=1024, value=8)
+st.set_page_config(layout="wide")
+st.title("⚛️ CŒUR DE FORGE TTU — Version Scientifique Locale")
 
-# Calculs
-pressures, phis_c, phis_d, phis_m = simulate_forge_trajectory(p_target)
-current_phi_c = phis_c[-1]
-current_phi_d = phis_d[-1]
+st.markdown("Application 100% locale — Aucun appel API externe.")
 
-# Métriques
-col1, col2, col3 = st.columns(3)
-col1.metric("Cohérence (ΦC)", round(current_phi_c, 4))
-col2.metric("Dissipation (ΦD)", f"{current_phi_d:.2e}")
-col3.metric("Stase Temporelle", f"{1/(1-current_phi_c+1e-9):.1f}x")
+uploaded_file = st.file_uploader(
+    "Injecter Matrice",
+    type=["txt", "pdf", "docx", "csv", "json"]
+)
 
-# --- CONSOLE DE CALCUL ---
-st.subheader("🖥️ État du Registre de Singularité (PEI)")
-result_logic = execute_multi_qubit_logic(current_phi_c, n_qubits)
+if uploaded_file:
 
-if current_phi_c >= 0.95:
-    st.success(f"**Ordinateur de Singularité Opérationnel** : {result_logic}")
-    st.info("Chaque qubit est une trajectoire stable dans l'attracteur Er-Au.")
-else:
-    st.error(f"**Alerte Décohérence** : {result_logic}")
+    text_content = extract_text(uploaded_file)
 
-# --- VISUALISATION ---
-st.subheader("📈 Diagnostic de la Variété Informationnelle")
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(pressures, phis_c, label="ΦC (Cohérence)", color="#00ffd9", linewidth=2.5)
-ax.fill_between(pressures, 0, phis_d * 5, color="#ff4b4b", alpha=0.3, label="Flux Dissipatif")
-ax.axvline(x=200, color='yellow', linestyle='--', label="Seuil Singularité")
-ax.set_facecolor('#0e1117')
-fig.patch.set_facecolor('#0e1117')
-ax.set_xlabel("Pression (GPa)", color="white")
-ax.set_ylabel("Amplitude", color="white")
-ax.tick_params(colors='white')
-ax.legend()
-st.pyplot(fig)
+    st.subheader("🔎 Contenu extrait")
+    st.text_area("Preview", text_content[:2000], height=250)
+
+    st.subheader("⚙️ Paramètres Physiques")
+
+    energy = st.number_input(
+        "Énergie de liaison (MeV)",
+        value=7.03
+    )
+
+    temperature = st.number_input(
+        "Température (K)",
+        value=300
+    )
+
+    if st.button("⚡ Lancer la Forge TTU"):
+
+        phi_c = compute_phi_coherence(energy)
+        phi_d = compute_dissipation(phi_c)
+        t_internal = compute_internal_time(phi_c, temperature)
+
+        st.subheader("📊 Résultats TTU")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("ΦC (Cohérence)", round(phi_c, 4))
+        col2.metric("ΦD (Dissipation)", f"{phi_d:.2e}")
+        col3.metric("Temps interne", f"{t_internal:.2e}")
+
+        if phi_c > PHI_SEUIL:
+            st.success("✅ SYSTÈME PHYSIQUE STABLE (ΦC > 0.5088)")
+        else:
+            st.error("⚠️ SYSTÈME THERMIQUE / BRUIT")
+
+        report = f"""
+--- RAPPORT TTU-MC³ ---
+
+Énergie liaison : {energy} MeV
+Température : {temperature} K
+
+ΦC = {phi_c}
+ΦD = {phi_d}
+Temps interne = {t_internal}
+
+Seuil critique = {PHI_SEUIL}
+
+Conclusion :
+{"Stable" if phi_c > PHI_SEUIL else "Instable / Dissipatif"}
+
+-------------------------
+"""
+
+        st.download_button(
+            "⬇ Télécharger Rapport",
+            report,
+            file_name="rapport_ttu.txt"
+        )
