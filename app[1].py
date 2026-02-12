@@ -1,82 +1,121 @@
+
 import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.integrate import odeint
+import pandas as pd
+import json
+import math
+from PyPDF2 import PdfReader
+from docx import Document
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="TTU-MC3 Cyber-Forge", layout="wide")
+# ============================
+# CONSTANTES PHYSIQUES
+# ============================
 
-# --- STYLE CSS POUR LE BRANDING ---
-st.markdown("""
-    <style>
-    .stApp { background-color: #0e1117; color: white; }
-    .payment-box { 
-        padding: 20px; 
-        border: 2px solid #ff4b4b; 
-        border-radius: 10px; 
-        background-color: #1e1e1e;
-        text-align: center;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+HBAR = 1.054e-34
+KB = 1.380649e-23
+PHI_SEUIL = 0.5088
+E_REF = 9.0  # MeV référence plomb-208
 
-# --- TITRE ET CONTACT ---
-st.title("🛡️ TTU-MC³ : Unified Cyber-Forge")
-st.sidebar.markdown(f"""
-### 📞 Contact & Support
-**Email :** [mayombochristal@gmail.com](mailto:mayombochristal@gmail.com)
-""")
+# ============================
+# EXTRACTION MULTI-FORMAT
+# ============================
 
-# --- MODULES DE PAIEMENT ---
-def display_payment_info():
-    st.markdown("""
-    <div class="payment-box">
-        <h3>💳 ACTIVER LA FORGE (SERVICES PREMIUM)</h3>
-        <p>Pour débloquer le cryptage haute cohérence et les audits complets :</p>
-        <p><b>Gabon 🇬🇦 (Airtel/Moov) : +241 77 76 54 96</b></p>
-        <p><b>Congo 🇨🇬 (Airtel/Moov) : +241 65 43 00 33</b></p>
-        <p><i>Envoyez la preuve de transfert à l'email ci-dessus pour recevoir votre clé d'activation.</i></p>
-    </div>
-    """, unsafe_allow_html=True)
+def extract_text(file):
+    if file.type == "application/pdf":
+        reader = PdfReader(file)
+        return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
-# --- LOGIQUE TTU-MC3 ---
-def diode_chua(x):
-    m0, m1 = -1.143, -0.714
-    return m1 * x + 0.5 * (m0 - m1) * (np.abs(x + 1) - np.abs(x - 1))
+    elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = Document(file)
+        return "\n".join([p.text for p in doc.paragraphs])
 
-def dynamics(state, t, a, b):
-    x, y, z = state
-    return [a*(y - x - diode_chua(x)), x - y + z, -b*y]
+    elif file.type == "text/csv":
+        df = pd.read_csv(file)
+        return df.to_string()
 
-# --- INTERFACE ---
-tab1, tab2, tab3 = st.tabs(["🔎 Audit Gratuit", "🔐 Cryptage (Premium)", "🧪 Forge Matérielle"])
+    elif file.type == "application/json":
+        data = json.load(file)
+        return json.dumps(data, indent=2)
 
-with tab1:
-    st.header("Analyseur de Résilience (Pentesting)")
-    st.write("Évaluez si votre système est un **Rocher** ou une **Fleur de Givre**.")
-    val_liaison = st.number_input("Énergie de liaison mesurée (MeV)", 0.0, 10.0, 4.5)
-    
-    phi_c = val_liaison / 9.0
-    if phi_c < 0.5088:
-        st.error(f"⚠️ VULNÉRABILITÉ DÉTECTÉE : Cohérence {phi_c:.4f} < 0.5088")
-        st.write("Votre structure informationnelle est instable face aux attaques par chaos.")
     else:
-        st.success(f"✅ SYSTÈME ROBUSTE : Cohérence {phi_c:.4f} > 0.5088")
+        return file.read().decode("utf-8")
 
-with tab2:
-    st.header("Tunnel de Communication Chaotique")
-    display_payment_info()
-    st.warning("Le module de cryptage par synchronisation de chaos est verrouillé.")
-    if st.text_input("Entrez votre clé d'activation payante") == "TTU-2026-PRO":
-        st.success("Accès autorisé à la Forge Virtuelle.")
-        # Le code de cryptage s'exécute ici
-        
 
-with tab3:
-    st.header("Forge Acoustique : Chaux de Carbure")
-    st.info("Utilisez cette section pour stabiliser vos matériaux (Résonance 19.605 Hz).")
-    st.write("Contactez **mayombochristal@gmail.com** pour les protocoles industriels complets.")
-    
+# ============================
+# MOTEUR TTU-MC³
+# ============================
 
-st.divider()
-st.write("© 2026 Start-up TTU-MC³. Tous droits réservés.")
+def compute_phi_coherence(energy_liaison):
+    return energy_liaison / E_REF
+
+def compute_dissipation(phi_c, tau=1e-12):
+    return (HBAR / tau) * (phi_c / PHI_SEUIL) ** 2
+
+def compute_internal_time(phi_c, temperature=300):
+    if phi_c == 0:
+        return float("inf")
+    return (KB * temperature) / phi_c
+
+
+# ============================
+# INTERFACE STREAMLIT
+# ============================
+
+st.set_page_config(layout="wide")
+st.title("⚛️ CŒUR DE FORGE TTU — Version Scientifique Locale")
+
+uploaded_file = st.file_uploader(
+    "Injecter Matrice",
+    type=["txt", "pdf", "docx", "csv", "json"]
+)
+
+if uploaded_file:
+
+    text_content = extract_text(uploaded_file)
+
+    st.subheader("🔎 Contenu extrait")
+    st.text_area("Preview", text_content[:2000], height=250)
+
+    st.subheader("⚙️ Paramètres Physiques")
+
+    energy = st.number_input("Énergie de liaison (MeV)", value=7.03)
+    temperature = st.number_input("Température (K)", value=300)
+
+    if st.button("⚡ Lancer la Forge TTU"):
+
+        phi_c = compute_phi_coherence(energy)
+        phi_d = compute_dissipation(phi_c)
+        t_internal = compute_internal_time(phi_c, temperature)
+
+        st.subheader("📊 Résultats TTU")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("ΦC (Cohérence)", round(phi_c, 4))
+        col2.metric("ΦD (Dissipation)", f"{phi_d:.2e}")
+        col3.metric("Temps interne", f"{t_internal:.2e}")
+
+        if phi_c > PHI_SEUIL:
+            st.success("✅ SYSTÈME PHYSIQUE STABLE (ΦC > 0.5088)")
+        else:
+            st.error("⚠️ SYSTÈME THERMIQUE / BRUIT")
+
+        report = f"""
+--- RAPPORT TTU-MC³ ---
+
+Énergie liaison: {energy} MeV
+ΦC = {phi_c}
+ΦD = {phi_d}
+Temps interne = {t_internal}
+
+Seuil critique = {PHI_SEUIL}
+
+Conclusion :
+{"Stable" if phi_c > PHI_SEUIL else "Instable / Dissipatif"}
+
+-------------------------
+"""
+
+        st.download_button(
+            "⬇ Télécharger Rapport",
+            report,
+            file_name="rapport_ttu.txt"
+        )
