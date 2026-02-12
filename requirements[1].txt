@@ -1,8 +1,4 @@
-# Bibliothèques fondamentales pour la TTU-MC3
-streamlit==1.31.0
-numpy==1.26.0
-scipy==1.11.0
-matplotlib==3.8.0
-
-# Optionnel : pour l'interface et le design
-pandas==2.1.0
+streamlit
+pandas
+PyPDF2
+python-docx
