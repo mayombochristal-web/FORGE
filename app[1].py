@@ -1,162 +1,165 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
-import json
-import math
+import matplotlib.pyplot as plt
 
-# ===== IMPORT PDF SÉCURISÉ =====
-try:
-    from pypdf import PdfReader
-except Exception:
-    PdfReader = None
-
-try:
-    from docx import Document
-except Exception:
-    Document = None
-
-
-# ==============================
-# CONSTANTES PHYSIQUES
-# ==============================
-
-HBAR = 1.054e-34
-KB = 1.380649e-23
+# ==========================================================
+# CONSTANTES PHYSIQUES TTU-MC³
+# ==========================================================
+HBAR = 6.5821e-16  # eV.s
 PHI_SEUIL = 0.5088
-E_REF = 9.0  # MeV (Plomb-208 référence)
+PRESSION_CRITIQUE_REF = 200.0  # GPa référence
+
+# ==========================================================
+# MODÈLE DYNAMIQUE CONTINU (FORMULATION SCIENTIFIQUE)
+# ==========================================================
+
+def simulate_forge_trajectory(p_max, temperature):
+    """
+    Simulation continue différentiable
+    basée sur un modèle d'approche exponentielle critique.
+    """
+
+    pressures = np.linspace(0, p_max, 300)
+
+    # Paramètre thermique
+    beta = 1 / (temperature + 1e-9)
+
+    # Cohérence : croissance sigmoïde critique
+    phi_c = 1 / (1 + np.exp(-(pressures - PRESSION_CRITIQUE_REF) / 40))
+
+    # Dissipation : décroissance gaussienne modulée
+    phi_d = np.exp(-beta * phi_c) * (1 - phi_c)
+
+    # Mémoire : accumulation quadratique
+    phi_m = phi_c**2
+
+    # Gradient dΦC/dP
+    dphi_dp = np.gradient(phi_c, pressures)
+
+    # Indicateur de stabilité locale (approx jacobien scalaire)
+    stability = 1 - np.abs(dphi_dp)
+
+    return pressures, phi_c, phi_d, phi_m, dphi_dp, stability
 
 
-# ==============================
-# EXTRACTION MULTI-FORMAT
-# ==============================
+# ==========================================================
+# ANALYSE CRITIQUE
+# ==========================================================
 
-def extract_text(file):
+def extraction_pei(phi_c, phi_d, stability):
+    """
+    Verdict basé sur cohérence + dissipation + stabilité
+    """
 
-    file_type = file.type
+    if phi_c > 0.98 and phi_d < 1e-12 and stability > 0.9:
+        return "SINGULARITÉ STABLE — Holonomie protégée"
 
-    # PDF
-    if file_type == "application/pdf":
-        if PdfReader is None:
-            return "⚠ pypdf non installé."
-        reader = PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text
+    elif phi_c > PHI_SEUIL:
+        return "RÉGIME CRITIQUE — Transition en cours"
 
-    # DOCX
-    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        if Document is None:
-            return "⚠ python-docx non installé."
-        doc = Document(file)
-        return "\n".join([p.text for p in doc.paragraphs])
-
-    # CSV
-    elif file_type == "text/csv":
-        df = pd.read_csv(file)
-        return df.to_string()
-
-    # JSON
-    elif file_type == "application/json":
-        data = json.load(file)
-        return json.dumps(data, indent=2)
-
-    # TXT
     else:
-        return file.read().decode("utf-8")
+        return "RÉGIME DISSIPATIF — Structure non stabilisée"
 
 
-# ==============================
-# MOTEUR TTU-MC³
-# ==============================
+# ==========================================================
+# INTERFACE
+# ==========================================================
 
-def compute_phi_coherence(energy_liaison):
-    return energy_liaison / E_REF
+st.set_page_config(page_title="Forge TTU MC³ — Advanced", layout="wide")
+st.title("⚛️ FORGE TTU — MOTEUR DYNAMIQUE AVANCÉ")
 
+st.sidebar.header("Paramètres physiques")
 
-def compute_dissipation(phi_c, tau=1e-12):
-    return (HBAR / tau) * (phi_c / PHI_SEUIL) ** 2
+p_target = st.sidebar.slider("Pression (GPa)", 0.0, 500.0, 200.0)
+temperature = st.sidebar.number_input("Température (K)", value=0.05, format="%.4f")
 
+# ==========================================================
+# EXECUTION
+# ==========================================================
 
-def compute_internal_time(phi_c, temperature=300):
-    if phi_c == 0:
-        return float("inf")
-    return (KB * temperature) / phi_c
-
-
-# ==============================
-# INTERFACE STREAMLIT
-# ==============================
-
-st.set_page_config(layout="wide")
-st.title("⚛️ CŒUR DE FORGE TTU — Version Scientifique Locale")
-
-st.markdown("Application 100% locale — Aucun appel API externe.")
-
-uploaded_file = st.file_uploader(
-    "Injecter Matrice",
-    type=["txt", "pdf", "docx", "csv", "json"]
+pressures, phis_c, phis_d, phis_m, gradients, stability = simulate_forge_trajectory(
+    p_target, temperature
 )
 
-if uploaded_file:
+current_phi_c = phis_c[-1]
+current_phi_d = phis_d[-1]
+current_phi_m = phis_m[-1]
+current_grad = gradients[-1]
+current_stability = stability[-1]
 
-    text_content = extract_text(uploaded_file)
+verdict = extraction_pei(current_phi_c, current_phi_d, current_stability)
 
-    st.subheader("🔎 Contenu extrait")
-    st.text_area("Preview", text_content[:2000], height=250)
+# ==========================================================
+# MÉTRIQUES
+# ==========================================================
 
-    st.subheader("⚙️ Paramètres Physiques")
+col1, col2, col3, col4 = st.columns(4)
 
-    energy = st.number_input(
-        "Énergie de liaison (MeV)",
-        value=7.03
-    )
+col1.metric("ΦC Cohérence", round(current_phi_c, 6))
+col2.metric("ΦD Dissipation", f"{current_phi_d:.2e}")
+col3.metric("Gradient Critique", f"{current_grad:.4e}")
+col4.metric("Stabilité Locale", round(current_stability, 4))
 
-    temperature = st.number_input(
-        "Température (K)",
-        value=300
-    )
+# ==========================================================
+# STATUT PHYSIQUE
+# ==========================================================
 
-    if st.button("⚡ Lancer la Forge TTU"):
+st.subheader("Analyse du régime dynamique")
 
-        phi_c = compute_phi_coherence(energy)
-        phi_d = compute_dissipation(phi_c)
-        t_internal = compute_internal_time(phi_c, temperature)
+if "SINGULARITÉ STABLE" in verdict:
+    st.success(verdict)
+elif "CRITIQUE" in verdict:
+    st.warning(verdict)
+else:
+    st.error(verdict)
 
-        st.subheader("📊 Résultats TTU")
+# ==========================================================
+# VISUALISATIONS SCIENTIFIQUES
+# ==========================================================
 
-        col1, col2, col3 = st.columns(3)
+st.subheader("Dynamique complète de la variété")
 
-        col1.metric("ΦC (Cohérence)", round(phi_c, 4))
-        col2.metric("ΦD (Dissipation)", f"{phi_d:.2e}")
-        col3.metric("Temps interne", f"{t_internal:.2e}")
+fig, ax = plt.subplots(3, 1, figsize=(8, 10))
 
-        if phi_c > PHI_SEUIL:
-            st.success("✅ SYSTÈME PHYSIQUE STABLE (ΦC > 0.5088)")
-        else:
-            st.error("⚠️ SYSTÈME THERMIQUE / BRUIT")
+# ΦC & ΦD
+ax[0].plot(pressures, phis_c)
+ax[0].plot(pressures, phis_d)
+ax[0].axhline(y=PHI_SEUIL, linestyle="--")
+ax[0].set_xlabel("Pression (GPa)")
+ax[0].set_ylabel("Amplitude")
+ax[0].set_title("Cohérence et Dissipation")
 
-        report = f"""
---- RAPPORT TTU-MC³ ---
+# Gradient critique
+ax[1].plot(pressures, gradients)
+ax[1].set_xlabel("Pression (GPa)")
+ax[1].set_ylabel("dΦC/dP")
+ax[1].set_title("Gradient critique")
 
-Énergie liaison : {energy} MeV
-Température : {temperature} K
+# Stabilité locale
+ax[2].plot(pressures, stability)
+ax[2].set_xlabel("Pression (GPa)")
+ax[2].set_ylabel("Indice stabilité")
+ax[2].set_title("Stabilité dynamique locale")
 
-ΦC = {phi_c}
-ΦD = {phi_d}
-Temps interne = {t_internal}
+plt.tight_layout()
+st.pyplot(fig)
 
-Seuil critique = {PHI_SEUIL}
+# ==========================================================
+# EXPORT SCIENTIFIQUE
+# ==========================================================
 
-Conclusion :
-{"Stable" if phi_c > PHI_SEUIL else "Instable / Dissipatif"}
+data = pd.DataFrame({
+    "Pression": pressures,
+    "Phi_C": phis_c,
+    "Phi_D": phis_d,
+    "Phi_M": phis_m,
+    "Gradient": gradients,
+    "Stabilite": stability
+})
 
--------------------------
-"""
-
-        st.download_button(
-            "⬇ Télécharger Rapport",
-            report,
-            file_name="rapport_ttu.txt"
-        )
+st.download_button(
+    "Télécharger données scientifiques (CSV)",
+    data.to_csv(index=False),
+    "forge_ttu_donnees.csv"
+)
