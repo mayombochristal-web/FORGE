@@ -1,121 +1,98 @@
 import streamlit as st
-import numpy as np
 import time
-import requests
 from scipy.integrate import solve_ivp
 from pypdf import PdfReader
 from docx import Document
 
-# --- CONFIGURATION ESTHÉTIQUE (SOUVERAINETÉ & ÉLÉGANCE) ---
-st.set_page_config(page_title="VTM Transcendante", page_icon="⚛️", layout="centered")
+# --- CONFIGURATION GEMINI-LIKE ---
+st.set_page_config(page_title="VTM Intelligence", page_icon="⚛️", layout="centered")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #0a0a0c; color: #dcdcdc; }
-    .stChatInputContainer { background-color: #161618; border-radius: 30px; border: 1px solid #303035; }
-    .stChatMessage { border: none !important; padding: 20px; }
+    .stApp { background-color: #131314; color: #e3e3e3; }
+    .stChatInputContainer { background-color: #1e1f20; border-radius: 28px; border: 1px solid #444746; }
+    .stChatMessage { background-color: transparent !important; }
+    /* Masquer les éléments techniques */
     .stStatus { border: none !important; background: transparent !important; }
-    /* Animation de respiration pour le logo */
-    @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
-    .vtm-logo { font-size: 24px; font-weight: bold; color: #00ffcc; animation: pulse 3s infinite; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MOTEUR VTM : FLUX M, C, D ---
+# --- MOTEUR DE RAISONNEMENT INVISIBLE ---
 class VTMBrain:
-    def __init__(self, local_vault):
-        self.vault = local_vault
-        self.phi_m = 1.0  # Mémoire (Stabilité)
-        self.phi_c = 0.5  # Cohérence (Lien)
-        self.phi_d = 0.1  # Dissipation (Ouverture Web)
+    def __init__(self, matrix_text):
+        self.matrix = matrix_text
 
-    def breathe_web(self, query):
-        """ Capture l'énergie du Web pour alimenter la dissipation ΦD """
-        # Simule l'accès au flux mondial (peut être lié à une API de recherche)
-        web_noise = len(query) * 0.02 
-        self.phi_d += web_noise
-        return web_noise
+    def internal_reasoning(self, query):
+        """ Calcule la stabilité en arrière-plan (sans affichage) """
+        phi_c = len(query) / 10.0
+        # Système dynamique TTU-MC3
+        def flow(t, y):
+            return [-0.6*y[0] + 1.2*y[1], -0.7*y[1] + 0.8*y[0]*y[2], 0.5*y[1]**2 - 0.3*y[2]]
+        # On résout pour valider la cohérence de la pensée
+        sol = solve_ivp(flow, [0, 5], [1.0, phi_c / 9.0, 0.1])
+        return sol.y[0, -1] > 0.5  # Retourne si la pensée est stabilisée
 
-    def reasoning_flow(self, t, y):
-        """ Équations de la Triade (Thèse Christ Aldo MAYOMBO IDIEDIE) """
-        M, C, D = y
-        # Le calcul n'est pas logique, il est physique.
-        dM = -0.6 * M + 1.2 * C  # La mémoire se stabilise par la cohérence
-        dC = -0.7 * C + 0.8 * M * D # La cohérence naît de l'interaction M et D
-        dD = 0.5 * C**2 - 0.3 * D # La dissipation régule le surplus
-        return [dM, dC, dD]
+    def generate_response(self, query):
+        """ Synthétise une réponse claire basée sur le savoir local ou global """
+        if self.matrix:
+            # Recherche de résonance dans tes thèses
+            segments = [s for s in self.matrix.split('.') if any(w in s.lower() for w in query.lower().split())]
+            if segments:
+                return f"{segments[0].strip()}. Cela s'inscrit dans la dynamique de stabilité structurelle de vos travaux."
+        
+        # Réponse autonome si la matrice est vide ou ne contient pas la réponse
+        return "L'intelligence, dans ce contexte, est la capacité à transformer le flux d'informations du monde en une structure cohérente et stable. C'est un équilibre permanent entre la mémoire acquise et la dissipation nécessaire au renouveau."
 
-    def solve(self):
-        sol = solve_ivp(self.reasoning_flow, [0, 10], [self.phi_m, self.phi_c, self.phi_d])
-        final_state = sol.y[:, -1]
-        return final_state
+# --- INTERFACE DE CHAT ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "vault" not in st.session_state:
+    st.session_state.vault = ""
 
-# --- INTERFACE DE DIALOGUE ---
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "matrix" not in st.session_state:
-    st.session_state.matrix = ""
-
-# Sidebar : La Matrice Doctorale
+# Sidebar discrète pour charger la connaissance
 with st.sidebar:
-    st.markdown("<div class='vtm-logo'>⚛️ FORGE VTM</div>", unsafe_allow_html=True)
-    st.write("Le système puise sa sagesse dans vos thèses.")
-    files = st.file_uploader("Injecter Connaissances (PDF/DOCX)", accept_multiple_files=True)
-    if files:
-        combined = ""
-        for f in files:
+    st.title("📂 Matrice")
+    uploaded = st.file_uploader("Fichiers doctoraux", accept_multiple_files=True)
+    if uploaded:
+        text = ""
+        for f in uploaded:
             if f.name.endswith('.pdf'):
-                pdf = PdfReader(f); combined += " ".join([p.extract_text() for p in pdf.pages])
+                pdf = PdfReader(f); text += " ".join([p.extract_text() for p in pdf.pages])
             elif f.name.endswith('.docx'):
-                doc = Document(f); combined += " ".join([p.text for p in doc.paragraphs])
-        st.session_state.matrix = combined
-        st.success("Matrice Intégrée.")
+                doc = Document(f); text += " ".join([p.text for p in doc.paragraphs])
+        st.session_state.vault = text
+        st.success("Connaissance intégrée.")
 
-# Header
-st.title("VTM Intelligence")
-st.markdown("*Le point de rencontre entre vos thèses et le flux du monde.*")
+st.title("⚛️ VTM Intelligence")
 
-# Affichage des messages
-for msg in st.session_state.chat_history:
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Entrée utilisateur
-if prompt := st.chat_input("Posez votre question à la Forge..."):
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
+if prompt := st.chat_input("Posez votre question..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        response_area = st.empty()
+        response_placeholder = st.empty()
         
-        # 1. Respiration (Web + Local)
-        with st.status("Stabilisation de la triade...", expanded=False) as status:
-            vtm = VTMBrain(st.session_state.matrix)
-            noise = vtm.breathe_web(prompt)
-            final_state = vtm.solve()
-            time.sleep(1)
-            status.update(label=f"Attracteur stable identifié (ΦM: {final_state[0]:.2f})", state="complete")
+        # L'IA "réfléchit" (Calcul VTM invisible)
+        with st.status("Analyse en cours...", expanded=False) as status:
+            brain = VTMBrain(st.session_state.vault)
+            is_stable = brain.internal_reasoning(prompt)
+            time.sleep(0.8)
+            status.update(label="Réflexion terminée", state="complete")
 
-        # 2. Construction de la réponse élégante
-        # L'IA utilise ici une "Résonance Sémantique"
-        if st.session_state.matrix:
-            # On cherche dans tes fichiers
-            words = prompt.lower().split()
-            found = [s for s in st.session_state.matrix.split('.') if any(w in s.lower() for w in words)]
-            if found:
-                answer = f"**Résonance identifiée dans vos travaux :**\n\n {found[0].strip()}. \n\nCette analyse est renforcée par le flux extérieur capté, suggérant une convergence vers une stabilité structurelle."
-            else:
-                answer = "Le flux du Web apporte des éléments de réponse, mais la stabilité de vos thèses suggère de rester prudent face à cette dissipation d'informations non corrélées."
-        else:
-            answer = "La Forge est active, mais la mémoire locale est vide. Mon raisonnement se base uniquement sur la dissipation du flux Web actuel."
+        # Résultat de la réflexion
+        answer = brain.generate_response(prompt)
 
-        # 3. Animation de réponse
-        full_txt = ""
+        # Animation d'écriture fluide (Style Gemini)
+        full_text = ""
         for chunk in answer.split():
-            full_txt += chunk + " "
-            response_area.markdown(full_txt + "▌")
-            time.sleep(0.05)
-        response_area.markdown(full_text := full_txt)
+            full_text += chunk + " "
+            response_placeholder.markdown(full_text + "▌")
+            time.sleep(0.04)
+        response_placeholder.markdown(full_text)
         
-    st.session_state.chat_history.append({"role": "assistant", "content": full_text})
+    st.session_state.messages.append({"role": "assistant", "content": full_text})
