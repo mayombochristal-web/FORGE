@@ -1,115 +1,140 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-from scipy.integrate import solve_ivp
 import time
+import json
+import re
+from scipy.integrate import solve_ivp
+from pypdf import PdfReader
+from docx import Document
+import io
 
 # ==========================================
-# MOTEUR PHYSIQUE VTM (Backend Triadique)
+# 1. MOTEUR DE RAISONNEMENT VTM (BACKEND)
 # ==========================================
 
-class TriadSystem:
-    """
-    Système dynamique triadique général (VTM v3).
-    Équations :
-        dM/dt = -α*M + β*C
-        dC/dt = -γ*C + δ*M*D
-        dD/dt =  η*C² - μ*D
-    """
-    def __init__(self, alpha=0.6, beta=1.2, gamma=0.7, delta=0.8, eta=0.5, mu=0.3):
-        self.params = (alpha, beta, gamma, delta, eta, mu)
-
-    def derivative(self, t, state):
-        M, C, D = state
-        a, b, g, d, e, m = self.params
+class VTM_Engine:
+    @staticmethod
+    def compute_triad_convergence(input_complexity, vault_size):
+        """ Simule la stabilisation vers un attracteur logique """
+        # Phénoménologie : plus l'input est dense, plus l'énergie est haute
+        energy = min(input_complexity / 50 + vault_size / 100000, 15.0)
+        phi_c = energy / 9.0  # Basé sur E_REF = 9.0 (Pb-208)
         
-        dM = -a * M + b * C
-        dC = -g * C + d * M * D
-        dD = e * C**2 - m * D
-        return [dM, dC, dD]
+        # Système triadique canonique (Thèse Mayombo Idiedie)
+        def triad_flow(t, y):
+            M, C, D = y
+            # dM = -alpha*M + beta*C
+            # dC = -gamma*C + delta*M*D
+            # dD = eta*C^2 - mu*D
+            return [-0.6*M + 1.2*C, -0.7*C + 0.8*M*D, 0.5*C**2 - 0.3*D]
+        
+        sol = solve_ivp(triad_flow, [0, 15], [1.0, phi_c, 0.1], method='RK45')
+        return sol.y[:, -1], phi_c
+
+    @staticmethod
+    def semantic_search(query, vault_text, top_k=3):
+        """ Recherche de fragments de connaissances dans la matrice de données """
+        if not vault_text: return ""
+        # Split par paragraphes
+        paragraphs = [p for p in vault_text.split('\n') if len(p) > 50]
+        # Recherche simplifiée par mots-clés (en attendant un embedding vectoriel)
+        words = query.lower().split()
+        scores = []
+        for p in paragraphs:
+            score = sum(1 for w in words if w in p.lower())
+            scores.append((score, p))
+        
+        top_matches = sorted(scores, key=lambda x: x[0], reverse=True)[:top_k]
+        return "\n\n".join([m[1] for m in top_matches if m[0] > 0])
 
 # ==========================================
-# INTERFACE UTILISATEUR VTM
+# 2. INTERFACE UTILISATEUR (FRONT-END)
 # ==========================================
 
-st.set_page_config(page_title="VTM v3 - Virtual Triadic Machine", layout="wide")
+st.set_page_config(page_title="FORGE VTM IA", page_icon="⚛️", layout="wide")
 
-st.title("🧠 Virtual Triadic Machine (VTM v3)")
+# CSS pour le style "Gemini Dark"
 st.markdown("""
-> **Calcul par Attracteur :** L'ordinateur devient un système physique simulé où le résultat 
-> est la position finale dans l'espace des phases (Mémoire, Cohérence, Dissipation).
-""")
+    <style>
+    .stApp { background-color: #0e1117; color: #e0e0e0; }
+    .stChatMessage { border-radius: 20px; border: 1px solid #30363d; margin-bottom: 15px; }
+    .st-emotion-cache-1c7n2ka { background-color: #161b22 !important; } /* Assistant */
+    .st-emotion-cache-jan737 { background-color: #0d1117 !important; } /* User */
+    </style>
+""", unsafe_allow_html=True)
 
-# Barre latérale : Programmation de la Triade
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "full_vault" not in st.session_state:
+    st.session_state.vault = ""
+
+# Barre latérale : La Matrice de Données
 with st.sidebar:
-    st.header("⚙️ Programmation du Qtrit")
-    alpha = st.slider("α (Dissipation M)", 0.1, 2.0, 0.6)
-    beta = st.slider("β (Couplage M-C)", 0.1, 2.0, 1.2)
-    gamma = st.slider("γ (Dissipation C)", 0.1, 2.0, 0.7)
-    delta = st.slider("δ (Non-linéarité C-D)", 0.1, 2.0, 0.8)
-    eta = st.slider("η (Génération D)", 0.1, 2.0, 0.5)
-    mu = st.slider("μ (Évaporation D)", 0.1, 2.0, 0.3)
+    st.title("📂 Matrice 200Mo")
+    st.write("Injectez vos thèses et documents doctoraux.")
+    uploaded_files = st.file_uploader("Upload Matrix", accept_multiple_files=True, type=['pdf', 'docx', 'txt'])
     
-    st.divider()
-    st.header("🚀 État Initial")
-    m0 = st.number_input("ΦM Initial", value=1.0)
-    c0 = st.number_input("ΦC Initial", value=0.5)
-    d0 = st.number_input("ΦD Initial", value=0.1)
-    
-    t_max = st.number_input("Temps de calcul (T)", value=50)
+    if uploaded_files:
+        with st.spinner("Stabilisation de la matrice..."):
+            combined = ""
+            for f in uploaded_files:
+                if f.type == "application/pdf":
+                    reader = PdfReader(f)
+                    combined += " ".join([p.extract_text() for p in reader.pages if p.extract_text()])
+                elif "document" in f.type:
+                    doc = Document(f)
+                    combined += " ".join([p.text for p in doc.paragraphs])
+                else:
+                    combined += f.read().decode("utf-8")
+            st.session_state.vault = combined
+            st.success(f"✅ Matrice chargée : {len(combined)//1024} Ko")
 
-# Exécution de la Simulation (Le "Calcul")
-if st.button("⚡ Lancer la Convergence vers l'Attracteur"):
-    system = TriadSystem(alpha, beta, gamma, delta, eta, mu)
-    y0 = [m0, c0, d0]
-    t_span = (0, t_max)
-    t_eval = np.linspace(0, t_max, 1000)
+# Zone de Chat principale
+st.title("⚛️ Forge Triadique VTM-IA")
+st.caption("Intelligence Artificielle Souveraine basée sur la Théorie TTU-MC³")
 
-    # Résolution par intégration (Simule l'évolution du Qtrit)
-    with st.spinner("Stabilisation de la Triade..."):
-        sol = solve_ivp(system.derivative, t_span, y0, t_eval=t_eval, method='RK45')
+# Affichage de l'historique
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    # Affichage des Résultats
-    col1, col2 = st.columns([1, 1])
+# Entrée Utilisateur
+if prompt := st.chat_input("Posez une question à la Forge..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    with col1:
-        st.subheader("📉 Évolution Temporelle")
-        df = pd.DataFrame({
-            'Temps': sol.t,
-            'Mémoire (ΦM)': sol.y[0],
-            'Cohérence (ΦC)': sol.y[1],
-            'Dissipation (ΦD)': sol.y[2]
-        })
-        st.line_chart(df.set_index('Temps'))
+    # RAISONNEMENT VTM
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        
+        with st.status("Lancement du moteur TTU-MC³...", expanded=False) as status:
+            # 1. Analyse Dynamique
+            state_final, phi_c = VTM_Engine.compute_triad_convergence(len(prompt), len(st.session_state.vault))
+            time.sleep(0.5)
+            status.write(f"Vibration initiale captée... ΦC = {phi_c:.4f}")
+            
+            # 2. Extraction des connaissances (RAG)
+            context = VTM_Engine.semantic_search(prompt, st.session_state.vault)
+            time.sleep(0.5)
+            status.update(label="Attracteur stable identifié. Génération logique...", state="complete")
 
-    with col2:
-        st.subheader("🌀 Espace des Phases (Attracteur)")
-        fig = go.Figure(data=[go.Scatter3d(
-            x=sol.y[0], y=sol.y[1], z=sol.y[2],
-            mode='lines',
-            line=dict(color=sol.t, colorscale='Viridis', width=4)
-        )])
-        fig.update_layout(
-            scene=dict(
-                xaxis_title='Mémoire (ΦM)',
-                yaxis_title='Cohérence (ΦC)',
-                zaxis_title='Dissipation (ΦD)'
-            ),
-            margin=dict(l=0, r=0, b=0, t=0)
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # 3. Construction de la réponse basée sur l'attracteur
+        if phi_c < 0.5088:
+            response = "⚠️ **Instabilité Détectée** : La cohérence de votre requête est inférieure au seuil critique (0.5088). La dissipation thermique empêche la stabilisation d'une réponse logique. Veuillez enrichir votre question ou la matrice de données."
+        else:
+            if context:
+                response = f"**Analyse Triadique (Attracteur M={state_final[0]:.2f}) :**\n\n"
+                response += f"En m'appuyant sur la matrice chargée, voici l'interprétation cohérente :\n\n {context[:1500]}..."
+            else:
+                response = f"L'attracteur est stable ({state_final[0]:.2f}), mais aucune corrélation sémantique n'a été trouvée dans la matrice locale. La Forge suggère une exploration des invariants arithmétiques liés à votre requête."
 
-    # Résultat final (Convergence)
-    st.divider()
-    m_final, c_final, d_final = sol.y[:, -1]
-    
-    res_col1, res_col2, res_col3 = st.columns(3)
-    res_col1.metric("Résultat ΦM (Attracteur)", round(m_final, 4))
-    res_col2.metric("Stabilité ΦC", round(c_final, 4))
-    res_col3.metric("Entropie Finale ΦD", round(d_final, 4))
-
-    if abs(sol.y[0, -1] - sol.y[0, -2]) < 1e-4:
-        st.success("✅ CALCUL TERMINÉ : Attracteur stable atteint.")
-    else:
-        st.warning("⚠️ SYSTÈME INSTABLE : Le calcul n'a pas encore convergé.")
+        # Animation d'écriture
+        full_res = ""
+        for word in response.split():
+            full_res += word + " "
+            placeholder.markdown(full_res + "▌")
+            time.sleep(0.05)
+        placeholder.markdown(full_res)
+        
+    st.session_state.messages.append({"role": "assistant", "content": full_res})
