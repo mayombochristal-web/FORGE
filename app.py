@@ -1,121 +1,115 @@
-
 import streamlit as st
+import numpy as np
 import pandas as pd
-import json
-import math
-from PyPDF2 import PdfReader
-from docx import Document
+import plotly.graph_objects as go
+from scipy.integrate import solve_ivp
+import time
 
-# ============================
-# CONSTANTES PHYSIQUES
-# ============================
+# ==========================================
+# MOTEUR PHYSIQUE VTM (Backend Triadique)
+# ==========================================
 
-HBAR = 1.054e-34
-KB = 1.380649e-23
-PHI_SEUIL = 0.5088
-E_REF = 9.0  # MeV référence plomb-208
+class TriadSystem:
+    """
+    Système dynamique triadique général (VTM v3).
+    Équations :
+        dM/dt = -α*M + β*C
+        dC/dt = -γ*C + δ*M*D
+        dD/dt =  η*C² - μ*D
+    """
+    def __init__(self, alpha=0.6, beta=1.2, gamma=0.7, delta=0.8, eta=0.5, mu=0.3):
+        self.params = (alpha, beta, gamma, delta, eta, mu)
 
-# ============================
-# EXTRACTION MULTI-FORMAT
-# ============================
+    def derivative(self, t, state):
+        M, C, D = state
+        a, b, g, d, e, m = self.params
+        
+        dM = -a * M + b * C
+        dC = -g * C + d * M * D
+        dD = e * C**2 - m * D
+        return [dM, dC, dD]
 
-def extract_text(file):
-    if file.type == "application/pdf":
-        reader = PdfReader(file)
-        return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+# ==========================================
+# INTERFACE UTILISATEUR VTM
+# ==========================================
 
-    elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = Document(file)
-        return "\n".join([p.text for p in doc.paragraphs])
+st.set_page_config(page_title="VTM v3 - Virtual Triadic Machine", layout="wide")
 
-    elif file.type == "text/csv":
-        df = pd.read_csv(file)
-        return df.to_string()
+st.title("🧠 Virtual Triadic Machine (VTM v3)")
+st.markdown("""
+> **Calcul par Attracteur :** L'ordinateur devient un système physique simulé où le résultat 
+> est la position finale dans l'espace des phases (Mémoire, Cohérence, Dissipation).
+""")
 
-    elif file.type == "application/json":
-        data = json.load(file)
-        return json.dumps(data, indent=2)
+# Barre latérale : Programmation de la Triade
+with st.sidebar:
+    st.header("⚙️ Programmation du Qtrit")
+    alpha = st.slider("α (Dissipation M)", 0.1, 2.0, 0.6)
+    beta = st.slider("β (Couplage M-C)", 0.1, 2.0, 1.2)
+    gamma = st.slider("γ (Dissipation C)", 0.1, 2.0, 0.7)
+    delta = st.slider("δ (Non-linéarité C-D)", 0.1, 2.0, 0.8)
+    eta = st.slider("η (Génération D)", 0.1, 2.0, 0.5)
+    mu = st.slider("μ (Évaporation D)", 0.1, 2.0, 0.3)
+    
+    st.divider()
+    st.header("🚀 État Initial")
+    m0 = st.number_input("ΦM Initial", value=1.0)
+    c0 = st.number_input("ΦC Initial", value=0.5)
+    d0 = st.number_input("ΦD Initial", value=0.1)
+    
+    t_max = st.number_input("Temps de calcul (T)", value=50)
 
-    else:
-        return file.read().decode("utf-8")
+# Exécution de la Simulation (Le "Calcul")
+if st.button("⚡ Lancer la Convergence vers l'Attracteur"):
+    system = TriadSystem(alpha, beta, gamma, delta, eta, mu)
+    y0 = [m0, c0, d0]
+    t_span = (0, t_max)
+    t_eval = np.linspace(0, t_max, 1000)
 
+    # Résolution par intégration (Simule l'évolution du Qtrit)
+    with st.spinner("Stabilisation de la Triade..."):
+        sol = solve_ivp(system.derivative, t_span, y0, t_eval=t_eval, method='RK45')
 
-# ============================
-# MOTEUR TTU-MC³
-# ============================
+    # Affichage des Résultats
+    col1, col2 = st.columns([1, 1])
 
-def compute_phi_coherence(energy_liaison):
-    return energy_liaison / E_REF
+    with col1:
+        st.subheader("📉 Évolution Temporelle")
+        df = pd.DataFrame({
+            'Temps': sol.t,
+            'Mémoire (ΦM)': sol.y[0],
+            'Cohérence (ΦC)': sol.y[1],
+            'Dissipation (ΦD)': sol.y[2]
+        })
+        st.line_chart(df.set_index('Temps'))
 
-def compute_dissipation(phi_c, tau=1e-12):
-    return (HBAR / tau) * (phi_c / PHI_SEUIL) ** 2
-
-def compute_internal_time(phi_c, temperature=300):
-    if phi_c == 0:
-        return float("inf")
-    return (KB * temperature) / phi_c
-
-
-# ============================
-# INTERFACE STREAMLIT
-# ============================
-
-st.set_page_config(layout="wide")
-st.title("⚛️ CŒUR DE FORGE TTU — Version Scientifique Locale")
-
-uploaded_file = st.file_uploader(
-    "Injecter Matrice",
-    type=["txt", "pdf", "docx", "csv", "json"]
-)
-
-if uploaded_file:
-
-    text_content = extract_text(uploaded_file)
-
-    st.subheader("🔎 Contenu extrait")
-    st.text_area("Preview", text_content[:2000], height=250)
-
-    st.subheader("⚙️ Paramètres Physiques")
-
-    energy = st.number_input("Énergie de liaison (MeV)", value=7.03)
-    temperature = st.number_input("Température (K)", value=300)
-
-    if st.button("⚡ Lancer la Forge TTU"):
-
-        phi_c = compute_phi_coherence(energy)
-        phi_d = compute_dissipation(phi_c)
-        t_internal = compute_internal_time(phi_c, temperature)
-
-        st.subheader("📊 Résultats TTU")
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("ΦC (Cohérence)", round(phi_c, 4))
-        col2.metric("ΦD (Dissipation)", f"{phi_d:.2e}")
-        col3.metric("Temps interne", f"{t_internal:.2e}")
-
-        if phi_c > PHI_SEUIL:
-            st.success("✅ SYSTÈME PHYSIQUE STABLE (ΦC > 0.5088)")
-        else:
-            st.error("⚠️ SYSTÈME THERMIQUE / BRUIT")
-
-        report = f"""
---- RAPPORT TTU-MC³ ---
-
-Énergie liaison: {energy} MeV
-ΦC = {phi_c}
-ΦD = {phi_d}
-Temps interne = {t_internal}
-
-Seuil critique = {PHI_SEUIL}
-
-Conclusion :
-{"Stable" if phi_c > PHI_SEUIL else "Instable / Dissipatif"}
-
--------------------------
-"""
-
-        st.download_button(
-            "⬇ Télécharger Rapport",
-            report,
-            file_name="rapport_ttu.txt"
+    with col2:
+        st.subheader("🌀 Espace des Phases (Attracteur)")
+        fig = go.Figure(data=[go.Scatter3d(
+            x=sol.y[0], y=sol.y[1], z=sol.y[2],
+            mode='lines',
+            line=dict(color=sol.t, colorscale='Viridis', width=4)
+        )])
+        fig.update_layout(
+            scene=dict(
+                xaxis_title='Mémoire (ΦM)',
+                yaxis_title='Cohérence (ΦC)',
+                zaxis_title='Dissipation (ΦD)'
+            ),
+            margin=dict(l=0, r=0, b=0, t=0)
         )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Résultat final (Convergence)
+    st.divider()
+    m_final, c_final, d_final = sol.y[:, -1]
+    
+    res_col1, res_col2, res_col3 = st.columns(3)
+    res_col1.metric("Résultat ΦM (Attracteur)", round(m_final, 4))
+    res_col2.metric("Stabilité ΦC", round(c_final, 4))
+    res_col3.metric("Entropie Finale ΦD", round(d_final, 4))
+
+    if abs(sol.y[0, -1] - sol.y[0, -2]) < 1e-4:
+        st.success("✅ CALCUL TERMINÉ : Attracteur stable atteint.")
+    else:
+        st.warning("⚠️ SYSTÈME INSTABLE : Le calcul n'a pas encore convergé.")
