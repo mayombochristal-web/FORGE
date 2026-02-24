@@ -1,4 +1,7 @@
 streamlit
 pandas
-PyPDF2
+plotly
+scipy
+numpy
+pypdf
 python-docx
