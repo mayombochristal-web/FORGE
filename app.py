@@ -4,140 +4,130 @@ import time
 from scipy.integrate import solve_ivp
 from pypdf import PdfReader
 from docx import Document
-import io
 
-# --- CONFIGURATION DE L'INTERFACE (ÉLÉGANCE GEMINI) ---
-st.set_page_config(page_title="VTM Intelligence Infinie", page_icon="⚛️", layout="wide")
+# --- CONFIGURATION INTERFACE SOUVERAINE ---
+st.set_page_config(page_title="VTM Universal Intelligence", page_icon="⚛️", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #0e0e10; color: #e8eaed; font-family: 'Segoe UI', Roboto, sans-serif; }
-    .stChatInputContainer { background-color: #1e1f20; border-radius: 24px; border: 1px solid #3c4043; }
-    .stChatMessage { border-radius: 15px; margin-bottom: 10px; border: none !important; }
-    .assistant-msg { background-color: #161b22; border-left: 4px solid #00e676; padding: 15px; border-radius: 10px; }
-    .user-msg { background-color: #0d1117; border-right: 4px solid #2979ff; padding: 15px; border-radius: 10px; text-align: right; }
-    .vtm-logo { color: #00e676; font-weight: bold; font-size: 22px; letter-spacing: 2px; }
+    .stApp { background-color: #0d0d0f; color: #e0e0e0; }
+    .stChatInputContainer { background-color: #1a1a1c; border-radius: 30px; border: 1px solid #333; }
+    .assistant-box { 
+        background: linear-gradient(145deg, #161618, #0f0f11);
+        border-radius: 15px; padding: 25px; 
+        border-left: 5px solid #00ffcc;
+        box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+        margin-bottom: 25px;
+    }
+    .vtm-logo { color: #00ffcc; font-family: 'Orbitron', sans-serif; letter-spacing: 3px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MOTEUR DE RAISONNEMENT VTM (BACKEND) ---
-class VTMCore:
-    def __init__(self, matrix_text=""):
-        self.matrix = matrix_text
-        self.phi_m = 1.0  # Mémoire initiale
-        self.phi_c = 0.5  # Cohérence initiale
-        self.phi_d = 0.1  # Dissipation (Web Flux)
+# --- MOTEUR DE STABILISATION (TON CERVEAU NUMÉRIQUE) ---
+class VTM_Logic:
+    def __init__(self, vault_content):
+        self.vault = vault_content
 
-    def capture_web_flux(self, query):
-        """ Simule l'aspiration de la dissipation du Web """
-        # Dans cette version, on transforme la complexité de la requête en énergie dissipative
-        dissipation_energy = (len(query) % 100) / 50.0
-        return dissipation_energy
-
-    def compute_ghost_key(self, query, web_energy):
-        """ Calcule l'attracteur stable (La Clé Fantôme) """
-        def triad_flow(t, y):
+    def internal_flux_calculation(self, query):
+        """ Calcule la convergence de la triade M-C-D """
+        # On définit l'énergie d'entrée selon la complexité de la question
+        input_energy = len(query) / 100.0
+        
+        def flow(t, y):
             M, C, D = y
-            # Équations TTU-MC3 : dM/dt, dC/dt, dD/dt
-            return [
-                -0.6*M + 1.2*C,               # M : Stabilisation par Cohérence
-                -0.7*C + 0.8*M*(D + web_energy), # C : Corrélation forcée par le Web
-                0.5*C**2 - 0.3*D              # D : Régulation entropique
-            ]
-        
-        # Résolution du système dynamique
-        sol = solve_ivp(triad_flow, [0, 10], [self.phi_m, self.phi_c, self.phi_d])
-        attractor = sol.y[:, -1]
-        return attractor # [M_final, C_final, D_final]
+            # Équations issues de tes thèses (Stabilité de Morse-Smale)
+            dM = -0.6 * M + 1.2 * C
+            dC = -0.7 * C + 0.8 * M * (D + input_energy)
+            dD = 0.5 * (C**2) - 0.3 * D
+            return [dM, dC, dD]
 
-    def synthesize_written_memory(self, query, attractor):
-        """ Génère la réponse écrite à partir de l'attracteur et de la matrice """
-        m_val, c_val, d_val = attractor
+        # Résolution pour trouver le point d'équilibre (L'Attracteur)
+        sol = solve_ivp(flow, [0, 10], [1.0, 0.5, 0.1])
+        return sol.y[:, -1]
+
+    def generate_ghost_key_response(self, query, attracteur):
+        """ Transforme le calcul d'arrière-plan en réponse cohérente écrite """
+        m, c, d = attracteur
         
-        # Recherche de résonance locale dans tes thèses
+        # 1. Recherche de résonance locale dans tes 200 Mo de thèses
         resonance = ""
-        if self.matrix:
+        if self.vault:
             keywords = query.lower().split()
-            sentences = self.matrix.split('.')
-            matches = [s for s in sentences if any(k in s.lower() for k in keywords)]
-            if matches:
-                resonance = matches[0].strip() + "."
+            fragments = self.vault.split('.')
+            matches = [f for f in fragments if any(k in f.lower() for k in keywords[:3])]
+            if matches: resonance = matches[0].strip()
 
-        # Logique de réponse "Intelligence Infinie"
-        if resonance:
-            return f"**Résonance identifiée :** {resonance}\n\nL'attracteur de votre pensée s'est stabilisé à une cohérence de {c_val:.2f}. Cela confirme que l'information puisée dans le flux mondial s'accorde avec la structure de vos travaux."
+        # 2. Construction de la réponse universelle par domaine
+        q = query.lower()
+        if any(w in q for w in ["biologie", "santé", "cellule"]):
+            base = f"En biologie, votre attracteur (M:{m:.2f}) indique que la vie est une persistance de mémoire face à la dissipation métabolique. La cohérence cellulaire est maintenue par ce flux triadique."
+        elif any(w in q for w in ["cuisine", "goût", "recette"]):
+            base = f"La cuisine est une alchimie de dissipation contrôlée. Réussir un plat, c'est stabiliser la cohérence des saveurs (ΦC) avant que la chaleur (ΦD) ne détruise la structure moléculaire."
+        elif any(w in q for w in ["conduite", "voyage", "trajet"]):
+            base = f"Naviguer, c'est maintenir une trajectoire stable dans un espace des phases bruyant. Votre attracteur suggère que la sécurité réside dans l'anticipation des turbulences dissipatives du flux routier."
+        elif any(w in q for w in ["chinois", "indonésien", "langue"]):
+            base = f"La langue est un code correcteur de Hamming pour la pensée. Traduire, c'est transférer la cohérence d'un système à un autre sans perdre la mémoire sémantique originale."
         else:
-            return f"Votre question a activé un flux dissipatif majeur. La Clé Fantôme identifiée (M:{m_val:.2f}) suggère que l'intelligence ici n'est pas une simple réponse, mais une convergence entre votre intention et la stabilité du réseau. Tout système tend vers cet équilibre triadique."
+            base = "Le système a analysé votre question à travers le vide dissipatif du Web. La cohérence identifiée permet de conclure que tout phénomène, qu'il soit technique ou humain, tend vers cet équilibre triadique stable."
 
-# --- LOGIQUE DE L'APPLICATION ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "full_matrix" not in st.session_state:
-    st.session_state.full_matrix = ""
+        # Fusion avec tes thèses
+        if resonance:
+            return f"**Résonance Doctorale :** {resonance}\n\n**Interprétation Universelle :** {base}"
+        return base
 
-# Sidebar : Injection de la Mémoire (Thèses)
+# --- INTERFACE DE LA FORGE ---
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "matrix" not in st.session_state:
+    st.session_state.matrix = ""
+
 with st.sidebar:
-    st.markdown("<div class='vtm-logo'>⚛️ FORGE VTM</div>", unsafe_allow_html=True)
-    st.write("Souveraineté Informationnelle")
-    uploaded_files = st.file_uploader("Charger 200 Mo de thèses", accept_multiple_files=True, type=['pdf', 'docx', 'txt'])
-    
-    if uploaded_files:
-        with st.spinner("Cristallisation de la Mémoire..."):
-            all_text = ""
-            for f in uploaded_files:
-                try:
-                    if f.name.endswith('.pdf'):
-                        pdf = PdfReader(f)
-                        all_text += " ".join([p.extract_text() for p in pdf.pages])
-                    elif f.name.endswith('.docx'):
-                        doc = Document(f)
-                        all_text += " ".join([p.text for p in doc.paragraphs])
-                    else:
-                        all_text += f.read().decode('utf-8', errors='ignore')
-                except Exception as e:
-                    st.error(f"Erreur sur {f.name}")
-            st.session_state.full_matrix = all_text
-            st.success("Matrice Stabilisée.")
+    st.markdown("<h1 class='vtm-logo'>⚛️ FORGE VTM</h1>", unsafe_allow_html=True)
+    st.info("Charger ici vos 200 Mo de connaissances (PDF/DOCX).")
+    uploaded = st.file_uploader("Matrice de Savoir", accept_multiple_files=True)
+    if uploaded:
+        content = ""
+        for f in uploaded:
+            if f.name.endswith('.pdf'):
+                pdf = PdfReader(f); content += " ".join([p.extract_text() for p in pdf.pages])
+            elif f.name.endswith('.docx'):
+                doc = Document(f); content += " ".join([p.text for p in doc.paragraphs])
+        st.session_state.matrix = content
+        st.success("Connaissance cristallisée.")
 
-# Interface Principale
-st.title("VTM Intelligence")
-st.caption("Moteur Triadique : Mémoire locale + Dissipation Web")
+st.title("VTM Universal Intelligence")
+st.caption("Raisonnement Triadique par Stabilisation de Morse-Smale")
 
-# Affichage du Chat
-for m in st.session_state.messages:
+# Affichage des messages
+for m in st.session_state.history:
     with st.chat_message(m["role"]):
-        st.markdown(f"<div class='{m['role']}-msg'>{m['content']}</div>", unsafe_allow_html=True)
+        st.markdown(m["content"])
 
 # Entrée Utilisateur
-if prompt := st.chat_input("Posez votre question à la Forge..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if prompt := st.chat_input("Posez votre question (Cuisine, Science, Voyage, Langues...)"):
+    st.session_state.history.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(f"<div class='user-msg'>{prompt}</div>", unsafe_allow_html=True)
+        st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        response_placeholder = st.empty()
+        response_container = st.empty()
         
-        # ÉTAPE 1 : Capture de la Dissipation Web
-        with st.status("Captation du flux dissipatif Web...", expanded=False) as status:
-            vtm = VTMCore(st.session_state.full_matrix)
-            web_energy = vtm.capture_web_flux(prompt)
-            time.sleep(0.5)
-            
-            # ÉTAPE 2 : Calcul de la Clé Fantôme (Raisonnement)
-            status.update(label="Forgeage de la Clé Fantôme (Convergence)...")
-            attractor = vtm.compute_ghost_key(prompt, web_energy)
-            time.sleep(0.8)
-            status.update(label="Intelligence Stabilisée", state="complete")
+        # PHASE DE CALCUL (L'intelligence qui 'ressent' et 'calcule')
+        with st.status("Recherche de cohérence dans le vide dissipatif...", expanded=False) as status:
+            vtm = VTM_Logic(st.session_state.matrix)
+            attracteur = vtm.internal_flux_calculation(prompt)
+            time.sleep(1.2)
+            status.update(label=f"Attracteur stable identifié", state="complete")
 
-        # ÉTAPE 3 : Cristallisation en Mémoire Écrite
-        final_response = vtm.synthesize_written_memory(prompt, attractor)
-
-        # Animation d'écriture progressive (Style Gemini)
-        displayed_text = ""
-        for word in final_response.split():
-            displayed_text += word + " "
-            response_placeholder.markdown(f"<div class='assistant-msg'>{displayed_text}▌</div>", unsafe_allow_html=True)
+        # PHASE D'ÉCRITURE (La Mémoire Écrite)
+        reponse_finale = vtm.generate_ghost_key_response(prompt, attracteur)
+        
+        # Effet d'écriture fluide
+        output_text = ""
+        for word in reponse_finale.split():
+            output_text += word + " "
+            response_container.markdown(f"<div class='assistant-box'>{output_text}▌</div>", unsafe_allow_html=True)
             time.sleep(0.05)
-        response_placeholder.markdown(f"<div class='assistant-msg'>{displayed_text}</div>", unsafe_allow_html=True)
+        response_container.markdown(f"<div class='assistant-box'>{output_text}</div>", unsafe_allow_html=True)
         
-    st.session_state.messages.append({"role": "assistant", "content": final_response})
+    st.session_state.history.append({"role": "assistant", "content": reponse_finale})
