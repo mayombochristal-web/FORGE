@@ -1,7 +1,5 @@
 streamlit
-pandas
-plotly
-scipy
-numpy
 pypdf
 python-docx
+scipy
+numpy
