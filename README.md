@@ -1,18 +1,20 @@
-# TTU Language Model
+# TTU-MC³ Chatbot
 
-Modèle de langage basé sur la Théorie Triadique Unifiée (TTU-MC³), implémenté en PyTorch avec une interface Streamlit.
+Un chatbot conversationnel basé sur la **Théorie Triadique Unifiée (TTU-MC³)**.  
+Le modèle utilise une dynamique dissipative à trois composantes (Mémoire, Cohérence, Dissipation) pour générer du texte et maintenir un contexte conversationnel.
 
-## Caractéristiques
+## Fonctionnalités
 
-- Cellules TTU avec dynamique dissipative (Mémoire, Cohérence, Dissipation)
-- Auto-hémostase pour stabiliser la dissipation
-- Visualisation 3D des trajectoires dans l'espace des phases
-- Génération de texte avec température
+- Interface de chat avec historique
+- Plusieurs modes de génération (Dissipation Complexe Active, Silence Dissipatif, etc.)
+- Visualisation 3D en temps réel de la trajectoire interne
 - Entraînement sur corpus personnalisé
+- Sauvegarde et chargement de modèles
+- Paramètres ajustables (température, longueur, bruit)
 
 ## Installation
 
 ```bash
-git clone https://github.com/votre_nom/ttu-language-model.git
-cd ttu-language-model
+git clone https://github.com/votre_nom/ttu-chatbot.git
+cd ttu-chatbot
 pip install -r requirements.txt
