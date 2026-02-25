@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import yaml
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import numpy as np
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
@@ -34,7 +35,7 @@ class TTUCell(nn.Module):
         return new_state
 
 class TTULanguageModel(nn.Module):
-    def __init__(self, base_model_name="distilgpt2", hidden_dim=3, dt=0.1):
+    def __init__(self, base_model_name="microsoft/DialoGPT-medium", hidden_dim=3, dt=0.1):
         super().__init__()
         self.base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
@@ -42,14 +43,12 @@ class TTULanguageModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.dt = dt
         self.ttu_cell = TTUCell(hidden_dim, dt)
-        # Projeter l'état caché du transformer vers une impulsion pour la TTU
         self.impulse_proj = nn.Linear(self.base_model.config.hidden_size, 3)
-        # Moduler les logits avec l'état TTU
         self.logit_modulator = nn.Linear(hidden_dim, self.base_model.config.vocab_size, bias=False)
 
     def forward(self, input_ids, attention_mask=None, ttu_state=None):
         outputs = self.base_model.transformer(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_states = outputs.last_hidden_state  # (batch, seq_len, hidden_size)
+        hidden_states = outputs.last_hidden_state
         batch_size, seq_len, _ = hidden_states.shape
 
         if ttu_state is None:
@@ -58,22 +57,22 @@ class TTULanguageModel(nn.Module):
         traj = []
         all_logits = []
         for t in range(seq_len):
-            # Impulsion basée sur l'état caché courant
-            impulse = self.impulse_proj(hidden_states[:, t, :])  # (batch, 3)
+            impulse = self.impulse_proj(hidden_states[:, t, :])
             ttu_state = self.ttu_cell(ttu_state, impulse)
             traj.append(ttu_state.detach().cpu().numpy())
-            # Obtenir les logits de la tête de langage
-            logits = self.base_model.lm_head(hidden_states[:, t, :])  # (batch, vocab_size)
-            # Moduler par l'état TTU
-            modulation = self.logit_modulator(ttu_state)  # (batch, vocab_size)
-            logits = logits + 0.1 * modulation  # facteur d'influence
+            logits = self.base_model.lm_head(hidden_states[:, t, :])
+            modulation = self.logit_modulator(ttu_state)
+            logits = logits + 0.1 * modulation
             all_logits.append(logits)
 
         return torch.stack(all_logits, dim=1), ttu_state, traj
 
-    def generate(self, prompt, max_new_tokens=100, temperature=0.8, ttu_state=None):
+    def generate(self, prompt, max_new_tokens=100, temperature=0.8, ttu_state=None, knowledge=None):
         self.eval()
         with torch.no_grad():
+            # Ajouter les connaissances si fournies
+            if knowledge:
+                prompt = prompt + "\n[Contexte: " + knowledge + "]"
             input_ids = self.tokenizer.encode(prompt, return_tensors='pt')
             attention_mask = torch.ones_like(input_ids)
             generated = input_ids
@@ -83,7 +82,7 @@ class TTULanguageModel(nn.Module):
             traj = []
             for _ in range(max_new_tokens):
                 outputs = self.base_model.transformer(input_ids=generated, attention_mask=attention_mask)
-                last_hidden = outputs.last_hidden_state[:, -1, :]  # dernier token
+                last_hidden = outputs.last_hidden_state[:, -1, :]
                 impulse = self.impulse_proj(last_hidden)
                 ttu_state = self.ttu_cell(ttu_state, impulse)
                 traj.append(ttu_state.detach().cpu().numpy())
@@ -91,7 +90,6 @@ class TTULanguageModel(nn.Module):
                 modulation = self.logit_modulator(ttu_state)
                 logits = logits + 0.1 * modulation
                 logits = logits / temperature
-                # Appliquer top_k et top_p (simplifié)
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
                 generated = torch.cat([generated, next_token], dim=1)
