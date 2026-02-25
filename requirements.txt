@@ -1,4 +1,8 @@
 streamlit
+torch
 numpy
-scipy
+matplotlib
 plotly
+pyyaml
+pandas
+scipy
