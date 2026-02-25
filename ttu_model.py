@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 import yaml
 
 with open("config.yaml", "r") as f:
@@ -48,11 +47,7 @@ class TTUCell(nn.Module):
         new_phi_d = phi_d + self.dt * dphi_d
         new_phi_m = phi_m + self.dt * dphi_m
 
-        # Auto-hémostase : ajustement de la dissipation si phi_d trop grand
-        # (on peut rendre ce mécanisme différenciable)
-        # Ici, on applique un facteur de réduction directement sur la mise à jour
-        # pour stabiliser.
-        # Plus sophistiqué : intégrer un terme mu variable comme dans engine.py
+        # Auto-hémostase : si phi_d trop grand, on le réduit
         threshold = 10.0
         mu_factor = torch.where(torch.abs(new_phi_d) > threshold, 0.5, 1.0)
         new_phi_d = mu_factor * new_phi_d
@@ -61,7 +56,6 @@ class TTUCell(nn.Module):
         return new_state
 
     def get_derivatives(self, state, impulse):
-        """Calcule les dérivées pour analyse"""
         phi_c, phi_d, phi_m = state[:,0], state[:,1], state[:,2]
         dphi_c = self.gamma * impulse[:,0] - self.alpha_c * phi_c - self.beta_c * phi_c * phi_d
         dphi_d = self.delta * phi_c**2 - self.alpha_d * phi_d
@@ -82,51 +76,42 @@ class TTULanguageModel(nn.Module):
         self.num_layers = num_layers
 
     def forward(self, input_ids, states=None):
-        """
-        input_ids: (batch, seq_len)
-        states: liste optionnelle d'états initiaux pour chaque cellule (batch, hidden_dim)
-        """
         batch, seq_len = input_ids.shape
-        embeds = self.embedding(input_ids)  # (batch, seq_len, embed_dim)
+        embeds = self.embedding(input_ids)
 
         if states is None:
             states = [None] * self.num_layers
 
         outputs = []
-        # Pour stocker les trajectoires (pour visualisation)
         traj = {f'layer_{i}': [] for i in range(self.num_layers)}
 
         for t in range(seq_len):
-            x = embeds[:, t, :]  # (batch, embed_dim)
+            x = embeds[:, t, :]
             new_states = []
             for i, cell in enumerate(self.cells):
                 state_i = states[i] if states[i] is not None else None
-                new_state = cell(x, state_i)   # (batch, hidden_dim)
+                new_state = cell(x, state_i)
                 new_states.append(new_state)
                 traj[f'layer_{i}'].append(new_state.detach().cpu().numpy())
-                # Pour les cellules suivantes, on utilise le nouvel état comme entrée ? 
-                # On peut décider de donner l'état à la cellule suivante.
-                # Option simple : chaque cellule reçoit le même embedding.
-                # Option plus riche : chaîner les états (comme dans les RNN)
-                # Ici on garde simple : toutes les cellules reçoivent le même x.
-            # Concaténer les états de toutes les cellules pour la sortie
-            combined = torch.cat(new_states, dim=-1)  # (batch, hidden_dim * num_layers)
+            combined = torch.cat(new_states, dim=-1)
             logits = self.out_proj(combined)
             outputs.append(logits)
-            states = new_states  # pour le prochain pas
+            states = new_states
 
         return torch.stack(outputs, dim=1), traj
 
-    def generate(self, start_ids, max_new_tokens=100, temperature=1.0):
-        """Génère une séquence à partir d'un contexte initial."""
+    def generate(self, start_ids, max_new_tokens=100, temperature=1.0, states=None):
+        """Génère une séquence à partir d'un contexte initial et d'états optionnels."""
         self.eval()
         with torch.no_grad():
             input_ids = start_ids.clone().detach()
-            # Initialiser les états à zéro
-            states = [torch.zeros(1, self.hidden_dim) for _ in range(self.num_layers)]
+            batch_size = input_ids.size(0)
+            if states is None:
+                states = [torch.zeros(batch_size, self.hidden_dim, device=input_ids.device)
+                          for _ in range(self.num_layers)]
             generated = []
             for _ in range(max_new_tokens):
-                embeds = self.embedding(input_ids[:, -1:])  # dernier token
+                embeds = self.embedding(input_ids[:, -1:])
                 x = embeds[:, 0, :]
                 new_states = []
                 for i, cell in enumerate(self.cells):
@@ -139,4 +124,4 @@ class TTULanguageModel(nn.Module):
                 generated.append(next_token.item())
                 input_ids = torch.cat([input_ids, next_token], dim=1)
                 states = new_states
-            return generated
+            return generated, states
