@@ -8,3 +8,4 @@ numpy
 matplotlib
 requests
 beautifulsoup4
+schedule
