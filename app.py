@@ -4,6 +4,12 @@ import numpy as np
 import yaml
 import os
 import plotly.graph_objects as go
+import os
+import pickle
+from pathlib import Path
+
+# Créer le dossier models s'il n'existe pas
+Path("models").mkdir(exist_ok=True)
 from ttu_model import TTULanguageModel
 from utils import load_text, plot_trajectory_3d
 
