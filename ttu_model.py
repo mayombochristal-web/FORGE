@@ -1,20 +1,16 @@
 import torch
 import torch.nn as nn
 import yaml
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 class TTUCell(nn.Module):
-    """
-    Cellule TTU pour un pas de temps.
-    """
-    def __init__(self, input_dim, hidden_dim=3, dt=0.1):
+    def __init__(self, hidden_dim=3, dt=0.1):
         super().__init__()
         self.dt = dt
         self.hidden_dim = hidden_dim
-
-        # Paramètres apprenables (initialisés depuis config)
         self.gamma = nn.Parameter(torch.tensor(config['model']['gamma_init']))
         self.alpha_c = nn.Parameter(torch.tensor(config['model']['alpha_c_init']))
         self.beta_c = nn.Parameter(torch.tensor(config['model']['beta_c_init']))
@@ -23,105 +19,82 @@ class TTUCell(nn.Module):
         self.epsilon = nn.Parameter(torch.tensor(config['model']['epsilon_init']))
         self.alpha_m = nn.Parameter(torch.tensor(config['model']['alpha_m_init']))
 
-        # Projection embedding -> impulsion
-        self.W_impulse = nn.Linear(input_dim, 3)
-
-    def forward(self, x, state=None):
-        """
-        x: (batch, input_dim) embedding à ce pas
-        state: (batch, 3) état précédent (phi_c, phi_d, phi_m)
-        """
-        if state is None:
-            state = torch.zeros(x.size(0), 3, device=x.device)
-
-        phi_c, phi_d, phi_m = state[:, 0], state[:, 1], state[:, 2]
-        impulse = self.W_impulse(x)  # (batch, 3)
-
-        # Dérivées
-        dphi_c = self.gamma * impulse[:, 0] - self.alpha_c * phi_c - self.beta_c * phi_c * phi_d
-        dphi_d = self.delta * phi_c**2 - self.alpha_d * phi_d
-        dphi_m = self.epsilon * phi_d - self.alpha_m * phi_m
-
-        # Mise à jour Euler
-        new_phi_c = phi_c + self.dt * dphi_c
-        new_phi_d = phi_d + self.dt * dphi_d
-        new_phi_m = phi_m + self.dt * dphi_m
-
-        # Auto-hémostase : si phi_d trop grand, on le réduit
-        threshold = 10.0
-        mu_factor = torch.where(torch.abs(new_phi_d) > threshold, 0.5, 1.0)
-        new_phi_d = mu_factor * new_phi_d
-
-        new_state = torch.stack([new_phi_c, new_phi_d, new_phi_m], dim=1)
-        return new_state
-
-    def get_derivatives(self, state, impulse):
+    def forward(self, state, impulse):
         phi_c, phi_d, phi_m = state[:,0], state[:,1], state[:,2]
         dphi_c = self.gamma * impulse[:,0] - self.alpha_c * phi_c - self.beta_c * phi_c * phi_d
         dphi_d = self.delta * phi_c**2 - self.alpha_d * phi_d
         dphi_m = self.epsilon * phi_d - self.alpha_m * phi_m
-        return torch.stack([dphi_c, dphi_d, dphi_m], dim=1)
-
+        new_phi_c = phi_c + self.dt * dphi_c
+        new_phi_d = phi_d + self.dt * dphi_d
+        new_phi_m = phi_m + self.dt * dphi_m
+        threshold = 10.0
+        mu_factor = torch.where(torch.abs(new_phi_d) > threshold, 0.5, 1.0)
+        new_phi_d = mu_factor * new_phi_d
+        new_state = torch.stack([new_phi_c, new_phi_d, new_phi_m], dim=1)
+        return new_state
 
 class TTULanguageModel(nn.Module):
-    """
-    Modèle de langage basé sur des cellules TTU empilées.
-    """
-    def __init__(self, vocab_size, embed_dim, hidden_dim=3, num_layers=2, dt=0.1):
+    def __init__(self, base_model_name="distilgpt2", hidden_dim=3, dt=0.1):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.cells = nn.ModuleList([TTUCell(embed_dim, hidden_dim, dt) for _ in range(num_layers)])
-        self.out_proj = nn.Linear(hidden_dim * num_layers, vocab_size)
+        self.base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
+        self.dt = dt
+        self.ttu_cell = TTUCell(hidden_dim, dt)
+        # Projeter l'état caché du transformer vers une impulsion pour la TTU
+        self.impulse_proj = nn.Linear(self.base_model.config.hidden_size, 3)
+        # Moduler les logits avec l'état TTU
+        self.logit_modulator = nn.Linear(hidden_dim, self.base_model.config.vocab_size, bias=False)
 
-    def forward(self, input_ids, states=None):
-        batch, seq_len = input_ids.shape
-        embeds = self.embedding(input_ids)
+    def forward(self, input_ids, attention_mask=None, ttu_state=None):
+        outputs = self.base_model.transformer(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_states = outputs.last_hidden_state  # (batch, seq_len, hidden_size)
+        batch_size, seq_len, _ = hidden_states.shape
 
-        if states is None:
-            states = [None] * self.num_layers
+        if ttu_state is None:
+            ttu_state = torch.zeros(batch_size, self.hidden_dim, device=input_ids.device)
 
-        outputs = []
-        traj = {f'layer_{i}': [] for i in range(self.num_layers)}
-
+        traj = []
+        all_logits = []
         for t in range(seq_len):
-            x = embeds[:, t, :]
-            new_states = []
-            for i, cell in enumerate(self.cells):
-                state_i = states[i] if states[i] is not None else None
-                new_state = cell(x, state_i)
-                new_states.append(new_state)
-                traj[f'layer_{i}'].append(new_state.detach().cpu().numpy())
-            combined = torch.cat(new_states, dim=-1)
-            logits = self.out_proj(combined)
-            outputs.append(logits)
-            states = new_states
+            # Impulsion basée sur l'état caché courant
+            impulse = self.impulse_proj(hidden_states[:, t, :])  # (batch, 3)
+            ttu_state = self.ttu_cell(ttu_state, impulse)
+            traj.append(ttu_state.detach().cpu().numpy())
+            # Obtenir les logits de la tête de langage
+            logits = self.base_model.lm_head(hidden_states[:, t, :])  # (batch, vocab_size)
+            # Moduler par l'état TTU
+            modulation = self.logit_modulator(ttu_state)  # (batch, vocab_size)
+            logits = logits + 0.1 * modulation  # facteur d'influence
+            all_logits.append(logits)
 
-        return torch.stack(outputs, dim=1), traj
+        return torch.stack(all_logits, dim=1), ttu_state, traj
 
-    def generate(self, start_ids, max_new_tokens=100, temperature=1.0, states=None):
-        """Génère une séquence à partir d'un contexte initial et d'états optionnels."""
+    def generate(self, prompt, max_new_tokens=100, temperature=0.8, ttu_state=None):
         self.eval()
         with torch.no_grad():
-            input_ids = start_ids.clone().detach()
-            batch_size = input_ids.size(0)
-            if states is None:
-                states = [torch.zeros(batch_size, self.hidden_dim, device=input_ids.device)
-                          for _ in range(self.num_layers)]
-            generated = []
+            input_ids = self.tokenizer.encode(prompt, return_tensors='pt')
+            attention_mask = torch.ones_like(input_ids)
+            generated = input_ids
+            if ttu_state is None:
+                ttu_state = torch.zeros(1, self.hidden_dim)
+
+            traj = []
             for _ in range(max_new_tokens):
-                embeds = self.embedding(input_ids[:, -1:])
-                x = embeds[:, 0, :]
-                new_states = []
-                for i, cell in enumerate(self.cells):
-                    new_state = cell(x, states[i])
-                    new_states.append(new_state)
-                combined = torch.cat(new_states, dim=-1)
-                logits = self.out_proj(combined) / temperature
+                outputs = self.base_model.transformer(input_ids=generated, attention_mask=attention_mask)
+                last_hidden = outputs.last_hidden_state[:, -1, :]  # dernier token
+                impulse = self.impulse_proj(last_hidden)
+                ttu_state = self.ttu_cell(ttu_state, impulse)
+                traj.append(ttu_state.detach().cpu().numpy())
+                logits = self.base_model.lm_head(last_hidden)
+                modulation = self.logit_modulator(ttu_state)
+                logits = logits + 0.1 * modulation
+                logits = logits / temperature
+                # Appliquer top_k et top_p (simplifié)
                 probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
-                generated.append(next_token.item())
-                input_ids = torch.cat([input_ids, next_token], dim=1)
-                states = new_states
-            return generated, states
+                generated = torch.cat([generated, next_token], dim=1)
+                attention_mask = torch.cat([attention_mask, torch.ones(1,1)], dim=1)
+
+            return self.tokenizer.decode(generated[0], skip_special_tokens=True), ttu_state, traj
