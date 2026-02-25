@@ -243,16 +243,10 @@ with col1:
                     input_ids = [char2idx.get(c, 0) for c in prompt]
                     input_tensor = torch.tensor(input_ids, dtype=torch.long).unsqueeze(0).to(device)
 
-                    # Appliquer les paramètres du mode au modèle (en modifiant les paramètres directement ?)
-                    # Pour simplifier, on peut ajuster les paramètres des cellules si besoin,
-                    # mais on va plutôt les passer via un état modifié ? Ici on utilise les paramètres par défaut.
-                    # Une approche plus simple : on modifie gamma, mu, etc. en modifiant les attributs des cellules.
+                    # Appliquer les paramètres du mode au modèle
                     model = st.session_state['model']
-                    # Option : ajuster les paramètres des cellules selon le mode
                     for cell in model.cells:
                         cell.gamma.data = torch.tensor(gamma, device=device)
-                        # mu n'est pas un paramètre direct, mais on pourrait l'utiliser dans auto-hémostase
-                        # Pour l'instant, on utilise les paramètres appris.
 
                     # Faire évoluer le modèle sur le prompt (mise à jour de l'état)
                     with torch.no_grad():
@@ -296,11 +290,8 @@ with col2:
     st.header("📈 Visualisation")
 
     if 'model' in st.session_state and 'conversation' in st.session_state:
-        # On peut afficher la trajectoire de la dernière génération si disponible
-        # Pour l'instant, on génère un échantillon aléatoire pour démo
         if st.button("Afficher une trajectoire exemple"):
             model = st.session_state['model']
-            # Prendre un extrait du dataloader s'il existe
             if 'dataloader' in st.session_state:
                 sample_batch, _ = next(iter(st.session_state['dataloader']))
                 sample_batch = sample_batch[:1].to(device)
