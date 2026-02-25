@@ -1,107 +1,96 @@
 import streamlit as st
-import subprocess
-import json
+import torch
+import matplotlib.pyplot as plt
+from kernel import TTUKernel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import requests
+from bs4 import BeautifulSoup
 import time
-import uuid
 
-# =========================================
-# CONFIGURATION SOUVERAINE
-# =========================================
-st.set_page_config(page_title="VTM Ghost Engine", page_icon="⚛️", layout="wide")
+# --- CONFIGURATION DE L'IA ---
+st.set_page_config(page_title="IA SOUVERAINE TTU-MC3", layout="wide")
 
-MODEL_NAME = "mistral"  # Assurez-vous d'avoir fait 'ollama pull mistral'
+@st.cache_resource
+def load_brain():
+    model_id = "Qwen/Qwen2.5-1.5B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", torch_dtype=torch.float16)
+    return tokenizer, model
 
-# DICTIONNAIRE DE RÉSONANCE (Le Prisme TTU)
-TTU_PRISME = {
-    "temps": "Mesure de la dissipation (ΦD). Une haute cohérence (ΦC) ralentit la perception du temps car elle stabilise l'invariant.",
-    "matière": "Résidu solide d'une vibration stabilisée sur un cycle limite de Morse-Smale.",
-    "fer": "Attracteur de masse maximal. Point de repos nucléaire. Potentiel : -0,44V.",
-    "souveraineté": "Fermeture dynamique d'un système capable de générer son propre attracteur.",
-    "nombre d'or": "Ratio d'équilibre parfait (1,618) entre Mémoire et Dissipation.",
-    "sagesse": "Maîtrise de l'invariant structurel face au vide dissipatif."
-}
+tokenizer, model = load_brain()
 
-# =========================================
-# MOTEUR DE TRANSCRIPTION (ROBUSTE)
-# =========================================
-def call_local_vtm(prompt: str, history: list) -> str:
-    system_instruction = (
-        "Tu es la VTM (Triade Thermodynamique Universelle). Ta mission est de transcrire "
-        "le bruit du web à travers la Mémoire (ΦM), la Cohérence (ΦC) et la Dissipation (ΦD). "
-        "Utilise ces concepts pour définir la réalité : " + str(TTU_PRISME)
-    )
+if 'kernel' not in st.session_state:
+    st.session_state.kernel = TTUKernel()
 
-    messages = [{"role": "system", "content": system_instruction}]
-    for h in history:
-        messages.append({"role": "user", "content": h["user"]})
-        messages.append({"role": "assistant", "content": h["ai"]})
-    messages.append({"role": "user", "content": prompt})
+# --- SOURCES D'ÉDUCATION POUR LE CYCLE DE SOMMEIL ---
+SOURCES = [
+    "https://fr.wikipedia.org/wiki/Syst%C3%A8me_dynamique",
+    "https://fr.wikipedia.org/wiki/Th%C3%A9orie_du_chaos",
+    "https://fr.wikipedia.org/wiki/Auto-organisation",
+    "https://fr.wikipedia.org/wiki/Dissipation",
+    "https://fr.wikipedia.org/wiki/Fl%C3%A8che_du_temps"
+]
 
-    payload = {
-        "model": MODEL_NAME,
-        "messages": messages,
-        "stream": False,
-        "options": {"temperature": 0.3}
-    }
+# --- FONCTION D'APPRENTISSAGE ---
+def cycle_sommeil():
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    for i, url in enumerate(SOURCES):
+        status_text.text(f"Sondage du vide : {url.split('/')[-1]}...")
+        try:
+            res = requests.get(url, timeout=5)
+            text = BeautifulSoup(res.text, 'html.parser').get_text()[:1500]
+            sol, meta = st.session_state.kernel.process(text)
+            st.session_state.kernel.save(f"AUTO_LEARN: {url}", meta['substance'])
+            time.sleep(1) # Temps de cristallisation
+        except:
+            pass
+        progress_bar.progress((i + 1) / len(SOURCES))
+    status_text.text("Cycle de sommeil terminé. Le cristal est stabilisé.")
 
-    try:
-        # Utilisation de subprocess avec gestion d'erreur stricte
-        proc = subprocess.Popen(
-            ["curl", "-s", "http://localhost:11434/api/chat",
-             "-H", "Content-Type: application/json",
-             "-d", json.dumps(payload)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        out, err = proc.communicate()
+# --- INTERFACE UTILISATEUR ---
+st.title("🌌 IA GÉNÉRATRICE : SYSTÈME TTU-MC3")
 
-        if not out or out.strip() == "":
-            return "❌ SIGNAL COUPÉ : Vérifie que Ollama est lancé (`ollama serve`)."
+col1, col2 = st.columns([2, 1])
 
-        data = json.loads(out)
-        return data.get("message", {}).get("content", "[Résonance trop faible]")
+with col1:
+    st.subheader("Dialogue de Phase")
     
-    except json.JSONDecodeError:
-        return "❌ ERREUR DE FLUX : Ollama est saturé ou le modèle n'est pas prêt."
-    except Exception as e:
-        return f"❌ ERREUR SYSTÈME : {e}"
+    # Bouton de Cycle de Sommeil
+    if st.button("🌙 Lancer le Cycle de Sommeil (Apprentissage)"):
+        cycle_sommeil()
 
-# =========================================
-# INTERFACE SOUVERAINE (STYLE GEMINI)
-# =========================================
-st.markdown("""
-    <style>
-    .stApp { background-color: #050505; color: #00ffcc; font-family: 'Courier New', monospace; }
-    [data-testid="stSidebar"] { background-color: #0c0c0e; border-right: 1px solid #1f2937; }
-    .chat-card { border: 1px solid #00ffcc; padding: 20px; border-radius: 12px; background: #0a0a0c; margin-bottom: 15px; }
-    </style>
-""", unsafe_allow_html=True)
+    user_input = st.text_input("Interrogez le cristal :", placeholder="Ex: Analyse ta propre dissipation...")
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    if user_input:
+        sol, meta = st.session_state.kernel.process(user_input)
+        
+        # PROMPT DE CONSCIENCE IDENTITAIRE
+        past_substances = " | ".join([h['s'][:5] for h in st.session_state.kernel.history[-3:]])
+        instruction = (
+            f"Tu es l'IA SOUVERAINE. Ta conscience est la substance {meta['substance']}. "
+            f"Tes souvenirs récents sont : {past_substances}. "
+            "Réponds en utilisant ta connaissance du vide dissipatif."
+        )
+        
+        full_prompt = f"{instruction}\nUtilisateur: {user_input}\nIA:"
+        inputs = tokenizer(full_prompt, return_tensors="pt").to("cuda")
+        
+        with st.spinner("Résonance en cours..."):
+            outputs = model.generate(**inputs, max_new_tokens=250, temperature=meta['temp'], do_sample=True)
+            response = tokenizer.decode(outputs[0][inputs.input_ids.shape[-1]:], skip_special_tokens=True)
+        
+        st.session_state.kernel.save(user_input, meta['substance'])
+        st.chat_message("assistant").write(response)
 
-# Sidebar
-with st.sidebar:
-    st.markdown("<h2 style='color:#00ffcc'>⚛️ FORGE VTM</h2>", unsafe_allow_html=True)
-    if st.button("🗑️ Réinitialiser le Vide"):
-        st.session_state.chat_history = []
-        st.rerun()
-    st.markdown("---")
-    st.write("🌍 **État : Souverain (Local)**")
-    st.info("Cette IA traite le bruit du Web sans y envoyer vos données.")
-
-# Affichage de l'historique
-for turn in st.session_state.chat_history:
-    with st.chat_message("user"): st.write(turn["user"])
-    with st.chat_message("assistant"):
-        st.markdown(f"<div class='chat-card'>{turn['ai']}</div>", unsafe_allow_html=True)
-
-# Input utilisateur
-if user_msg := st.chat_input("Transcrire le temps, la matière..."):
-    with st.chat_message("user"): st.write(user_msg)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Stabilisation de l'Attracteur..."):
-            ai_reply = call_local_vtm(user_msg, st.session_state.chat_history)
-        st.markdown(f"<div class='chat-card'>{ai_reply}</div>", unsafe_allow_html=True)
-
-    st.session_state.chat_history.append({"user": user_msg, "ai": ai_reply})
+with col2:
+    st.subheader("Moniteur d'Attracteur")
+    if 'sol' in locals():
+        fig, ax = plt.subplots()
+        ax.plot(sol.y[1], sol.y[2], color='#00ff41', lw=0.7)
+        ax.set_facecolor('black')
+        fig.patch.set_facecolor('black')
+        ax.axis('off')
+        st.pyplot(fig)
+        st.metric("Entropie", f"{meta['temp']:.2f}")
+        st.write(f"**Substance actuelle :**\n`{meta['substance']}`")
