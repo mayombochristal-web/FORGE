@@ -1,43 +1,38 @@
+import torch
 import numpy as np
 import plotly.graph_objects as go
 import requests
 import os
-import wikipediaapi
 
-# Initialisation de l'API Wikipédia
-wiki = wikipediaapi.Wikipedia(
-    language='fr',
-    extract_format=wikipediaapi.ExtractFormat.WIKI,
-    user_agent='TTU-AI-Chatbot/1.0'
-)
+def load_text(filepath, seq_length, batch_size):
+    """Charge un fichier texte et crée un DataLoader."""
+    with open(filepath, 'r', encoding='utf-8') as f:
+        text = f.read()
+    chars = sorted(list(set(text)))
+    char2idx = {ch: i for i, ch in enumerate(chars)}
+    idx2char = {i: ch for i, ch in enumerate(chars)}
+    data = [char2idx[ch] for ch in text]
+    vocab_size = len(chars)
 
-def search_wikipedia(query, max_sentences=3):
-    """Recherche sur Wikipédia et retourne un résumé."""
-    try:
-        page = wiki.page(query)
-        if page.exists():
-            # Prendre les premières phrases du résumé
-            summary = page.summary.split('.')
-            result = '. '.join(summary[:max_sentences]) + '.'
-            return result
-        else:
-            # Chercher une page par suggestion
-            search_url = f"https://fr.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json"
-            resp = requests.get(search_url).json()
-            if resp['query']['search']:
-                title = resp['query']['search'][0]['title']
-                page = wiki.page(title)
-                if page.exists():
-                    summary = page.summary.split('.')
-                    result = '. '.join(summary[:max_sentences]) + '.'
-                    return result
-            return None
-    except Exception as e:
-        print(f"Erreur Wiki: {e}")
-        return None
+    sequences = []
+    targets = []
+    for i in range(0, len(data) - seq_length, seq_length):
+        seq = data[i:i+seq_length]
+        target = data[i+1:i+seq_length+1]
+        if len(seq) == seq_length:
+            sequences.append(seq)
+            targets.append(target)
+
+    dataset = torch.utils.data.TensorDataset(
+        torch.tensor(sequences, dtype=torch.long),
+        torch.tensor(targets, dtype=torch.long)
+    )
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return dataloader, vocab_size, idx2char, char2idx
 
 def plot_trajectory_3d(traj):
-    points = np.array(traj).squeeze(1)
+    """Affiche la trajectoire 3D d'une cellule."""
+    points = np.array(traj).squeeze(1)  # (seq_len, 3)
     fig = go.Figure(data=[go.Scatter3d(
         x=points[:,0], y=points[:,1], z=points[:,2],
         mode='lines+markers',
