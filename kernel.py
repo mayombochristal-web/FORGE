@@ -1,31 +1,59 @@
 import numpy as np
-import json
 from scipy.integrate import solve_ivp
+from typing import Optional, Tuple, Dict
 
-class TTUKernel:
-    def __init__(self, memory_file="memory_phase.json"):
-        self.params = {'alpha': 0.0001, 'beta': 0.5, 'gamma': 1.2, 'lambda_': 4.0, 'mu': 3.0}
-        self.memory_file = memory_file
-        try:
-            with open(memory_file, 'r') as f: self.history = json.load(f)
-        except: self.history = []
-        self.state = self.history[-1]['state'] if self.history else [15.0, 0.5, 0.2]
+class TTU_Master_Kernel:
+    def __init__(self, params: Optional[Dict[str, float]] = None, initial_state: Optional[list] = None):
+        self.params = params or {
+            'alpha': 0.0001, 'beta': 0.5, 'gamma': 1.2,
+            'lambda_': 4.0, 'mu': 3.0
+        }
+        self.phi_init = initial_state or [15.0, 0.5, 0.2]
+        self.solution = None
+        self.substance = ""
 
-    def engine(self, t, phi, v_t):
+    def engine(self, t: float, phi: list, v_t: float) -> list:
         pm, pc, pd = phi
-        d_pm = -self.params['alpha'] * pm + self.params['beta'] * pd
-        d_pc = self.params['gamma'] * v_t - self.params['lambda_'] * pc * pd
-        d_pd = 0.1 * pc**2 - self.params['mu'] * (pd**3)
+        alpha = self.params['alpha']
+        beta = self.params['beta']
+        gamma = self.params['gamma']
+        lambda_ = self.params['lambda_']
+        mu = self.params['mu']
+
+        d_pm = -alpha * pm + beta * pd
+        d_pc = gamma * v_t - lambda_ * pc * pd
+        d_pd = 0.1 * pc**2 - mu * (pd**3)
         return [d_pm, d_pc, d_pd]
 
-    def process(self, data):
-        v_t = np.sin(len(data) * 0.1)
-        sol = solve_ivp(self.engine, (0, 40), self.state, args=(v_t,), method='BDF', t_eval=np.linspace(0, 40, 500))
-        self.state = sol.y[:, -1].tolist()
-        entropy = np.std(np.diff(sol.y[1])) * 20
-        substance = "".join([chr(int(abs(p) % 26) + 65) for p in sol.y[0][::100]])
-        return sol, {"temp": np.clip(entropy, 0.4, 1.2), "substance": substance}
+    def run_sequence(self, t_span: Tuple[float, float] = (0, 500),
+                     t_eval: Optional[np.ndarray] = None,
+                     signal_func=None, method: str = 'BDF'):
+        if signal_func is None:
+            signal_func = lambda t: 0.0
 
-    def save(self, query, substance):
-        self.history.append({"q": query, "s": substance, "state": self.state})
-        with open(self.memory_file, 'w') as f: json.dump(self.history[-10:], f)
+        def dynamics(t, phi):
+            v_t = signal_func(t)
+            return self.engine(t, phi, v_t)
+
+        if t_eval is None:
+            t_eval = np.linspace(t_span[0], t_span[1], 10000)
+
+        sol = solve_ivp(dynamics, t_span, self.phi_init,
+                        method=method, t_eval=t_eval)
+        self.solution = sol
+        return sol
+
+    def extract_substance(self, sampling_rate: int = 500) -> str:
+        if self.solution is None:
+            return ""
+        pm = self.solution.y[0]
+        sampled = pm[::sampling_rate]
+        ascii_codes = [32 + (int(abs(val) * 10) % 94) for val in sampled]
+        substance = "".join(chr(code) for code in ascii_codes)
+        self.substance = substance
+        return substance
+
+    def get_attractor_data(self):
+        if self.solution is None:
+            return None, None
+        return self.solution.y[1], self.solution.y[2]
