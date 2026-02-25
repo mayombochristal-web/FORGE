@@ -1,8 +1,0 @@
-streamlit
-torch
-numpy
-matplotlib
-plotly
-pyyaml
-pandas
-scipy
