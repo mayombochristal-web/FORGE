@@ -1,9 +1,10 @@
 streamlit
 torch
+transformers
 numpy
-matplotlib
 plotly
 pyyaml
-pandas
 scipy
 requests
+pandas
+matplotlib
