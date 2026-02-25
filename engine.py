@@ -2,10 +2,10 @@ import numpy as np
 from scipy.integrate import ode
 
 class TTUEngine:
-    def __init__(self):
-        self.gamma = 1.35
-        self.mu = 0.75
-        self.lambd = 0.08
+    def __init__(self, gamma=1.35, mu=0.75, lambd=0.08):
+        self.gamma = gamma
+        self.mu = mu
+        self.lambd = lambd
         self.state = [1.0, 0.0, 0.0] 
 
     def system(self, t, y, impulse):
