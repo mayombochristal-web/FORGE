@@ -1,0 +1,21 @@
+model:
+  embed_dim: 32
+  hidden_dim: 3
+  num_layers: 2
+  dt: 0.1
+  gamma_init: 1.35
+  alpha_c_init: 0.5
+  beta_c_init: 0.2
+  delta_init: 0.3
+  alpha_d_init: 0.4
+  epsilon_init: 0.2
+  alpha_m_init: 0.1
+  noise_sigma: 0.05
+  noise_decay: 0.1
+
+training:
+  batch_size: 64
+  seq_length: 100
+  learning_rate: 0.001
+  epochs: 50
+  device: "cuda"  # ou "cpu"
