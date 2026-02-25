@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import time
 
 # ---------- Configuration de la page ----------
-st.set_page_page_title("TTU-MC³ Chatbot", layout="wide")
+st.set_page_config(page_title="TTU-MC³ Chatbot", layout="wide")
 st.title("🧠💬 Chatbot TTU-MC³")
 st.markdown("Un assistant conversationnel basé sur la dynamique triadique dissipative.")
 
