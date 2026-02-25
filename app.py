@@ -2,22 +2,28 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
+import hashlib
+import time
 
+# Imports locaux
 from ttu_kernel import TTU_Master_Kernel
 from ttu_bridge import TTU_LLM_Bridge
-from utils import query_signal, balanced_signal, plot_attractor, plot_time_series
+from utils import prompt_to_signal, plot_attractor, plot_time_series
 
-st.set_page_config(page_title="TTU-MC3 Générateur Autonome", page_icon="🌀", layout="wide")
+# Configuration de la page
+st.set_page_config(page_title="TTU-MC3 Chatbot", page_icon="🌀", layout="wide")
 
-st.title("🌀 TTU-MC3 : Moteur de Cristallisation Informationnelle")
+# Titre et description
+st.title("🌀 Chatbot TTU-MC3 : IA générative autonome")
 st.markdown("""
-Ce simulateur implémente la triade (Mémoire, Cohérence, Dissipation) selon les principes de la TTU-MC3.
-Ajustez les paramètres dans la barre latérale pour explorer la dynamique de l'attracteur.
-La substance extraite peut être utilisée pour générer du texte via un modèle local (GPT-2).
+Ce chatbot utilise un moteur TTU-MC3 en arrière-plan pour influencer la génération de texte.
+Chaque question est transformée en signal qui excite le système dynamique.
+L'attracteur obtenu produit des paramètres (température, top_p) et une "substance" qui guident le modèle local GPT-2.
 """)
 
+# Barre latérale : paramètres du kernel et options
 with st.sidebar:
-    st.header("⚙️ Paramètres du Kernel")
+    st.header("⚙️ Paramètres TTU")
     alpha = st.number_input("α (Amortissement mémoire)", value=0.0001, format="%.5f", step=0.0001)
     beta = st.number_input("β (Couplage Dissipation-Mémoire)", value=0.5, format="%.2f", step=0.1)
     gamma = st.number_input("γ (Gain de Cohérence)", value=1.2, format="%.2f", step=0.1)
@@ -30,115 +36,133 @@ with st.sidebar:
     pd0 = st.number_input("Φd (Dissipation)", value=0.2)
 
     st.subheader("Simulation")
-    duration = st.number_input("Durée (t_max)", value=500, min_value=10, max_value=2000, step=50)
+    t_max = st.number_input("Durée d'intégration (secondes simulées)", value=10.0, min_value=1.0, max_value=50.0, step=1.0)
+    n_points = st.number_input("Nombre de points", value=2000, min_value=500, max_value=10000, step=500)
     method = st.selectbox("Méthode d'intégration", ["BDF", "RK45", "LSODA"])
 
-    st.subheader("Signal d'injection")
-    signal_type = st.selectbox("Type de signal", ["Aucun", "Query", "Balanced"])
-    # Le signal miroir nécessiterait une rétroaction en temps réel, non trivial ici.
+    st.subheader("Modèle de langage")
+    model_name = st.selectbox("Modèle", ["gpt2", "distilgpt2", "microsoft/DialoGPT-small"])
+    use_web_noise = st.checkbox("Ajouter du bruit 'web' au signal", value=True)
 
-    st.subheader("Extraction")
-    sampling_rate = st.number_input("Taux d'échantillonnage (pas)", value=500, min_value=10, step=10)
+    st.subheader("Affichage")
+    show_attractor = st.checkbox("Afficher l'attracteur après chaque réponse", value=False)
+    show_params = st.checkbox("Afficher les paramètres sémantiques", value=True)
 
-    run_button = st.button("🚀 Lancer la simulation")
+# Initialisation de l'historique de conversation
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-params = {
-    'alpha': alpha,
-    'beta': beta,
-    'gamma': gamma,
-    'lambda_': lambda_,
-    'mu': mu
-}
-initial_state = [pm0, pc0, pd0]
-kernel = TTU_Master_Kernel(params, initial_state)
+# Cache du modèle LLM (chargé une seule fois)
+@st.cache_resource
+def load_llm(model_name):
+    from transformers import pipeline, set_seed
+    set_seed(42)
+    return pipeline('text-generation', model=model_name)
 
-if run_button:
-    with st.spinner("Intégration en cours... (cela peut prendre quelques secondes)"):
-        if signal_type == "Query":
-            signal_func = lambda t: query_signal(t)
-        elif signal_type == "Balanced":
-            signal_func = lambda t: balanced_signal(t)
-        else:
-            signal_func = lambda t: 0.0
+# Fonction de génération de réponse
+def generate_response(prompt, history, params, initial_state, t_max, n_points, method, model_name, use_web_noise):
+    # Créer le kernel avec les paramètres actuels
+    kernel = TTU_Master_Kernel(params, initial_state)
 
-        t_span = (0, duration)
-        t_eval = np.linspace(0, duration, 10000)
-        sol = kernel.run_sequence(t_span, t_eval, signal_func=signal_func, method=method)
-        substance = kernel.extract_substance(sampling_rate=sampling_rate)
+    # Construire le signal à partir du prompt + éventuel bruit
+    def signal_func(t):
+        sig = prompt_to_signal(t, prompt, freq_base=1.0)
+        if use_web_noise:
+            sig += 0.05 * np.random.normal()
+        return sig
 
-    st.success("Simulation terminée !")
+    # Intégration
+    t_span = (0, t_max)
+    t_eval = np.linspace(0, t_max, n_points)
+    sol = kernel.run_sequence(t_span, t_eval, signal_func=signal_func, method=method)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("📈 Attracteur (Φc vs Φd)")
-        pc, pd = kernel.get_attractor_data()
-        if pc is not None:
-            fig = plot_attractor(pc, pd)
-            st.pyplot(fig)
-            plt.close(fig)
-    with col2:
-        st.subheader("📊 Séries temporelles")
-        t = sol.t
-        pm, pc, pd = sol.y
-        fig2 = plot_time_series(t, pm, pc, pd)
-        st.pyplot(fig2)
-        plt.close(fig2)
+    # Extraction de la substance (échantillonnage adapté)
+    sampling_rate = max(1, n_points // 50)  # environ 50 échantillons
+    substance = kernel.extract_substance(sampling_rate=sampling_rate)
 
-    st.subheader("🧬 Substance extraite")
-    st.code(substance, language="text")
-
+    # Paramètres sémantiques
     bridge = TTU_LLM_Bridge(kernel)
     semantic = bridge.extract_semantic_vector()
-    st.subheader("🔮 Paramètres sémantiques pour LLM")
-    st.write(f"**Température**: {semantic['temperature']:.4f}")
-    st.write(f"**Top_p**: {semantic['top_p']:.4f}")
 
-    prompt = bridge.decode_substance_to_prompt(substance)
-    st.write(f"**Prompt fantôme**: {prompt}")
+    # Construction du prompt pour le LLM
+    # On inclut les derniers échanges (jusqu'à 6 messages) et la substance
+    context = "\n".join([f"{m['role']}: {m['content']}" for m in history[-6:]])
+    llm_prompt = f"{context}\n{substance[:100]}\nUser: {prompt}\nAssistant:"
 
-    with st.expander("🤖 Génération de texte avec modèle local (GPT-2)"):
-        use_llm = st.checkbox("Utiliser GPT-2 pour générer du texte (nécessite transformers et torch)")
-        if use_llm:
-            try:
-                from transformers import pipeline, set_seed
-                @st.cache_resource
-                def load_model():
-                    return pipeline('text-generation', model='gpt2')
-                generator = load_model()
-                set_seed(42)
+    # Génération avec le modèle
+    try:
+        generator = load_llm(model_name)
+        results = generator(
+            llm_prompt,
+            max_length=150,
+            temperature=semantic['temperature'],
+            top_p=semantic['top_p'],
+            do_sample=True,
+            num_return_sequences=1,
+            pad_token_id=50256  # pour gpt2
+        )
+        reply = results[0]['generated_text'].replace(llm_prompt, "").strip()
+        if not reply:
+            reply = "..."
+    except Exception as e:
+        reply = f"[Erreur du modèle: {e}]"
 
-                if st.button("Générer du texte"):
-                    with st.spinner("Génération en cours..."):
-                        results = generator(
-                            prompt,
-                            max_length=100,
-                            temperature=semantic['temperature'],
-                            top_p=semantic['top_p'],
-                            do_sample=True,
-                            num_return_sequences=1
-                        )
-                        generated = results[0]['generated_text']
-                        st.markdown(f"**Résultat:**\n\n{generated}")
-            except ImportError:
-                st.error("Les bibliothèques `transformers` et `torch` ne sont pas installées. Installez-les avec `pip install transformers torch`.")
+    return reply, sol, substance, semantic
 
-    st.subheader("💾 Sauvegarde / Export")
-    config = {
-        'engine_parameters': params,
-        'initial_state': initial_state,
-        'integration_settings': {
-            'solver': method,
-            't_span': [0, duration],
-            'sampling_rate': sampling_rate
-        },
-        'signal_type': signal_type
-    }
-    yaml_str = yaml.dump(config)
-    st.download_button("📥 Télécharger la configuration (YAML)", data=yaml_str, file_name="ttu_config.yaml")
-    st.download_button("📥 Télécharger la substance (TXT)", data=substance, file_name="substance.txt")
+# Interface de chat
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-else:
-    st.info("Ajustez les paramètres et cliquez sur 'Lancer la simulation'.")
+# Zone de saisie
+if prompt := st.chat_input("Posez votre question..."):
+    # Ajouter le message utilisateur
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
+    # Génération de la réponse
+    with st.chat_message("assistant"):
+        with st.spinner("Le cristal TTU oscille..."):
+            params = {
+                'alpha': alpha,
+                'beta': beta,
+                'gamma': gamma,
+                'lambda_': lambda_,
+                'mu': mu
+            }
+            initial_state = [pm0, pc0, pd0]
+            reply, sol, substance, semantic = generate_response(
+                prompt,
+                st.session_state.messages,
+                params,
+                initial_state,
+                t_max,
+                n_points,
+                method,
+                model_name,
+                use_web_noise
+            )
+            st.markdown(reply)
+
+            # Affichage optionnel des infos
+            if show_params:
+                with st.expander("🔮 Paramètres sémantiques extraits"):
+                    st.write(f"**Température**: {semantic['temperature']:.4f}")
+                    st.write(f"**Top_p**: {semantic['top_p']:.4f}")
+                    st.write(f"**Substance (extrait)**: `{substance[:100]}`")
+
+            if show_attractor and sol is not None:
+                with st.expander("🌀 Attracteur Φc vs Φd"):
+                    pc, pd = kernel.get_attractor_data()
+                    if pc is not None:
+                        fig = plot_attractor(pc, pd, title="Attracteur pour cette question")
+                        st.pyplot(fig)
+                        plt.close(fig)
+
+    # Ajouter la réponse à l'historique
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+
+# Pied de page
 st.markdown("---")
 st.markdown("**TTU-MC3 - Scellement Isomorphique Certifié**")
