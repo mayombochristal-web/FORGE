@@ -1,70 +1,65 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-from core.engine import TTUEngine
-from interface.demodulator import Demodulator
-from db.manager import DBManager
 import plotly.graph_objects as go
+import numpy as np
 
-# Configuration de la page
-st.set_page_config(page_title="TTU-MC³ Generator", layout="wide")
-st.title("🧠 TTU-MC³ : Générateur par Dissipation")
+# Imports locaux simplifiés pour mobile
+from engine import TTUEngine
+from demodulator import Demodulator
+from manager import DBManager
 
-# Initialisation des composants dans la session Streamlit
-if 'engine' not in st.session_state:
-    st.session_state.engine = TTUEngine()
+st.set_page_config(page_title="TTU-MC3 AI", layout="wide")
+
+# Initialisation de la session
+if 'ttu' not in st.session_state:
+    st.session_state.ttu = TTUEngine()
     st.session_state.demod = Demodulator()
     st.session_state.db = DBManager()
-    st.session_state.history = []
+    st.session_state.chat = []
 
-# Sidebar pour le monitoring interne
-st.sidebar.header("🎛️ Monitoring de Phase")
-gain_val = st.sidebar.slider("Gain (γ)", 0.5, 2.0, 1.1)
-st.session_state.engine.gamma = gain_val
+st.title("🌌 TTU-MC³ Generator")
+st.write("Interface de chat basée sur la dissipation informationnelle.")
 
-# Zone de Chat
-st.subheader("Conversation avec la Substance")
-container = st.container()
+# Affichage du chat
+for msg in st.session_state.chat:
+    with st.chat_message(msg["role"]):
+        st.write(msg["text"])
 
-with st.form(key='chat_form', clear_on_submit=True):
-    user_input = st.text_input("Entrez votre prompt :", placeholder="L'IA va cristalliser votre pensée...")
-    submit_button = st.form_submit_button(label='Dissiper & Générer')
+# Champ de saisie
+prompt = st.chat_input("Envoyez une impulsion...")
 
-if submit_button and user_input:
-    # 1. Calcul de l'impulsion
-    impulse = sum(ord(c) for c in user_input) / 1000.0
+if prompt:
+    st.session_state.chat.append({"role": "user", "text": prompt})
     
-    # 2. Simulation et capture des données pour le monitoring
-    phase_data = []
-    for _ in range(60):
-        state = st.session_state.engine.process_signal(impulse)
-        phase_data.append({"Phi_C": state[0], "Phi_D": state[1], "Phi_M": state[2]})
+    # 1. Traitement physique
+    impulse = sum(ord(c) for c in prompt) / 500.0
+    m_history = []
+    full_states = []
     
-    df_phase = pd.DataFrame(phase_data)
+    for _ in range(80):
+        s = st.session_state.ttu.process_signal(impulse)
+        m_history.append(s[2])
+        full_states.append(s)
     
-    # 3. Démodulation
-    response = st.session_state.demod.get_ascii(df_phase['Phi_M'].tolist())
+    # 2. Logique SGBD
+    sig = str(round(sum(m_history[:3]), 2))
+    mem = st.session_state.db.check_memory(sig)
     
-    # 4. Archivage
-    st.session_state.history.append({"user": user_input, "ai": response, "data": df_phase})
+    if mem:
+        response = mem[0]
+    else:
+        response = st.session_state.demod.decode_stream(m_history)
+        st.session_state.db.save_crystal(sig, response)
+    
+    st.session_state.chat.append({"role": "assistant", "text": response})
+    st.session_state.last_data = np.array(full_states)
+    st.rerun()
 
-# Affichage des résultats
-if st.session_state.history:
-    last_entry = st.session_state.history[-1]
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.write(f"**Dernière réponse :** {last_entry['ai']}")
-        # Graphique de l'Attracteur
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(y=last_entry['data']['Phi_M'], mode='lines', name='Mémoire (Φm)', line=dict(color='gold')))
-        fig.add_trace(go.Scatter(y=last_entry['data']['Phi_D'], mode='lines', name='Dissipation (Φd)', line=dict(color='red')))
-        fig.update_layout(title="Dynamique de l'Attracteur", template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.write("**Espace de Phase (Φc vs Φd)**")
-        fig_phase = go.Figure(data=go.Scatter(x=last_entry['data']['Phi_C'], y=last_entry['data']['Phi_D'], mode='markers+lines'))
-        fig_phase.update_layout(xaxis_title="Cohérence", yaxis_title="Dissipation", template="plotly_dark")
-        st.plotly_chart(fig_phase, use_container_width=True)
+# Visualisation 3D en bas pour mobile
+if 'last_data' in st.session_state:
+    st.divider()
+    st.subheader("Visualisation de l'Attracteur")
+    data = st.session_state.last_data
+    fig = go.Figure(data=[go.Scatter3d(x=data[:,0], y=data[:,1], z=data[:,2], 
+                    mode='lines', line=dict(color='cyan', width=5))])
+    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,b=0,t=0))
+    st.plotly_chart(fig, use_container_width=True)
