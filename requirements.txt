@@ -1,7 +1,4 @@
 streamlit
 numpy
-matplotlib
 scipy
-pyyaml
-transformers
-torch
+plotly
