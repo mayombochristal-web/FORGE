@@ -1,6 +1,5 @@
 streamlit
 torch
-transformers
 numpy
 plotly
 pyyaml
@@ -8,4 +7,3 @@ scipy
 requests
 pandas
 matplotlib
-wikipedia-api
