@@ -1,11 +1,11 @@
 import torch
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import matplotlib.pyplot as plt
+import os
+import requests
 
 def load_text(filepath, seq_length, batch_size, device='cpu'):
-    """Charge un fichier texte et crée un DataLoader pour l'entraînement."""
+    """Charge un fichier texte et crée un DataLoader."""
     with open(filepath, 'r', encoding='utf-8') as f:
         text = f.read()
     chars = sorted(list(set(text)))
@@ -14,7 +14,6 @@ def load_text(filepath, seq_length, batch_size, device='cpu'):
     data = [char2idx[ch] for ch in text]
     vocab_size = len(chars)
 
-    # Découpage en séquences
     sequences = []
     targets = []
     for i in range(0, len(data) - seq_length, seq_length):
@@ -32,8 +31,7 @@ def load_text(filepath, seq_length, batch_size, device='cpu'):
     return dataloader, vocab_size, idx2char, char2idx
 
 def plot_trajectory_3d(traj, layer=0):
-    """Affiche la trajectoire d'une cellule dans l'espace 3D."""
-    # traj: liste de (batch, 3) pour chaque pas de temps, batch=1 ici
+    """Affiche la trajectoire 3D d'une cellule."""
     points = np.array(traj[f'layer_{layer}']).squeeze(1)  # (seq_len, 3)
     fig = go.Figure(data=[go.Scatter3d(
         x=points[:,0], y=points[:,1], z=points[:,2],
@@ -51,17 +49,19 @@ def plot_trajectory_3d(traj, layer=0):
     )
     return fig
 
-def plot_dissipation(dissipation_history):
-    """Trace l'évolution de la dissipation au cours de l'entraînement."""
-    fig, ax = plt.subplots()
-    ax.plot(dissipation_history, label='Dissipation moyenne')
-    ax.set_xlabel('Étape')
-    ax.set_ylabel('Phi_D')
-    ax.set_title('Évolution de la dissipation')
-    ax.legend()
-    return fig
-
-def compute_lyapunov(cell, state, impulse, dt=0.1):
-    """Calcule une approximation du spectre de Lyapunov via le Jacobien."""
-    # À implémenter si besoin
-    pass
+def download_corpus(name="shakespeare"):
+    """Télécharge un corpus depuis une URL publique."""
+    os.makedirs("data", exist_ok=True)
+    urls = {
+        'shakespeare': 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt',
+        'tiny_shakespeare': 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt',
+        'wikitext': 'https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/train.txt'
+    }
+    url = urls.get(name, urls['shakespeare'])
+    dest = os.path.join('data', f"{name}.txt")
+    if not os.path.exists(dest):
+        print(f"Téléchargement de {url}...")
+        r = requests.get(url)
+        with open(dest, 'wb') as f:
+            f.write(r.content)
+    return dest
