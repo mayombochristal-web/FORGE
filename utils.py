@@ -3,21 +3,14 @@ import matplotlib.pyplot as plt
 import hashlib
 
 def prompt_to_signal(t, prompt, freq_base=1.0):
-    """
-    Convertit le texte du prompt en un signal temporel.
-    Utilise un hash MD5 pour moduler amplitude et phase.
-    """
-    # Empreinte numérique du prompt (entre 0 et 1)
+    """Convertit le texte du prompt en un signal temporel via un hash."""
     hash_val = int(hashlib.md5(prompt.encode()).hexdigest(), 16) / 2**128
-    # Amplitude modulée par le hash, fréquence de base
     return 0.5 * np.sin(2 * np.pi * freq_base * t + 2 * np.pi * hash_val)
 
 def query_signal(t, freq=0.8):
-    """Signal de test (pour compatibilité)"""
     return 1.2 * np.sin(freq * t) + 0.5 * np.cos(2.1 * t)
 
 def balanced_signal(t):
-    """Signal de test avec bruit (pour compatibilité)"""
     freq = 0.8 if (int(t/10) % 2 == 0) else 0.4
     return 1.5 * np.sin(freq * t) + 0.2 * np.random.normal()
 
