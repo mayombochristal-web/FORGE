@@ -1,6 +1,6 @@
 # TTU-MC³ Chatbot
 
-Un chatbot conversationnel basé sur la **Théorie Triadique Unifiée (TTU-MC³)**.  
+Un assistant conversationnel basé sur la **Théorie Triadique Unifiée (TTU-MC³)**.  
 Le modèle utilise une dynamique dissipative à trois composantes (Mémoire, Cohérence, Dissipation) pour générer du texte et maintenir un contexte conversationnel.
 
 ## Fonctionnalités
