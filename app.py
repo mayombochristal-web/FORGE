@@ -4,19 +4,19 @@ import yaml
 import os
 from pathlib import Path
 from ttu_model import TTULanguageModel
-from utils import plot_trajectory_3d
+from utils import plot_trajectory_3d, search_wikipedia
 import numpy as np
 
-# Configuration de la page
-st.set_page_config(page_title="TTU-MC³ AI Chatbot", layout="wide")
-st.title("🧠💬 TTU-MC³ AI - Chatbot à raisonnement augmenté")
-st.markdown("Un assistant conversationnel basé sur GPT-2 + dynamique triadique dissipative.")
+# Configuration
+st.set_page_config(page_title="TTU-MC³ AI Avancé", layout="wide")
+st.title("🧠💬 TTU-MC³ AI - Chatbot à raisonnement avancé")
+st.markdown("Un assistant conversationnel basé sur **DialoGPT** + dynamique triadique dissipative + recherche de connaissances.")
 
 # Chargement config
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
-# Initialisation du modèle (en cache)
+# Modèle en cache
 @st.cache_resource
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -29,25 +29,28 @@ def load_model():
 
 model, device = load_model()
 
-# Session state pour la conversation
+# Session state
 if "history" not in st.session_state:
-    st.session_state.history = []  # liste de messages
+    st.session_state.history = []
     st.session_state.ttu_state = None
     st.session_state.traj = []
+    st.session_state.knowledge_enabled = config['knowledge']['enabled']
 
-# Barre latérale de paramètres
-st.sidebar.header("⚙️ Paramètres de génération")
+# Barre latérale
+st.sidebar.header("⚙️ Paramètres")
 temperature = st.sidebar.slider("Température", 0.1, 2.0, config['model']['temperature'], 0.1)
 max_new_tokens = st.sidebar.slider("Max nouveaux tokens", 50, 500, 150, 10)
+knowledge_enabled = st.sidebar.checkbox("Activer recherche Wikipédia", value=st.session_state.knowledge_enabled)
+st.session_state.knowledge_enabled = knowledge_enabled
+
 mode = st.sidebar.selectbox("Mode", ["Standard", "Dissipation active", "Silence dissipatif", "Exploration"])
 if mode == "Dissipation active":
-    st.sidebar.info("Mode haute créativité")
+    st.sidebar.info("Créativité maximale")
 elif mode == "Silence dissipatif":
-    st.sidebar.info("Mode stable, moins de bruit")
+    st.sidebar.info("Stabilité")
 elif mode == "Exploration":
-    st.sidebar.info("Mode exploratoire, plus de risque")
+    st.sidebar.info("Exploration")
 
-# Bouton pour reset conversation
 if st.sidebar.button("🗑️ Nouvelle conversation"):
     st.session_state.history = []
     st.session_state.ttu_state = None
@@ -60,27 +63,32 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.header("💬 Conversation")
 
-    # Afficher l'historique
     for msg in st.session_state.history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Input utilisateur
     prompt = st.chat_input("Posez votre question...")
     if prompt:
-        # Afficher message utilisateur
         with st.chat_message("user"):
             st.markdown(prompt)
         st.session_state.history.append({"role": "user", "content": prompt})
 
-        # Génération
+        # Recherche de connaissances si activée
+        knowledge = None
+        if knowledge_enabled:
+            with st.spinner("Recherche de connaissances..."):
+                knowledge = search_wikipedia(prompt, max_sentences=config['knowledge']['max_summary_sentences'])
+            if knowledge:
+                st.info(f"Contexte trouvé : {knowledge}")
+
         with st.chat_message("assistant"):
             with st.spinner("Réflexion..."):
                 response, new_state, traj = model.generate(
                     prompt,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
-                    ttu_state=st.session_state.ttu_state
+                    ttu_state=st.session_state.ttu_state,
+                    knowledge=knowledge
                 )
                 st.markdown(response)
                 st.session_state.history.append({"role": "assistant", "content": response})
@@ -92,7 +100,6 @@ with col2:
     if st.session_state.traj:
         fig = plot_trajectory_3d(st.session_state.traj)
         st.plotly_chart(fig, use_container_width=True)
-        # Afficher les valeurs courantes
         last = st.session_state.traj[-1][0]
         st.metric("Cohérence (ϕ_C)", f"{last[0]:.3f}")
         st.metric("Dissipation (ϕ_D)", f"{last[1]:.3f}")
@@ -100,11 +107,13 @@ with col2:
     else:
         st.info("Posez une question pour voir la trajectoire.")
 
-    # Ajout d'un exemple de question mathématique
-    st.subheader("Exemples")
+    st.subheader("Exemples de questions")
     if st.button("Hypothèse de Riemann"):
-        # On pré-remplit le champ, mais il faudrait une interaction
-        st.info("Pour l'instant, je ne peux pas résoudre l'hypothèse de Riemann, mais je peux discuter de son importance.")
-        # On pourrait insérer automatiquement la question
+        st.session_state.history.append({"role": "user", "content": "Explique l'hypothèse de Riemann"})
+        st.rerun()
     if st.button("Théorème de Fermat"):
-        st.info("Le dernier théorème de Fermat a été démontré par Andrew Wiles en 1994.")
+        st.session_state.history.append({"role": "user", "content": "Qu'est-ce que le dernier théorème de Fermat ?"})
+        st.rerun()
+    if st.button("Qu'est-ce que la beauté ?"):
+        st.session_state.history.append({"role": "user", "content": "Qu'est-ce que la beauté selon les philosophes ?"})
+        st.rerun()
