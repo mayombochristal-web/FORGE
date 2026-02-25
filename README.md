@@ -1,8 +1,18 @@
-# TTU-MC3 Chatbot
+# TTU Language Model
 
-Chatbot IA autonome utilisant un moteur TTU-MC3 en arrière-plan pour influencer la génération de texte via un modèle local (GPT-2).
+Modèle de langage basé sur la Théorie Triadique Unifiée (TTU-MC³), implémenté en PyTorch avec une interface Streamlit.
+
+## Caractéristiques
+
+- Cellules TTU avec dynamique dissipative (Mémoire, Cohérence, Dissipation)
+- Auto-hémostase pour stabiliser la dissipation
+- Visualisation 3D des trajectoires dans l'espace des phases
+- Génération de texte avec température
+- Entraînement sur corpus personnalisé
 
 ## Installation
 
 ```bash
+git clone https://github.com/votre_nom/ttu-language-model.git
+cd ttu-language-model
 pip install -r requirements.txt
