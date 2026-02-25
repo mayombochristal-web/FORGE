@@ -1,12 +1,8 @@
 streamlit
-torch
-transformers
-accelerate
-bitsandbytes
-scipy
 numpy
 matplotlib
-requests
-beautifulsoup4
-schedule
+scipy
+pyyaml
+transformers
+torch
 fpdf
