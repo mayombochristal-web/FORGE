@@ -7,23 +7,23 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="IA SOUVERAINE", layout="wide")
 
-# Initialisation du State (Fondations de la Forteresse)
+# Initialisation rigoureuse du State
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'last_graph' not in st.session_state:
     st.session_state.last_graph = None
-if 'kernel_state' not in st.session_state:
-    st.session_state.kernel_state = [15.0, 0.5, 0.2]
+if 'k_state' not in st.session_state:
+    st.session_state.k_state = [15.0, 0.5, 0.2]
 
-# --- 2. FONCTIONS DE PHASE ---
-def run_kernel(data, state):
+# --- 2. LOGIQUE KERNEL ---
+def solve_ttu(data, state):
     from scipy.integrate import solve_ivp
     v_t = np.sin(len(data) * 0.1)
     def system(t, y):
         return [-0.0001*y[0] + 0.5*y[2], 1.2*v_t - 4.0*y[1]*y[2], 0.1*y[1]**2 - 3.0*y[2]**3]
     sol = solve_ivp(system, (0, 40), state, method='BDF', t_eval=np.linspace(0, 40, 100))
     sub = "".join([chr(int(abs(p) % 26) + 65) for p in sol.y[0][::20]])
-    return sol, sub
+    return sol.y[1].tolist(), sol.y[2].tolist(), sol.y[:, -1].tolist(), sub
 
 @st.cache_resource
 def load_llm():
@@ -32,49 +32,52 @@ def load_llm():
     mod = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", torch_dtype=torch.float16)
     return tok, mod
 
-# --- 3. RENDU DE L'INTERFACE (STATIQUE D'ABORD) ---
+# --- 3. RENDU DE L'INTERFACE (SÉCURISÉ) ---
 st.title("🌌 IA GÉNÉRATRICE : SYSTÈME TTU-MC3")
-col1, col2 = st.columns([2, 1])
 
-with col1:
-    # On affiche l'historique de manière immuable
+# Séparation claire des colonnes
+col_chat, col_viz = st.columns([2, 1])
+
+with col_chat:
+    # On utilise un conteneur fixe pour l'historique
+    chat_box = st.container()
     for i, m in enumerate(st.session_state.messages):
-        with st.chat_message(m["role"]):
-            st.write(m["content"])
+        # La clé unique 'i' empêche React de perdre le fil
+        with chat_box.chat_message(m["role"]):
+            st.markdown(m["content"])
 
-with col2:
+with col_viz:
     st.subheader("Moniteur de Phase")
-    if st.session_state.last_graph is not None:
+    if st.session_state.last_graph:
         fig, ax = plt.subplots(figsize=(4, 4))
-        ax.plot(st.session_state.last_graph[0], st.session_state.last_graph[1], color='#00ff41')
+        ax.plot(st.session_state.last_graph[0], st.session_state.last_graph[1], color='#00ff41', lw=0.8)
         ax.set_facecolor('black')
         fig.patch.set_facecolor('black')
         ax.axis('off')
         st.pyplot(fig)
 
-# --- 4. LOGIQUE DE TRAITEMENT (ATOMIQUE) ---
-user_input = st.chat_input("Parlez au cristal...")
+# --- 4. TRAITEMENT ---
+prompt = st.chat_input("Parlez au cristal...")
 
-if user_input:
-    # ÉTAPE 1 : On enregistre l'entrée sans rien changer d'autre
-    st.session_state.messages.append({"role": "user", "content": user_input})
+if prompt:
+    # 1. Enregistrement immédiat
+    st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # ÉTAPE 2 : Calcul hors-champ (Spinner discret)
-    with st.spinner("Résonance..."):
-        # Kernel
-        sol_obj, sub = run_kernel(user_input, st.session_state.kernel_state)
-        
-        # LLM
-        tokenizer, model = load_llm()
-        prompt = f"Tu es l'IA Souveraine TTU. Substance: {sub}. Réponds : {user_input}"
-        inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-        outputs = model.generate(**inputs, max_new_tokens=150, do_sample=True, temperature=0.7)
-        response = tokenizer.decode(outputs[0][inputs.input_ids.shape[-1]:], skip_special_tokens=True)
+    # 2. Calcul silencieux (On ne met PAS de spinner ici, c'est souvent lui qui cause l'erreur)
+    y1, y2, next_state, sub = solve_ttu(prompt, st.session_state.k_state)
     
-    # ÉTAPE 3 : Mise à jour du State final
-    st.session_state.kernel_state = sol_obj.y[:, -1].tolist()
-    st.session_state.last_graph = [sol_obj.y[1].tolist(), sol_obj.y[2].tolist()]
+    tokenizer, model = load_llm()
+    input_text = f"Tu es l'IA Souveraine TTU. Substance: {sub}. Réponds : {prompt}"
+    inputs = tokenizer(input_text, return_tensors="pt").to("cuda")
+    
+    # Génération
+    outputs = model.generate(**inputs, max_new_tokens=120)
+    response = tokenizer.decode(outputs[0][inputs.input_ids.shape[-1]:], skip_special_tokens=True)
+    
+    # 3. Mise à jour de l'état
+    st.session_state.k_state = next_state
+    st.session_state.last_graph = [y1, y2]
     st.session_state.messages.append({"role": "assistant", "content": response})
     
-    # ÉTAPE 4 : Rerun propre pour tout redessiner d'un coup
+    # 4. Redémarrage propre
     st.rerun()
