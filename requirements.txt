@@ -1,5 +1,10 @@
 streamlit
-pypdf
-python-docx
+torch
+transformers
+accelerate
+bitsandbytes
 scipy
 numpy
+matplotlib
+requests
+beautifulsoup4
