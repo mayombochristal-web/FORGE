@@ -1,7 +1,11 @@
 model:
-  embed_dim: 32
-  hidden_dim: 3
-  num_layers: 2
+  name: "distilgpt2"  # modèle léger pour Streamlit Cloud
+  max_length: 200
+  temperature: 0.8
+  top_k: 50
+  top_p: 0.95
+  repetition_penalty: 1.2
+  hidden_dim: 3  # dimension de l'état TTU
   dt: 0.1
   gamma_init: 1.35
   alpha_c_init: 0.5
@@ -12,10 +16,3 @@ model:
   alpha_m_init: 0.1
   noise_sigma: 0.05
   noise_decay: 0.1
-
-training:
-  batch_size: 64
-  seq_length: 100
-  learning_rate: 0.001
-  epochs: 50
-  device: "cuda"  # ou "cpu"
