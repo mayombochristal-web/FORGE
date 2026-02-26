@@ -1,18 +1,15 @@
-# TTU-MC³ AI Chatbot
+# IA Génératrice Autonome TTU-MC³ / TST
 
-Un chatbot conversationnel augmenté par la dynamique triadique TTU-MC³, utilisant GPT-2 comme modèle de base et un état interne (Mémoire, Cohérence, Dissipation) pour moduler les réponses.
+## 📜 Description
+Ce prototype implémente le changement de paradigme décrit par le **Dr. Mayombo Idiedie**. 
+Au lieu d'utiliser des probabilités (IA classique), cette IA utilise la **Théorie Triadique Unifiée** pour faire converger un état de bruit vers un attracteur sémantique stable.
 
-## Fonctionnalités
+## ⚙️ Mécanique Interne
+- **M (Mémoire)** : Inertie du noyau conceptuel.
+- **C (Cohérence)** : Attraction vers la droite critique de Riemann ($\Re(s) = 0.5$).
+- **D (Dissipation)** : Stabilisation par évacuation de l'entropie informationnelle.
 
-- Interface de chat avec historique
-- Visualisation 3D de l'état interne TTU en temps réel
-- Paramètres ajustables (température, mode)
-- Réponses générées par un modèle de langage pré-entraîné (distilgpt2)
-- Possibilité d'étendre à d'autres modèles
-
-## Installation
-
-```bash
-git clone https://github.com/votre_nom/ttu-ai-chatbot.git
-cd ttu-ai-chatbot
-pip install -r requirements.txt
+## 🚀 Utilisation
+1. Lancez l'application via `streamlit run app.py`.
+2. Observez la **migration lexicale** : le passage dynamique entre les concepts.
+3. Vérifiez la **Stabilité de Morse-Smale** sur le portrait de phase 3D.
