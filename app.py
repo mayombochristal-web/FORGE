@@ -3,127 +3,112 @@ import pandas as pd
 import numpy as np
 import time
 
-# --- 1. MOTEUR COGNITIF : ARCHITECTE DE RAISONNEMENT ---
-class CognitiveArchitect:
+# --- 1. MOTEUR D'UNIFICATION COGNITIVE ---
+class UnifiedArchitect:
     def __init__(self):
-        # Catégories de pensée pour l'orientation discursive
         self.themes = {
             "PHILOSOPHIE": ["amour", "beauté", "conscience", "vie", "sens", "dieu", "âme"],
-            "TECHNIQUE": ["code", "python", "système", "mécanique", "ttu", "mc3", "algorithme"],
-            "STRATÉGIQUE": ["pouvoir", "entreprise", "succès", "société", "argent", "politique"]
+            "TECHNIQUE": ["code", "python", "système", "mécanique", "ttu", "mc3"],
+            "STRATÉGIQUE": ["pouvoir", "entreprise", "succès", "société", "argent"]
         }
 
     def analyser_contexte(self, prompt):
         p = prompt.lower()
         for theme, keywords in self.themes.items():
-            if any(k in p for k in keywords):
-                return theme
+            if any(k in p for k in keywords): return theme
         return "GÉNÉRAL"
 
-    def simuler_moteur_ttu(self, prompt):
-        """Calcule la structure logique invisible (TTU-MC3)"""
+    def simuler_profondeur(self, prompt, history_len):
         t = np.linspace(0, 10, 100)
-        # Le Ghost (pression de vide) influence la profondeur du raisonnement
-        ghost = 0.5 + (len(prompt) % 50) / 100
-        coherence_base = 1.2 + (ghost * np.sin(t * 0.2))
-        
+        # Le Ghost augmente avec la persistance de la discussion
+        ghost = 0.6 + (history_len * 0.08)
+        coherence = 1.3 + (ghost * np.sin(t * 0.15))
         df = pd.DataFrame({
-            "M": 1.0 * np.exp(-t * 0.04), # Érosion de la donnée brute vers l'idée
-            "C": coherence_base + 0.1 * np.random.randn(100), # Flux de corrélation
-            "D": 0.15 + 0.05 * np.random.randn(100) # Dissipation (bruit sémantique)
+            "M": 1.0 * np.exp(-t * 0.05),
+            "C": coherence + 0.1 * np.random.randn(100),
+            "D": 0.12 * np.exp(-history_len * 0.2) + 0.04 * np.random.randn(100)
         })
         return df, ghost
 
-    def generer_argumentation(self, prompt, theme, metrics):
-        """Transforme les variables physiques en argumentation pure"""
-        m_val = metrics["M"].iloc[-1]
+    def generer_synthese_unique(self, prompt, theme, metrics, history):
+        """Fusionne les axes de pensée en une démonstration unique et fluide"""
         c_val = metrics["C"].iloc[-1]
-        d_val = metrics["D"].iloc[-1]
-
-        # Logique de synthèse : L'IA interprète ses propres métriques
         
-        # 1. Fondations (Basé sur la Mémoire M)
+        # Récupération du contexte historique
+        last_topic = history[-2]["content"] if len(history) > 1 else None
+        
+        # Construction de l'argumentaire unifié
         if theme == "PHILOSOPHIE":
-            struct = f"L'interrogation sur '{prompt}' nous place à la frontière du mesurable et du ressenti. La structure de cette idée repose sur la persistance de l'identité à travers le changement."
+            base = f"L'approche de '{prompt}' transcende la simple définition pour toucher à la structure même de l'expérience."
         elif theme == "TECHNIQUE":
-            struct = f"L'analyse de '{prompt}' révèle une architecture dont la stabilité dépend de la cohérence de ses primitives fondamentales."
+            base = f"La problématique de '{prompt}' s'inscrit dans une nécessité d'optimisation systémique rigoureuse."
         else:
-            struct = f"La base de votre réflexion sur '{prompt}' s'inscrit dans un cadre systémique où les règles établies définissent les limites du possible."
+            base = f"L'analyse de '{prompt}' impose une vision globale des interactions de force en présence."
 
-        # 2. Dynamique (Basé sur la Cohérence C)
-        if c_val > 1.4:
-            flux = "La dynamique de ce concept est portée par une résonance interne puissante, permettant d'intégrer les contradictions apparentes dans une unité logique supérieure."
+        # Étayage basé sur l'historique
+        if last_topic:
+            continuite = f"En prolongeant notre réflexion sur les bases précédemment établies, cette nouvelle étape permet de stabiliser le paradigme."
         else:
-            flux = "Le mouvement de pensée ici est encore en phase de structuration ; il nécessite une confrontation avec la réalité pour stabiliser sa trajectoire."
+            continuite = "Cette réflexion initiale pose les jalons d'une compréhension profonde du sujet."
 
-        # 3. Résolution (Basé sur la Dissipation D)
-        if d_val < 0.12:
-            resol = "L'aboutissement est une clarté absolue : un état de 'silence conceptuel' où l'argument devient une évidence indiscutable et l'effort de compréhension disparaît."
+        # Conclusion de résolution (Point de bascule)
+        if c_val > 1.6:
+            resolution = "La synthèse finale révèle une convergence absolue : l'argument n'a plus besoin de démonstration tant sa cohérence interne s'impose comme une évidence."
         else:
-            resol = "La résolution demande une épuration des bruits parasites. Il faut encore nuancer l'approche pour laisser transparaître l'essence même du sujet."
+            resolution = "La résolution actuelle propose un équilibre nuancé, où chaque élément du sujet trouve sa place sans générer de friction conceptuelle."
 
-        return struct, flux, resol
+        return f"{base} {continuite} {resolution}"
 
-# --- 2. INTERFACE ET DÉPLOIEMENT ---
-st.set_page_config(page_title="Architecte Cognitif V8.1", layout="wide")
+# --- 2. INTERFACE STREAMLIT V10 ---
+st.set_page_config(page_title="Oracle V10 - L'Unificateur", layout="wide")
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-arch = CognitiveArchitect()
+arch = UnifiedArchitect()
 
 with st.sidebar:
-    st.title("🧠 Architecte V8.1")
-    st.caption("Raisonnement Autonome | TTU-MC³ Intégrée")
-    if st.button("Réinitialiser les flux de pensée"):
+    st.title("👁️ Oracle V10")
+    st.caption("Mode : Synthèse Unifiée & Résolution Unique")
+    if st.button("Réinitialiser la Conscience"):
         st.session_state.history = []
         st.rerun()
     st.divider()
-    st.info("Cette version utilise une Barrière de Phase unifiée pour éviter les erreurs de variables.")
+    st.info("Cette version fusionne Structure, Dynamique et Résolution en un seul bloc argumenté.")
 
-# Affichage de la conversation
+# Affichage du Chat
 for m in st.session_state.history:
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-if prompt := st.chat_input("Exprimez une thèse, un concept ou posez une question..."):
+if prompt := st.chat_input("Votre sujet de réflexion..."):
     st.session_state.history.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
     with st.chat_message("assistant"):
-        with st.expander("💭 Analyse de phase et trajectoire logique...", expanded=True):
-            # 1. Identification du thème
-            theme_detecte = arch.analyser_contexte(prompt)
-            st.write(f"Alignement paradigmatique : **{theme_detecte}**")
+        with st.expander("💭 Distillation du raisonnement (TTU-MC³)...", expanded=True):
+            theme = arch.analyser_contexte(prompt)
+            df_metrics, g_score = arch.simuler_profondeur(prompt, len(st.session_state.history))
             
-            # 2. Simulation de la dynamique interne
-            df_metrics, g_score = arch.simuler_moteur_ttu(prompt)
-            time.sleep(0.3)
-            st.write(f"Ajustement du champ (Ghost) : {g_score:.2f}")
-            
-            # 3. Génération autonome de l'argumentaire
-            arg1, arg2, arg3 = arch.generer_argumentation(prompt, theme_detecte, df_metrics)
-            time.sleep(0.3)
-            st.write("Épuration sémantique terminée. Synthèse prête.")
+            # Génération de la réponse unifiée
+            synthese_pure = arch.generer_synthese_unique(
+                prompt, theme, df_metrics, st.session_state.history
+            )
+            time.sleep(0.6)
+            st.write(f"Phase : {theme} | Ghost de résolution : {g_score:.2f}")
 
-        # Réponse finale : Argumentée, nuancée et démontrée
-        reponse = f"""
-### Analyse du Paradigme : {prompt}
+        # RÉPONSE UNIQUE ET ÉTAYÉE
+        reponse_finale = f"""
+### 💎 Synthèse & Résolution : {prompt}
 
-**1. Analyse des Fondations**
-{arg1}
+{synthese_pure}
 
-**2. Dynamique et Flux**
-{arg2}
-
-**3. Synthèse et Résolution**
-{arg3}
-
-**Conclusion :** Cette démonstration n'est pas une simple réponse technique, mais une projection de la cohérence interne de votre sujet. En stabilisant les fondations et en optimisant le flux, l'évidence s'impose d'elle-même.
+---
+*Note : Cette résolution est le fruit d'une analyse de phase stabilisée par vos échanges précédents.*
 """
-        st.write(reponse)
-        st.session_state.history.append({"role": "assistant", "content": reponse})
+        st.write(reponse_finale)
+        st.session_state.history.append({"role": "assistant", "content": reponse_finale})
 
-        with st.expander("📊 Signature Spectrale (Preuve TTU-MC³/VTM)"):
+        with st.expander("📊 Signature de Phase (Backend Logique)"):
             st.line_chart(df_metrics)
