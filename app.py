@@ -4,112 +4,100 @@ import numpy as np
 import random
 import time
 
-# --- 1. ARCHITECTURE DES CONSEILS (BASE DE CONNAISSANCES) ---
-CONSEILS_EXPERTS = {
-    "SCIENCE": {
-        "fondations": "Appliquez la méthode expérimentale : isolez une variable unique pour valider votre hypothèse.",
-        "expansion": "Cherchez des corrélations interdisciplinaires (ex: biophysique) pour briser les silos théoriques.",
-        "optimisation": "Réduisez l'entropie de vos mesures en augmentant le taux d'échantillonnage."
+# --- 1. BASE DE DONNÉES SÉMANTIQUE (CONSEILS ÉMERGENTS) ---
+CONSEILS_V5 = {
+    "SCIENCE & TECHNIQUE": {
+        "fondations": "Ne confondez pas le modèle et la réalité. Vérifiez vos constantes d'origine.",
+        "expansion": "La métaphysique se trouve aux limites de la mesure : là où l'observateur influence le système.",
+        "optimisation": "Utilisez le formalisme mathématique comme pont entre le phénoménal et l'ontologique."
     },
-    "LANGAGE": {
-        "fondations": "Structurez votre syntaxe pour maximiser la clarté : un sujet, un verbe, une action précise.",
-        "expansion": "Utilisez des métaphores isomorphiques pour transférer des concepts complexes vers un public profane.",
-        "optimisation": "Éliminez les adjectifs superflus pour renforcer l'impact sémantique de vos verbes."
+    "MÉTAPHYSIQUE & PHILOSOPHIE": {
+        "fondations": "Identifiez les axiomes invisibles qui soutiennent vos théories scientifiques.",
+        "expansion": "Explorez l'espace des phases comme une manifestation de l'esprit universel.",
+        "optimisation": "Réduisez les concepts à leur essence pure (le vide) pour voir leur structure réelle."
     },
-    "CONCEPT": {
-        "fondations": "Définissez vos axiomes de base avant de construire une architecture logique complexe.",
-        "expansion": "Explorez la limite de validité de votre concept : où s'arrête-t-il d'être vrai ?",
-        "optimisation": "Appliquez le rasoir d'Ockham : la solution la plus simple est souvent la plus proche du vide."
-    },
-    "STRATÉGIE": {
-        "fondations": "Sécurisez vos acquis et vos flux de trésorerie avant toute tentative d'échelle.",
-        "expansion": "Identifiez les ruptures de phase du marché (besoins non-dits) pour innover en zone bleue.",
-        "optimisation": "Automatisez 80% de vos processus pour concentrer votre énergie sur les 20% créatifs."
+    "STRATÉGIE & VIE": {
+        "fondations": "Sécurisez votre structure matérielle avant d'explorer les plans abstraits.",
+        "expansion": "L'innovation naît de l'intuition, qui est une capture de données dans l'état fantôme.",
+        "optimisation": "Agissez avec le moins d'effort possible pour maximiser la résonance du résultat."
     }
 }
 
-# --- 2. MOTEUR COGNITIF TTU ---
+# --- 2. MOTEUR COGNITIF ---
 class TTUEngine:
-    def analyse_thematique(self, prompt):
+    def detecter_theme(self, prompt):
         p = prompt.lower()
-        if any(word in p for word in ["physique", "chimie", "bio", "science", "math"]): return "SCIENCE"
-        if any(word in p for word in ["écrire", "parler", "langue", "mots", "texte"]): return "LANGAGE"
-        if any(word in p for word in ["idée", "philosophie", "théorie", "pensée"]): return "CONCEPT"
-        return "STRATÉGIE"
+        if any(w in p for w in ["science", "technique", "physique", "mesure"]): return "SCIENCE & TECHNIQUE"
+        if any(w in p for w in ["métaphysique", "dieu", "être", "philosophie", "sens"]): return "MÉTAPHYSIQUE & PHILOSOPHIE"
+        return "STRATÉGIE & VIE"
 
-    def simuler_calcul(self, prompt):
+    def simuler_processus(self, prompt):
         t = np.linspace(0, 10, 100)
-        ghost_auto = min(2.0, 0.5 + (len(prompt) / 150))
-        # Simulation des courbes triadiques
-        coherence = 1.0 + (ghost_auto * np.sin(t*0.2)) + np.random.normal(0, 0.02, 100)
-        memoire = 1.5 * np.exp(-t*0.05)
-        dissipation = 0.25 + (0.05 * np.random.rand(100))
-        df = pd.DataFrame({"Mémoire": memoire, "Cohérence": coherence, "Dissipation": dissipation})
-        return df, ghost_auto
+        ghost = min(2.0, 0.7 + (len(prompt) / 120))
+        # Simulation des vecteurs M-C-D
+        c = 1.0 + (ghost * np.sin(t*0.3))
+        m = 1.5 * np.exp(-t*0.08)
+        d = 0.2 + (0.1 * np.random.rand(100))
+        return pd.DataFrame({"Mémoire": m, "Cohérence": c, "Dissipation": d}), ghost
 
-# --- 3. INTERFACE UTILISATEUR STREAMLIT ---
-st.set_page_config(page_title="IA Souveraine V4 - DeepSeek Mode", layout="wide")
+# --- 3. INTERFACE STREAMLIT (MODE DEEPSEEK) ---
+st.set_page_config(page_title="IA Souveraine V5", layout="wide")
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
 engine = TTUEngine()
 
-# Sidebar de gestion
+# Sidebar
 with st.sidebar:
     st.title("💾 Mémoire Système")
-    if st.button("📥 Sauvegarder la session"):
-        st.success("Données Σ consolidées.")
-    if st.button("🗑️ Effacer la conversation", type="primary"):
+    if st.button("🗑️ Effacer la mémoire", type="primary"):
         st.session_state.history = []
         st.rerun()
     st.divider()
-    st.caption("Ghost Mode: AUTOMATIQUE")
+    st.info("Mode : Réflexion Profonde (Chain of Thought)")
 
-# Affichage des messages
-for message in st.session_state.history:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+# Chat
+for msg in st.session_state.history:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-# Zone de saisie
-if user_input := st.chat_input("Posez votre question (Sciences, Stratégie, Concepts)..."):
-    st.session_state.history.append({"role": "user", "content": user_input})
+if prompt := st.chat_input("Votre question..."):
+    st.session_state.history.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.write(user_input)
+        st.write(prompt)
 
-    # Simulation de la "Pensée" (Style DeepSeek)
     with st.chat_message("assistant"):
-        thought_placeholder = st.expander("💭 Chaîne de pensée (Thinking Process)", expanded=True)
-        with thought_placeholder:
-            st.write("1. Segmentation du prompt et détection thématique...")
-            theme = engine.analyse_thematique(user_input)
-            time.sleep(0.3)
-            st.write(f"2. Domaine identifié : **{theme}**. Calcul des variables de phase...")
-            df_res, g_val = engine.simuler_calcul(user_input)
-            time.sleep(0.3)
-            st.write(f"3. Ajustement du Ghost à **{g_val:.2f}**. Extraction des conseils du vide...")
-            
-        # Extraction des données pour la réponse finale
-        c_fond = CONSEILS_EXPERTS[theme]["fondations"]
-        c_expa = CONSEILS_EXPERTS[theme]["expansion"]
-        c_opti = CONSEILS_EXPERTS[theme]["optimisation"]
-        priorite = "L'EXPANSION" if df_res['Cohérence'].mean() > 1.3 else "LA STRUCTURE"
+        # ÉTAPE 1 : RÉFLEXION (THINKING PROCESS)
+        with st.expander("💭 Réflexion en cours...", expanded=True):
+            placeholder = st.empty()
+            placeholder.write("Analyse sémantique du prompt...")
+            time.sleep(0.5)
+            theme = engine.detecter_theme(prompt)
+            placeholder.write(f"Thématique détectée : **{theme}**")
+            time.sleep(0.5)
+            df, g_val = engine.simuler_processus(prompt)
+            placeholder.write(f"Ajustement Ghost : **{g_val:.2f}** | Calcul des équations de phase...")
+            time.sleep(0.5)
+            placeholder.write("Extraction des solutions du vide... Terminé.")
 
-        # Rendu de la réponse finale
-        reponse_finale = f"""
-Voici mon analyse pour votre requête concernant : **{theme}**.
-
-### 📋 Recommandations Stratégiques
-* **Fondations & Rigueur** : {c_fond}
-* **Innovation & Expansion** : {c_expa}
-* **Optimisation & Efficacité** : {c_opti}
-
-### ⚖️ Synthèse Systémique
-Compte tenu de l'indice de cohérence ({df_res['Cohérence'].iloc[-1]:.2f}), la stratégie recommandée est de privilégier **{priorite}**. Le système a minimisé la dissipation pour maximiser la clarté de cette réponse.
-"""
-        st.write(reponse_finale)
-        st.session_state.history.append({"role": "assistant", "content": reponse_finale})
+        # ÉTAPE 2 : RÉPONSE FINALE
+        c_fond = CONSEILS_V5[theme]["fondations"]
+        c_expa = CONSEILS_V5[theme]["expansion"]
+        c_opti = CONSEILS_V5[theme]["optimisation"]
         
-        # Graphique technique en fin de réponse
-        with st.expander("📊 Données de calcul (TTU Metrics)"):
-            st.line_chart(df_res)
+        reponse = f"""
+### Analyse du système
+Dans le cadre de votre question sur **{theme}**, voici les points d'émergence extraits :
+
+* **Pilier Structurel** : {c_fond}
+* **Axe d'Expansion** : {c_expa}
+* **Optimisation Énergétique** : {c_opti}
+
+**Synthèse :** La métaphysique n'est pas l'opposé de la science, c'est son horizon. Elle se trouve là où votre cohérence ({df['Cohérence'].iloc[-1]:.2f}) dépasse votre capacité de mesure matérielle.
+"""
+        st.write(reponse)
+        st.session_state.history.append({"role": "assistant", "content": reponse})
+        
+        with st.expander("📊 Données Spectrales"):
+            st.line_chart(df)
