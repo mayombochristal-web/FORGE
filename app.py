@@ -1,142 +1,326 @@
+# ==========================================================
+# 🔥 ORACLE V13 — CHATBOT IA MODERNE AUTONOME
+# Production Ready — Streamlit + Ollama
+# ==========================================================
+
 import streamlit as st
-import pandas as pd
 import numpy as np
-import time
 import json
 import os
+import time
+import requests
+from typing import List, Dict
 
-# ================================================= =
-# 1. ARCHITECTE COGNITIF & DYNAMIQUE DE PHASE (TTU-MC³)
-# ================================================= =
-class OracleV12Engine:
-    def __init__(self):
-        # Espace latent : Paramètres que l'IA ajuste "en direct" sur vous
-        if "latent_params" not in st.session_state:
-            st.session_state.latent_params = {"profondeur": 1.0, "coherence_cible": 1.5, "agilite": 1.0}
-        
-        self.themes = {
-            "PHILOSOPHIE": ["conscience", "vie", "sens", "beauté", "amour", "dieu"],
-            "TECHNIQUE": ["code", "ttu", "mc3", "système", "physique", "math"],
-            "STRATÉGIQUE": ["pouvoir", "entreprise", "société", "guerre", "argent"]
-        }
+# ==========================================================
+# CONFIG
+# ==========================================================
 
-    def analyser_phase(self, prompt, history_len):
-        p = prompt.lower()
-        theme = "GÉNÉRAL"
-        for t, keywords in self.themes.items():
-            if any(k in p for k in keywords): theme = t
-        
-        # Simulation de la métrique de phase
-        t_axis = np.linspace(0, 10, 100)
-        # Le Ghost (point de bascule) s'affine avec l'apprentissage latent
-        ghost = 0.6 + (history_len * 0.05 * st.session_state.latent_params["profondeur"])
-        
-        metrics = pd.DataFrame({
-            "M (Mémoire)": 1.0 * np.exp(-t_axis * 0.05),
-            "C (Cohérence)": (1.3 + ghost * np.sin(t_axis * 0.15)) * st.session_state.latent_params["coherence_cible"],
-            "D (Dissipation)": 0.15 * np.exp(-history_len * 0.2) + 0.05 * np.random.randn(100)
-        })
-        return theme, metrics, ghost
+OLLAMA_URL = "http://localhost:11434/api/chat"
+OLLAMA_EMBED = "http://localhost:11434/api/embeddings"
 
-# ================================================= =
-# 2. LOGIQUE D'AUTO-AMÉLIORATION & RÉCOMPENSE
-# ================================================= =
-def enregistrer_rlhf(prompt, initial, refined, reward_score):
-    """Enregistre les données pour le futur Fine-Tuning (Apprentissage Profond)"""
-    log_file = "oracle_rlhf_data.jsonl"
-    entry = {
-        "timestamp": time.time(),
-        "prompt": prompt,
-        "chosen": refined if reward_score >= 3 else initial,
-        "rejected": initial if reward_score >= 3 else refined,
-        "score": reward_score,
-        "latent_state": st.session_state.latent_params
+MODEL = "llama3.2:3b"
+EMBED_MODEL = "nomic-embed-text"
+
+MEMORY_FILE = "oracle_memory.json"
+
+# ==========================================================
+# UTILITIES
+# ==========================================================
+
+def call_llm(messages, temperature=0.7, max_tokens=800):
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        },
     }
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-def appliquer_reward(score):
-    """Met à jour l'espace latent (Apprentissage immédiat)"""
-    # Si le score est bon, on augmente la profondeur et la cohérence
-    facteur = (score - 3) * 0.1
-    st.session_state.latent_params["profondeur"] += facteur
-    st.session_state.latent_params["coherence_cible"] += facteur * 0.5
-    # Bornage de sécurité
-    for k in st.session_state.latent_params:
-        st.session_state.latent_params[k] = np.clip(st.session_state.latent_params[k], 0.5, 3.0)
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, timeout=180)
+        r.raise_for_status()
+        return r.json()["message"]["content"]
+    except Exception as e:
+        return f"Erreur LLM: {e}"
 
-# ================================================= =
-# 3. INTERFACE DE GÉNÉRATION AUGMENTÉE
-# ================================================= =
-st.set_page_config(page_title="Oracle V12 - Auto-Amélioration", layout="wide")
+
+def get_embedding(text):
+    try:
+        r = requests.post(
+            OLLAMA_EMBED,
+            json={"model": EMBED_MODEL, "prompt": text},
+            timeout=60,
+        )
+        return np.array(r.json()["embedding"])
+    except:
+        return np.random.randn(768)
+
+
+def cosine(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+
+# ==========================================================
+# MEMORY SYSTEM
+# ==========================================================
+
+def load_memory():
+    if not os.path.exists(MEMORY_FILE):
+        return []
+    return json.load(open(MEMORY_FILE, "r", encoding="utf-8"))
+
+
+def save_memory(prompt, answer):
+    memory = load_memory()
+    emb = get_embedding(prompt).tolist()
+
+    memory.append({
+        "prompt": prompt,
+        "answer": answer,
+        "embedding": emb
+    })
+
+    memory = memory[-200:]  # limite mémoire
+    json.dump(memory, open(MEMORY_FILE, "w", encoding="utf-8"))
+
+
+def retrieve_memories(prompt, k=3):
+    memory = load_memory()
+    if not memory:
+        return ""
+
+    emb = get_embedding(prompt)
+
+    scored = []
+    for m in memory:
+        score = cosine(emb, np.array(m["embedding"]))
+        scored.append((score, m))
+
+    scored.sort(reverse=True)
+
+    return "\n".join(
+        f"- {x[1]['prompt']}" for x in scored[:k]
+    )
+
+
+# ==========================================================
+# LATENT SPACE
+# ==========================================================
+
+def init_latent():
+    return {
+        "profondeur": 1.2,
+        "coherence": 1.5,
+        "exploration": 1.0,
+        "rigueur": 1.2,
+    }
+
+
+def latent_to_params(latent):
+    temp = 0.7 * latent["exploration"] / latent["rigueur"]
+    temp = float(np.clip(temp, 0.2, 1.2))
+
+    max_tokens = int(600 * latent["profondeur"])
+
+    return temp, max_tokens
+
+
+# ==========================================================
+# PLANNER
+# ==========================================================
+
+def build_plan(prompt):
+    messages = [
+        {"role": "system",
+         "content": "Planifie brièvement la meilleure réponse."},
+        {"role": "user", "content": prompt},
+    ]
+
+    return call_llm(messages, temperature=0.3, max_tokens=200)
+
+
+# ==========================================================
+# SYSTEM PROMPT
+# ==========================================================
+
+def build_system_prompt(latent):
+
+    return f"""
+Tu es ORACLE, un assistant IA moderne.
+
+Objectifs :
+- naturel et clair
+- utile et intelligent
+- conversation fluide
+- profondeur si nécessaire
+- concision sinon
+
+Ne parle jamais de ton fonctionnement interne.
+
+Paramètres internes :
+{json.dumps(latent, ensure_ascii=False)}
+"""
+
+
+# ==========================================================
+# GENERATION PIPELINE
+# ==========================================================
+
+def generate_answer(prompt, history, latent):
+
+    memories = retrieve_memories(prompt)
+    plan = build_plan(prompt)
+
+    temp, max_tokens = latent_to_params(latent)
+
+    condensed_history = ""
+    for h in history[-6:]:
+        condensed_history += f"{h['role']}:{h['content']}\n"
+
+    messages = [
+        {"role": "system", "content": build_system_prompt(latent)},
+        {
+            "role": "user",
+            "content": f"""
+PLAN INTERNE:
+{plan}
+
+Souvenirs pertinents:
+{memories}
+
+Conversation:
+{condensed_history}
+
+Message utilisateur:
+{prompt}
+"""
+        },
+    ]
+
+    first = call_llm(messages, temp, max_tokens)
+
+    # ===== AUTO REFINE =====
+
+    refine_messages = [
+        {
+            "role": "system",
+            "content": "Améliore la réponse pour clarté et cohérence."
+        },
+        {
+            "role": "user",
+            "content": f"Question:{prompt}\nRéponse:{first}"
+        },
+    ]
+
+    refined = call_llm(refine_messages, temp - 0.1, max_tokens)
+
+    return refined
+
+
+# ==========================================================
+# INTERNAL QUALITY SCORE
+# ==========================================================
+
+def internal_score(answer):
+    r = call_llm([
+        {"role": "system", "content": "Note la qualité de 1 à 5."},
+        {"role": "user", "content": answer},
+    ], temperature=0.2, max_tokens=5)
+
+    try:
+        return float(r.strip()[0])
+    except:
+        return 3.0
+
+
+def update_latent(latent, user_rating, internal):
+
+    reward = (user_rating - 3)*0.6 + (internal - 3)*0.4
+
+    latent["profondeur"] = float(np.clip(
+        latent["profondeur"] + reward*0.05, 0.8, 2.5))
+
+    latent["exploration"] = float(np.clip(
+        latent["exploration"] + reward*0.03, 0.7, 1.5))
+
+    latent["rigueur"] = float(np.clip(
+        latent["rigueur"] + reward*0.02, 0.8, 1.6))
+
+    return latent
+
+
+# ==========================================================
+# STREAMLIT UI
+# ==========================================================
+
+st.set_page_config(page_title="🔥 Oracle V13", layout="wide")
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-engine = OracleV12Engine()
+if "latent" not in st.session_state:
+    st.session_state.latent = init_latent()
 
+# Sidebar
 with st.sidebar:
-    st.title("👁️ Oracle V12")
-    st.write("**Espace Latent (Appris) :**")
-    st.json(st.session_state.latent_params)
-    
-    if st.button("Réinitialiser l'Apprentissage"):
+    st.title("🔥 Oracle V13")
+    st.caption("Chatbot IA moderne local")
+
+    if st.button("Reset mémoire"):
         st.session_state.history = []
-        del st.session_state.latent_params
-        st.rerun()
-    
+        st.session_state.latent = init_latent()
+
     st.divider()
-    st.info("Cette version apprend de vos notes (Reward) et génère des logs RLHF pour un futur ré-entraînement.")
+    st.json(st.session_state.latent)
 
-# Affichage de la discussion
-for chat in st.session_state.history:
-    with st.chat_message(chat["role"]):
-        st.write(chat["content"])
+# Display chat
+for msg in st.session_state.history:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-if prompt := st.chat_input("Posez votre question... l'IA va s'auto-corriger"):
-    st.session_state.history.append({"role": "user", "content": prompt})
+prompt = st.chat_input("Parlez avec Oracle...")
+
+if prompt:
+
+    st.session_state.history.append(
+        {"role": "user", "content": prompt})
+
     with st.chat_message("user"):
         st.write(prompt)
 
     with st.chat_message("assistant"):
-        # ÉTAPE 1 : Analyse de Phase
-        theme, metrics, ghost = engine.analyser_phase(prompt, len(st.session_state.history))
-        
-        with st.expander("💭 Phase de Distillation & Auto-Critique", expanded=True):
-            st.write(f"Alignement : **{theme}** | Ghost : {ghost:.2f}")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("🛠️ **Génération Initiale...**")
-                raw_reply = f"Analyse préliminaire de {prompt}. La structure est stable mais manque de profondeur systémique."
-                time.sleep(0.5)
-                st.write("✓ Complétée.")
-            with col2:
-                st.write("🧠 **Auto-Correction & Raffinement...**")
-                refined_reply = f"Résolution étayée de {prompt} : En intégrant la dynamique de {theme.lower()}, nous observons un point de bascule où la théorie rencontre l'expérience pure. C'est ici que la cohérence devient souveraine."
-                time.sleep(0.8)
-                st.write("✓ Améliorée.")
-            st.line_chart(metrics)
+        placeholder = st.empty()
 
-        # ÉTAPE 2 : Affichage de la Résolution Unique (Fusionnée)
-        reponse_finale = f"""
-### 💎 Résolution Augmentée : {prompt}
+        answer = generate_answer(
+            prompt,
+            st.session_state.history,
+            st.session_state.latent
+        )
 
-{refined_reply}
+        # pseudo streaming
+        out = ""
+        for w in answer.split():
+            out += w + " "
+            placeholder.markdown(out)
+            time.sleep(0.01)
 
----
-*Perspective TTU-MC³ : Cohérence calculée à {metrics['C (Cohérence)'].iloc[-1]:.2f}.*
-"""
-        st.write(reponse_finale)
-        st.session_state.history.append({"role": "assistant", "content": reponse_finale})
+    st.session_state.history.append(
+        {"role": "assistant", "content": answer})
 
-        # ÉTAPE 3 : Système de Reward (Le levier d'apprentissage)
-        st.markdown("---")
-        st.write("⭐ **Évaluez cette résolution pour l'apprentissage de l'IA :**")
-        score = st.feedback("stars", key=f"score_{len(st.session_state.history)}")
-        
-        if score is not None:
-            # On ajoute +1 car st.feedback commence à 0
-            real_score = score + 1
-            appliquer_reward(real_score)
-            enregistrer_rlhf(prompt, raw_reply, refined_reply, real_score)
-            st.toast(f"Apprentissage mis à jour : Profondeur désormais à {st.session_state.latent_params['profondeur']:.2f}")
+    save_memory(prompt, answer)
+
+    # ===== FEEDBACK =====
+    rating = st.slider("Qualité de la réponse", 1, 5, 4)
+
+    if st.button("Valider apprentissage"):
+        internal = internal_score(answer)
+
+        st.session_state.latent = update_latent(
+            st.session_state.latent,
+            rating,
+            internal
+        )
+
+        st.success("Oracle a appris de cette interaction.")
