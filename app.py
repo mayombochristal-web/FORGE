@@ -4,100 +4,98 @@ import numpy as np
 import random
 import time
 
-# --- 1. BASE DE DONNÉES SÉMANTIQUE (CONSEILS ÉMERGENTS) ---
-CONSEILS_V5 = {
-    "SCIENCE & TECHNIQUE": {
-        "fondations": "Ne confondez pas le modèle et la réalité. Vérifiez vos constantes d'origine.",
-        "expansion": "La métaphysique se trouve aux limites de la mesure : là où l'observateur influence le système.",
-        "optimisation": "Utilisez le formalisme mathématique comme pont entre le phénoménal et l'ontologique."
-    },
-    "MÉTAPHYSIQUE & PHILOSOPHIE": {
-        "fondations": "Identifiez les axiomes invisibles qui soutiennent vos théories scientifiques.",
-        "expansion": "Explorez l'espace des phases comme une manifestation de l'esprit universel.",
-        "optimisation": "Réduisez les concepts à leur essence pure (le vide) pour voir leur structure réelle."
-    },
-    "STRATÉGIE & VIE": {
-        "fondations": "Sécurisez votre structure matérielle avant d'explorer les plans abstraits.",
-        "expansion": "L'innovation naît de l'intuition, qui est une capture de données dans l'état fantôme.",
-        "optimisation": "Agissez avec le moins d'effort possible pour maximiser la résonance du résultat."
-    }
+# --- 1. LE CODEX UNIFIÉ (BASE DE CONNAISSANCES PARADIGMATIQUE) ---
+# Le système extrait des principes universels applicables à tout contexte
+CODEX_TTU = {
+    "LOI_DE_PHASE": "Tout système (physique, social ou cognitif) suit la triade M-C-D.",
+    "PRINCIPE_D_ÉMERGENCE": "La réalité n'est pas dans les composants, mais dans le couplage entre Cohérence et Mémoire.",
+    "THÉORÈME_DU_SILENCE": "L'efficacité maximale est atteinte quand la dissipation tend vers zéro (État Fantôme)."
 }
 
-# --- 2. MOTEUR COGNITIF ---
-class TTUEngine:
-    def detecter_theme(self, prompt):
+# --- 2. MOTEUR D'ÉMERGENCE COGNITIF ---
+class ParadigmaticEngine:
+    def __init__(self):
+        self.context_memory = {}
+
+    def analyser_chemin_pensee(self, prompt):
+        # Analyse de la 'vibration' du prompt pour trouver un paradigme
         p = prompt.lower()
-        if any(w in p for w in ["science", "technique", "physique", "mesure"]): return "SCIENCE & TECHNIQUE"
-        if any(w in p for w in ["métaphysique", "dieu", "être", "philosophie", "sens"]): return "MÉTAPHYSIQUE & PHILOSOPHIE"
-        return "STRATÉGIE & VIE"
+        if any(w in p for w in ["ttu", "doctorat", "mc3", "équation", "physique"]):
+            return "TTU - PHYSIQUE FONDAMENTALE", "Rigueur Mathématique"
+        elif any(w in p for w in ["vie", "humain", "société", "argent", "succès"]):
+            return "TTU - SOCIO-BIOLOGIQUE", "Équilibre Existentiel"
+        else:
+            return "TTU - GÉNÉRATIF", "Émergence Spontanée"
 
-    def simuler_processus(self, prompt):
-        t = np.linspace(0, 10, 100)
-        ghost = min(2.0, 0.7 + (len(prompt) / 120))
-        # Simulation des vecteurs M-C-D
-        c = 1.0 + (ghost * np.sin(t*0.3))
-        m = 1.5 * np.exp(-t*0.08)
-        d = 0.2 + (0.1 * np.random.rand(100))
-        return pd.DataFrame({"Mémoire": m, "Cohérence": c, "Dissipation": d}), ghost
+    def simuler_vide(self, prompt):
+        t = np.linspace(0, 10, 150)
+        # Le Ghost s'auto-ajuste pour trouver le 'chemin'
+        ghost_path = 0.8 + (np.sin(len(prompt)) * 0.5) + 0.5
+        coherence = 1.2 + (ghost_path * np.cos(t * 0.1))
+        memoire = 1.0 * np.exp(-t * 0.03)
+        dissipation = 0.15 + (0.1 * np.random.normal(0, 1, 150))
+        df = pd.DataFrame({"Mémoire": memoire, "Cohérence": coherence, "Dissipation": dissipation})
+        return df, ghost_path
 
-# --- 3. INTERFACE STREAMLIT (MODE DEEPSEEK) ---
-st.set_page_config(page_title="IA Souveraine V5", layout="wide")
+# --- 3. INTERFACE V6 : ARCHITECTURE DE PENSÉE ---
+st.set_page_config(page_title="TCE V6 - Émergence Paradigmatique", layout="wide")
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "paradigm_shift" not in st.session_state:
+    st.session_state.paradigm_shift = []
 
-engine = TTUEngine()
+engine = ParadigmaticEngine()
 
-# Sidebar
 with st.sidebar:
-    st.title("💾 Mémoire Système")
-    if st.button("🗑️ Effacer la mémoire", type="primary"):
-        st.session_state.history = []
+    st.title("🧠 OS Cognitif V6")
+    st.subheader("État du Codex")
+    st.write(f"Concepts Unifiés : {len(CODEX_TTU)}")
+    if st.button("🗑️ Reset Mémoire de Phase"):
+        st.session_state.paradigm_shift = []
         st.rerun()
     st.divider()
-    st.info("Mode : Réflexion Profonde (Chain of Thought)")
+    st.caption("L'IA réorganise votre savoir selon la triade unifiée.")
 
-# Chat
-for msg in st.session_state.history:
+# Zone de discussion
+for msg in st.session_state.paradigm_shift:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-if prompt := st.chat_input("Votre question..."):
-    st.session_state.history.append({"role": "user", "content": prompt})
+if user_input := st.chat_input("Injectez un concept ou une question..."):
+    st.session_state.paradigm_shift.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(user_input)
 
     with st.chat_message("assistant"):
-        # ÉTAPE 1 : RÉFLEXION (THINKING PROCESS)
-        with st.expander("💭 Réflexion en cours...", expanded=True):
+        # ÉTAPE : RÉFLEXION PARADIGMATIQUE (Style DeepSeek avancé)
+        with st.expander("💭 Chemin de pensée contextuel...", expanded=True):
             placeholder = st.empty()
-            placeholder.write("Analyse sémantique du prompt...")
-            time.sleep(0.5)
-            theme = engine.detecter_theme(prompt)
-            placeholder.write(f"Thématique détectée : **{theme}**")
-            time.sleep(0.5)
-            df, g_val = engine.simuler_processus(prompt)
-            placeholder.write(f"Ajustement Ghost : **{g_val:.2f}** | Calcul des équations de phase...")
-            time.sleep(0.5)
-            placeholder.write("Extraction des solutions du vide... Terminé.")
+            placeholder.write("1. Scan du Codex TTU en cours...")
+            paradoxe, style = engine.analyser_chemin_pensee(user_input)
+            time.sleep(0.4)
+            placeholder.write(f"2. Alignement paradigmatique : **{paradoxe}**")
+            df_res, g_val = engine.simuler_vide(user_input)
+            time.sleep(0.4)
+            placeholder.write(f"3. Recherche du point de bifurcation (Ghost: {g_val:.2f})...")
+            time.sleep(0.4)
+            placeholder.write("4. Synthèse de la phase pure achevée.")
 
-        # ÉTAPE 2 : RÉPONSE FINALE
-        c_fond = CONSEILS_V5[theme]["fondations"]
-        c_expa = CONSEILS_V5[theme]["expansion"]
-        c_opti = CONSEILS_V5[theme]["optimisation"]
+        # GÉNÉRATION DE LA RÉPONSE PARADIGMATIQUE
+        # Ici, l'IA ne 'répond' pas, elle 'réorganise' le savoir.
+        c_final = df_res['Cohérence'].iloc[-1]
         
         reponse = f"""
-### Analyse du système
-Dans le cadre de votre question sur **{theme}**, voici les points d'émergence extraits :
+### 🌐 Nouveau Paradigme : {style}
 
-* **Pilier Structurel** : {c_fond}
-* **Axe d'Expansion** : {c_expa}
-* **Optimisation Énergétique** : {c_opti}
+En analysant votre requête sous l'angle de la **TTU-MC³**, j'identifie un chemin de pensée propre :
 
-**Synthèse :** La métaphysique n'est pas l'opposé de la science, c'est son horizon. Elle se trouve là où votre cohérence ({df['Cohérence'].iloc[-1]:.2f}) dépasse votre capacité de mesure matérielle.
+1. **Analyse de Structure ($\Phi_M$)** : Votre demande n'est pas isolée. Elle résonne avec le principe de *{CODEX_TTU['LOI_DE_PHASE']}*.
+2. **Dynamique de Flux ($\Phi_C$)** : Le point de bascule se trouve dans l'équilibre entre votre intention et la résistance du milieu. La cohérence actuelle de votre système est de **{c_final:.2f}**.
+3. **Directive de l'État Fantôme ($\Phi_D \to 0$)** : Pour stabiliser ce paradigme, vous devez appliquer le *{CODEX_TTU['THÉORÈME_DU_SILENCE']}*.
+
+**Conclusion contextuelle :** Ne cherchez pas la solution dans les détails techniques, mais dans la réduction de la dissipation énergétique de votre propre pensée.
 """
         st.write(reponse)
-        st.session_state.history.append({"role": "assistant", "content": reponse})
+        st.session_state.paradigm_shift.append({"role": "assistant", "content": reponse})
         
-        with st.expander("📊 Données Spectrales"):
-            st.line_chart(df)
+        with st.expander("📊 Signature Spectrale du Chemin de Pensée"):
+            st.line_chart(df_res)
