@@ -1,90 +1,115 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import random
 import time
 
-# --- 1. MOTEUR COGNITIF TTU (BACKEND) ---
-class TTUEngine:
-    def __init__(self):
-        if "memory" not in st.session_state:
-            st.session_state.memory = []
+# --- 1. ARCHITECTURE DES CONSEILS (BASE DE CONNAISSANCES) ---
+CONSEILS_EXPERTS = {
+    "SCIENCE": {
+        "fondations": "Appliquez la méthode expérimentale : isolez une variable unique pour valider votre hypothèse.",
+        "expansion": "Cherchez des corrélations interdisciplinaires (ex: biophysique) pour briser les silos théoriques.",
+        "optimisation": "Réduisez l'entropie de vos mesures en augmentant le taux d'échantillonnage."
+    },
+    "LANGAGE": {
+        "fondations": "Structurez votre syntaxe pour maximiser la clarté : un sujet, un verbe, une action précise.",
+        "expansion": "Utilisez des métaphores isomorphiques pour transférer des concepts complexes vers un public profane.",
+        "optimisation": "Éliminez les adjectifs superflus pour renforcer l'impact sémantique de vos verbes."
+    },
+    "CONCEPT": {
+        "fondations": "Définissez vos axiomes de base avant de construire une architecture logique complexe.",
+        "expansion": "Explorez la limite de validité de votre concept : où s'arrête-t-il d'être vrai ?",
+        "optimisation": "Appliquez le rasoir d'Ockham : la solution la plus simple est souvent la plus proche du vide."
+    },
+    "STRATÉGIE": {
+        "fondations": "Sécurisez vos acquis et vos flux de trésorerie avant toute tentative d'échelle.",
+        "expansion": "Identifiez les ruptures de phase du marché (besoins non-dits) pour innover en zone bleue.",
+        "optimisation": "Automatisez 80% de vos processus pour concentrer votre énergie sur les 20% créatifs."
+    }
+}
 
-    def simuler_reponse(self, prompt):
-        # Simulation des courbes M-C-D basées sur le texte
-        longueur = len(prompt)
+# --- 2. MOTEUR COGNITIF TTU ---
+class TTUEngine:
+    def analyse_thematique(self, prompt):
+        p = prompt.lower()
+        if any(word in p for word in ["physique", "chimie", "bio", "science", "math"]): return "SCIENCE"
+        if any(word in p for word in ["écrire", "parler", "langue", "mots", "texte"]): return "LANGAGE"
+        if any(word in p for word in ["idée", "philosophie", "théorie", "pensée"]): return "CONCEPT"
+        return "STRATÉGIE"
+
+    def simuler_calcul(self, prompt):
         t = np.linspace(0, 10, 100)
-        
-        # Automatisation du Ghost : plus le texte est long/complexe, plus le ghost est haut
-        ghost_auto = min(2.0, 0.5 + (longueur / 100))
-        
-        # Calcul des vecteurs (Logique TTU)
-        coherence = 1.0 + (ghost_auto * np.sin(t*0.2))
+        ghost_auto = min(2.0, 0.5 + (len(prompt) / 150))
+        # Simulation des courbes triadiques
+        coherence = 1.0 + (ghost_auto * np.sin(t*0.2)) + np.random.normal(0, 0.02, 100)
         memoire = 1.5 * np.exp(-t*0.05)
-        dissipation = 0.2 + (0.1 * np.random.rand(100))
-        
+        dissipation = 0.25 + (0.05 * np.random.rand(100))
         df = pd.DataFrame({"Mémoire": memoire, "Cohérence": coherence, "Dissipation": dissipation})
         return df, ghost_auto
 
-# --- 2. CONFIGURATION DE L'INTERFACE (STYLE GEMINI/CHATGPT) ---
-st.set_page_config(page_title="IA Souveraine", layout="wide")
+# --- 3. INTERFACE UTILISATEUR STREAMLIT ---
+st.set_page_config(page_title="IA Souveraine V4 - DeepSeek Mode", layout="wide")
 
-# CSS pour masquer les éléments "poétiques" inutiles et épurer l'interface
-st.markdown("""
-    <style>
-    .stChatMessage { border-radius: 15px; margin-bottom: 10px; }
-    .stSidebar { background-color: #f8f9fa; }
-    </style>
-""", unsafe_allow_html=True)
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-# --- 3. BARRE LATÉRALE : GESTION DE LA MÉMOIRE ---
-with st.sidebar:
-    st.title("💾 Mémoire Système")
-    st.write("Gestion de la conversation")
-    
-    if st.button("📥 Sauvegarder la session"):
-        st.success("Session enregistrée dans le Kernel Σ.")
-    
-    if st.button("🗑️ Effacer la conversation", type="primary"):
-        st.session_state.memory = []
-        st.rerun()
-    
-    st.divider()
-    st.info("Les paramètres Fantômes sont désormais gérés dynamiquement par l'IA.")
-
-# --- 4. LOGIQUE DE CONVERSATION ---
 engine = TTUEngine()
 
-# Affichage de l'historique
-for chat in st.session_state.memory:
-    with st.chat_message(chat["role"]):
-        st.write(chat["content"])
+# Sidebar de gestion
+with st.sidebar:
+    st.title("💾 Mémoire Système")
+    if st.button("📥 Sauvegarder la session"):
+        st.success("Données Σ consolidées.")
+    if st.button("🗑️ Effacer la conversation", type="primary"):
+        st.session_state.history = []
+        st.rerun()
+    st.divider()
+    st.caption("Ghost Mode: AUTOMATIQUE")
 
-# Entrée utilisateur
-if prompt := st.chat_input("Posez votre question ici..."):
-    # Ajout à l'historique (Mémoire vive)
-    st.session_state.memory.append({"role": "user", "content": prompt})
+# Affichage des messages
+for message in st.session_state.history:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+# Zone de saisie
+if user_input := st.chat_input("Posez votre question (Sciences, Stratégie, Concepts)..."):
+    st.session_state.history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(user_input)
 
-    # Calcul et Génération
-    with st.spinner("Analyse en cours..."):
-        df_result, ghost_val = engine.simuler_reponse(prompt)
-        
-        # Construction d'une réponse directe (Style Gemini/ChatGPT)
-        # On utilise les métriques pour nuancer le propos sans jargon poétique
-        c_final = df_result['Cohérence'].iloc[-1]
-        
-        if c_final > 1.5:
-            reponse = f"Après analyse de votre requête, il apparaît que les concepts liés à '{prompt}' présentent une forte interconnexion. Voici une synthèse structurée : \n\n1. **Analyse de fond** : Votre demande s'inscrit dans un cadre de haute cohérence.\n2. **Perspective** : Le système a ajusté sa pression de vide à {ghost_val:.2f} pour capturer les nuances latentes.\n3. **Conclusion** : La solution optimale réside dans l'équilibre entre la structure et l'innovation."
-        else:
-            reponse = f"Voici les informations concernant '{prompt}'. Le système a traité les données avec une stabilité nominale pour garantir la précision des faits."
-
-    # Affichage de la réponse IA
-    time.sleep(0.5) # Simulation de réflexion
+    # Simulation de la "Pensée" (Style DeepSeek)
     with st.chat_message("assistant"):
-        st.write(reponse)
-        st.session_state.memory.append({"role": "assistant", "content": reponse})
+        thought_placeholder = st.expander("💭 Chaîne de pensée (Thinking Process)", expanded=True)
+        with thought_placeholder:
+            st.write("1. Segmentation du prompt et détection thématique...")
+            theme = engine.analyse_thematique(user_input)
+            time.sleep(0.3)
+            st.write(f"2. Domaine identifié : **{theme}**. Calcul des variables de phase...")
+            df_res, g_val = engine.simuler_calcul(user_input)
+            time.sleep(0.3)
+            st.write(f"3. Ajustement du Ghost à **{g_val:.2f}**. Extraction des conseils du vide...")
+            
+        # Extraction des données pour la réponse finale
+        c_fond = CONSEILS_EXPERTS[theme]["fondations"]
+        c_expa = CONSEILS_EXPERTS[theme]["expansion"]
+        c_opti = CONSEILS_EXPERTS[theme]["optimisation"]
+        priorite = "L'EXPANSION" if df_res['Cohérence'].mean() > 1.3 else "LA STRUCTURE"
 
-    # Optionnel : Affichage discret des métriques techniques en bas
-    with st.expander("📊 Métriques de calcul (TTU Core)"):
-        st.line_chart(df_result)
+        # Rendu de la réponse finale
+        reponse_finale = f"""
+Voici mon analyse pour votre requête concernant : **{theme}**.
+
+### 📋 Recommandations Stratégiques
+* **Fondations & Rigueur** : {c_fond}
+* **Innovation & Expansion** : {c_expa}
+* **Optimisation & Efficacité** : {c_opti}
+
+### ⚖️ Synthèse Systémique
+Compte tenu de l'indice de cohérence ({df_res['Cohérence'].iloc[-1]:.2f}), la stratégie recommandée est de privilégier **{priorite}**. Le système a minimisé la dissipation pour maximiser la clarté de cette réponse.
+"""
+        st.write(reponse_finale)
+        st.session_state.history.append({"role": "assistant", "content": reponse_finale})
+        
+        # Graphique technique en fin de réponse
+        with st.expander("📊 Données de calcul (TTU Metrics)"):
+            st.line_chart(df_res)
