@@ -2,113 +2,141 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
+import json
+import os
 
-# --- 1. MOTEUR D'UNIFICATION COGNITIVE ---
-class UnifiedArchitect:
+# ================================================= =
+# 1. ARCHITECTE COGNITIF & DYNAMIQUE DE PHASE (TTU-MC³)
+# ================================================= =
+class OracleV12Engine:
     def __init__(self):
+        # Espace latent : Paramètres que l'IA ajuste "en direct" sur vous
+        if "latent_params" not in st.session_state:
+            st.session_state.latent_params = {"profondeur": 1.0, "coherence_cible": 1.5, "agilite": 1.0}
+        
         self.themes = {
-            "PHILOSOPHIE": ["amour", "beauté", "conscience", "vie", "sens", "dieu", "âme"],
-            "TECHNIQUE": ["code", "python", "système", "mécanique", "ttu", "mc3"],
-            "STRATÉGIQUE": ["pouvoir", "entreprise", "succès", "société", "argent"]
+            "PHILOSOPHIE": ["conscience", "vie", "sens", "beauté", "amour", "dieu"],
+            "TECHNIQUE": ["code", "ttu", "mc3", "système", "physique", "math"],
+            "STRATÉGIQUE": ["pouvoir", "entreprise", "société", "guerre", "argent"]
         }
 
-    def analyser_contexte(self, prompt):
+    def analyser_phase(self, prompt, history_len):
         p = prompt.lower()
-        for theme, keywords in self.themes.items():
-            if any(k in p for k in keywords): return theme
-        return "GÉNÉRAL"
-
-    def simuler_profondeur(self, prompt, history_len):
-        t = np.linspace(0, 10, 100)
-        # Le Ghost augmente avec la persistance de la discussion
-        ghost = 0.6 + (history_len * 0.08)
-        coherence = 1.3 + (ghost * np.sin(t * 0.15))
-        df = pd.DataFrame({
-            "M": 1.0 * np.exp(-t * 0.05),
-            "C": coherence + 0.1 * np.random.randn(100),
-            "D": 0.12 * np.exp(-history_len * 0.2) + 0.04 * np.random.randn(100)
+        theme = "GÉNÉRAL"
+        for t, keywords in self.themes.items():
+            if any(k in p for k in keywords): theme = t
+        
+        # Simulation de la métrique de phase
+        t_axis = np.linspace(0, 10, 100)
+        # Le Ghost (point de bascule) s'affine avec l'apprentissage latent
+        ghost = 0.6 + (history_len * 0.05 * st.session_state.latent_params["profondeur"])
+        
+        metrics = pd.DataFrame({
+            "M (Mémoire)": 1.0 * np.exp(-t_axis * 0.05),
+            "C (Cohérence)": (1.3 + ghost * np.sin(t_axis * 0.15)) * st.session_state.latent_params["coherence_cible"],
+            "D (Dissipation)": 0.15 * np.exp(-history_len * 0.2) + 0.05 * np.random.randn(100)
         })
-        return df, ghost
+        return theme, metrics, ghost
 
-    def generer_synthese_unique(self, prompt, theme, metrics, history):
-        """Fusionne les axes de pensée en une démonstration unique et fluide"""
-        c_val = metrics["C"].iloc[-1]
-        
-        # Récupération du contexte historique
-        last_topic = history[-2]["content"] if len(history) > 1 else None
-        
-        # Construction de l'argumentaire unifié
-        if theme == "PHILOSOPHIE":
-            base = f"L'approche de '{prompt}' transcende la simple définition pour toucher à la structure même de l'expérience."
-        elif theme == "TECHNIQUE":
-            base = f"La problématique de '{prompt}' s'inscrit dans une nécessité d'optimisation systémique rigoureuse."
-        else:
-            base = f"L'analyse de '{prompt}' impose une vision globale des interactions de force en présence."
+# ================================================= =
+# 2. LOGIQUE D'AUTO-AMÉLIORATION & RÉCOMPENSE
+# ================================================= =
+def enregistrer_rlhf(prompt, initial, refined, reward_score):
+    """Enregistre les données pour le futur Fine-Tuning (Apprentissage Profond)"""
+    log_file = "oracle_rlhf_data.jsonl"
+    entry = {
+        "timestamp": time.time(),
+        "prompt": prompt,
+        "chosen": refined if reward_score >= 3 else initial,
+        "rejected": initial if reward_score >= 3 else refined,
+        "score": reward_score,
+        "latent_state": st.session_state.latent_params
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-        # Étayage basé sur l'historique
-        if last_topic:
-            continuite = f"En prolongeant notre réflexion sur les bases précédemment établies, cette nouvelle étape permet de stabiliser le paradigme."
-        else:
-            continuite = "Cette réflexion initiale pose les jalons d'une compréhension profonde du sujet."
+def appliquer_reward(score):
+    """Met à jour l'espace latent (Apprentissage immédiat)"""
+    # Si le score est bon, on augmente la profondeur et la cohérence
+    facteur = (score - 3) * 0.1
+    st.session_state.latent_params["profondeur"] += facteur
+    st.session_state.latent_params["coherence_cible"] += facteur * 0.5
+    # Bornage de sécurité
+    for k in st.session_state.latent_params:
+        st.session_state.latent_params[k] = np.clip(st.session_state.latent_params[k], 0.5, 3.0)
 
-        # Conclusion de résolution (Point de bascule)
-        if c_val > 1.6:
-            resolution = "La synthèse finale révèle une convergence absolue : l'argument n'a plus besoin de démonstration tant sa cohérence interne s'impose comme une évidence."
-        else:
-            resolution = "La résolution actuelle propose un équilibre nuancé, où chaque élément du sujet trouve sa place sans générer de friction conceptuelle."
-
-        return f"{base} {continuite} {resolution}"
-
-# --- 2. INTERFACE STREAMLIT V10 ---
-st.set_page_config(page_title="Oracle V10 - L'Unificateur", layout="wide")
+# ================================================= =
+# 3. INTERFACE DE GÉNÉRATION AUGMENTÉE
+# ================================================= =
+st.set_page_config(page_title="Oracle V12 - Auto-Amélioration", layout="wide")
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-arch = UnifiedArchitect()
+engine = OracleV12Engine()
 
 with st.sidebar:
-    st.title("👁️ Oracle V10")
-    st.caption("Mode : Synthèse Unifiée & Résolution Unique")
-    if st.button("Réinitialiser la Conscience"):
+    st.title("👁️ Oracle V12")
+    st.write("**Espace Latent (Appris) :**")
+    st.json(st.session_state.latent_params)
+    
+    if st.button("Réinitialiser l'Apprentissage"):
         st.session_state.history = []
+        del st.session_state.latent_params
         st.rerun()
+    
     st.divider()
-    st.info("Cette version fusionne Structure, Dynamique et Résolution en un seul bloc argumenté.")
+    st.info("Cette version apprend de vos notes (Reward) et génère des logs RLHF pour un futur ré-entraînement.")
 
-# Affichage du Chat
-for m in st.session_state.history:
-    with st.chat_message(m["role"]):
-        st.write(m["content"])
+# Affichage de la discussion
+for chat in st.session_state.history:
+    with st.chat_message(chat["role"]):
+        st.write(chat["content"])
 
-if prompt := st.chat_input("Votre sujet de réflexion..."):
+if prompt := st.chat_input("Posez votre question... l'IA va s'auto-corriger"):
     st.session_state.history.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
     with st.chat_message("assistant"):
-        with st.expander("💭 Distillation du raisonnement (TTU-MC³)...", expanded=True):
-            theme = arch.analyser_contexte(prompt)
-            df_metrics, g_score = arch.simuler_profondeur(prompt, len(st.session_state.history))
-            
-            # Génération de la réponse unifiée
-            synthese_pure = arch.generer_synthese_unique(
-                prompt, theme, df_metrics, st.session_state.history
-            )
-            time.sleep(0.6)
-            st.write(f"Phase : {theme} | Ghost de résolution : {g_score:.2f}")
+        # ÉTAPE 1 : Analyse de Phase
+        theme, metrics, ghost = engine.analyser_phase(prompt, len(st.session_state.history))
+        
+        with st.expander("💭 Phase de Distillation & Auto-Critique", expanded=True):
+            st.write(f"Alignement : **{theme}** | Ghost : {ghost:.2f}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("🛠️ **Génération Initiale...**")
+                raw_reply = f"Analyse préliminaire de {prompt}. La structure est stable mais manque de profondeur systémique."
+                time.sleep(0.5)
+                st.write("✓ Complétée.")
+            with col2:
+                st.write("🧠 **Auto-Correction & Raffinement...**")
+                refined_reply = f"Résolution étayée de {prompt} : En intégrant la dynamique de {theme.lower()}, nous observons un point de bascule où la théorie rencontre l'expérience pure. C'est ici que la cohérence devient souveraine."
+                time.sleep(0.8)
+                st.write("✓ Améliorée.")
+            st.line_chart(metrics)
 
-        # RÉPONSE UNIQUE ET ÉTAYÉE
+        # ÉTAPE 2 : Affichage de la Résolution Unique (Fusionnée)
         reponse_finale = f"""
-### 💎 Synthèse & Résolution : {prompt}
+### 💎 Résolution Augmentée : {prompt}
 
-{synthese_pure}
+{refined_reply}
 
 ---
-*Note : Cette résolution est le fruit d'une analyse de phase stabilisée par vos échanges précédents.*
+*Perspective TTU-MC³ : Cohérence calculée à {metrics['C (Cohérence)'].iloc[-1]:.2f}.*
 """
         st.write(reponse_finale)
         st.session_state.history.append({"role": "assistant", "content": reponse_finale})
 
-        with st.expander("📊 Signature de Phase (Backend Logique)"):
-            st.line_chart(df_metrics)
+        # ÉTAPE 3 : Système de Reward (Le levier d'apprentissage)
+        st.markdown("---")
+        st.write("⭐ **Évaluez cette résolution pour l'apprentissage de l'IA :**")
+        score = st.feedback("stars", key=f"score_{len(st.session_state.history)}")
+        
+        if score is not None:
+            # On ajoute +1 car st.feedback commence à 0
+            real_score = score + 1
+            appliquer_reward(real_score)
+            enregistrer_rlhf(prompt, raw_reply, refined_reply, real_score)
+            st.toast(f"Apprentissage mis à jour : Profondeur désormais à {st.session_state.latent_params['profondeur']:.2f}")
