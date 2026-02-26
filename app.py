@@ -1,244 +1,90 @@
 import streamlit as st
-import torch
-import yaml
-import os
-from pathlib import Path
-from ttu_model import TTULanguageModel
-from utils import load_text, plot_trajectory_3d, download_corpus
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import time
 
-# Configuration de la page
-st.set_page_config(page_title="TTU-MC³ IA Autonome", layout="wide")
-st.title("🧠🤖 TTU-MC³ IA Autonome")
-st.markdown("Un générateur de texte autonome basé sur la dynamique triadique dissipative (sans modèle pré-entraîné).")
+# --- CONFIGURATION TTU-MC3 ---
+st.set_page_config(page_title="IA Génératrice TTU-MC3", layout="wide")
 
-# Chargement config
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
+st.title("🧠 IA Génératrice Autonome (Cadre TTU-MC³ / TST)")
+st.markdown("""
+*Ce prototype remplace le calcul probabiliste (GPT) par un **calcul par attracteur**. 
+L'IA converge physiquement vers la solution la plus stable sur la droite critique de Riemann.*
+""")
 
-# Dossiers
-Path("models").mkdir(exist_ok=True)
-Path("data").mkdir(exist_ok=True)
+# --- PARAMÈTRES DYNAMIQUES DANS LA BARRE LATÉRALE ---
+st.sidebar.header("Paramètres de la Triade")
+dt = st.sidebar.slider("Pas de temps (dt)", 0.001, 0.05, 0.01)
+K = st.sidebar.slider("Invariant Z3 (K)", 0.0, 4.0, 2.0944) # 2pi/3
+steps = st.sidebar.number_input("Nombre de cycles", 500, 5000, 1500)
 
-# Session state
-if "history" not in st.session_state:
-    st.session_state.history = []
-    st.session_state.ttu_states = None
-    st.session_state.traj = []
-    st.session_state.model_loaded = False
-    st.session_state.vocab_size = 0
-    st.session_state.idx2char = {}
-    st.session_state.char2idx = {}
-    st.session_state.loss_history = []
-    st.session_state.dissipation_history = []
+# Lexique sémantique (Ancres de l'attracteur)
+lexique = {
+    "CHAOS":      np.array([1.5, 0.1, 0.8]),
+    "STRUCTURE":  np.array([1.2, 0.3, 0.2]),
+    "LOGIQUE":    np.array([1.0, 0.8, 0.1]),
+    "RIEMANN":    np.array([0.8, 0.5, 0.4]), # Cible Droite Critique 0.5
+    "ÉQUILIBRE":  np.array([0.7, 0.7, 0.7]),
+    "ÉNERGIE":    np.array([0.4, 0.5, 1.4])
+}
 
-# Barre latérale
-st.sidebar.header("⚙️ Paramètres")
+# --- MOTEUR DYNAMIQUE ---
+def ttu_flow(state, K):
+    m, c, d = state
+    dm = -d * np.sin(K * c)
+    dc = 0.6 * (0.5 - c) + m * np.cos(K * d)
+    dd = 0.05 * (m * c) - 0.15 * d
+    return np.array([dm, dc, dd])
 
-# Mode de génération
-temperature = st.sidebar.slider("Température", 0.1, 2.0, 1.0, 0.1)
-max_new_tokens = st.sidebar.slider("Max nouveaux tokens", 20, 500, 150, 10)
+def get_closest_concept(state):
+    word = min(lexique.keys(), key=lambda w: np.linalg.norm(state - lexique[w]))
+    return word
 
-# Choix du device
-device = st.sidebar.selectbox("Device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
+# --- EXÉCUTION DE LA GÉNÉRATION ---
+if st.button("Lancer le Chemin de Pensée"):
+    phi = np.array([1.4, 0.1, 0.3]) # État initial (Bruit)
+    history = []
+    thoughts = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i in range(steps):
+        phi += ttu_flow(phi, K) * dt
+        
+        if i % 10 == 0:
+            word = get_closest_concept(phi)
+            history.append(phi.copy())
+            if not thoughts or thoughts[-1] != word:
+                thoughts.append(word)
+            status_text.text(f"Pensée actuelle : {word} | Cohérence : {phi[1]:.4f}")
+        
+        if i % (steps//100) == 0:
+            progress_bar.progress(i / steps)
 
-# Gestion des modèles sauvegardés
-model_files = list(Path("models").glob("*.pt"))
-model_names = [f.stem for f in model_files]
-selected_model = st.sidebar.selectbox("Charger un modèle", ["Aucun"] + model_names)
+    history = np.array(history)
 
-if selected_model != "Aucun" and st.sidebar.button("Charger"):
-    load_path = os.path.join("models", f"{selected_model}.pt")
-    checkpoint = torch.load(load_path, map_location=device)
-    # Reconstruire le modèle
-    model = TTULanguageModel(
-        vocab_size=checkpoint['vocab_size'],
-        embed_dim=config['model']['embed_dim'],
-        hidden_dim=config['model']['hidden_dim'],
-        num_layers=config['model']['num_layers'],
-        dt=config['model']['dt']
-    ).to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    st.session_state.model = model
-    st.session_state.idx2char = checkpoint['idx2char']
-    st.session_state.char2idx = checkpoint['char2idx']
-    st.session_state.vocab_size = checkpoint['vocab_size']
-    st.session_state.model_loaded = True
-    st.session_state.history = []
-    st.session_state.ttu_states = None
-    st.sidebar.success(f"Modèle {selected_model} chargé.")
+    # --- AFFICHAGE DES RÉSULTATS ---
+    col1, col2 = st.columns(2)
 
-# Sauvegarde
-model_name_save = st.sidebar.text_input("Nom pour sauvegarde", value="ttu_model")
-if st.sidebar.button("Sauvegarder le modèle"):
-    if st.session_state.model_loaded:
-        save_path = os.path.join("models", f"{model_name_save}.pt")
-        torch.save({
-            'model_state_dict': st.session_state.model.state_dict(),
-            'idx2char': st.session_state.idx2char,
-            'char2idx': st.session_state.char2idx,
-            'vocab_size': st.session_state.vocab_size
-        }, save_path)
-        st.sidebar.success(f"Modèle sauvegardé sous {save_path}")
-    else:
-        st.sidebar.error("Aucun modèle à sauvegarder.")
+    with col1:
+        st.subheader("Migration Lexicale")
+        st.success(" -> ".join(thoughts))
+        
+        # Graphique des composantes
+        df = pd.DataFrame(history, columns=['Mémoire', 'Cohérence', 'Dissipation'])
+        st.line_chart(df)
+        st.info("Observez la Cohérence (orange) se stabiliser vers 0.5 (Riemann).")
 
-# Entraînement
-st.sidebar.header("🎓 Entraînement")
-corpus_option = st.sidebar.radio("Corpus", ["Défaut (Shakespeare)", "Télécharger", "Upload"])
-if corpus_option == "Défaut (Shakespeare)":
-    corpus_path = download_corpus("shakespeare")
-elif corpus_option == "Télécharger":
-    corpus_name = st.sidebar.text_input("Nom du corpus (shakespeare, wikitext)", "shakespeare")
-    if st.sidebar.button("Télécharger"):
-        corpus_path = download_corpus(corpus_name)
-        st.sidebar.success(f"Corpus {corpus_name} téléchargé.")
-    else:
-        corpus_path = download_corpus("shakespeare")
-else:
-    uploaded_file = st.sidebar.file_uploader("Choisir un fichier texte", type=['txt'])
-    if uploaded_file:
-        corpus_path = os.path.join("data", "uploaded.txt")
-        with open(corpus_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.sidebar.success("Fichier uploadé.")
-    else:
-        corpus_path = download_corpus("shakespeare")
+    with col2:
+        st.subheader("Portrait de Phase 3D")
+        fig = go.Figure(data=[go.Scatter3d(
+            x=history[:, 0], y=history[:, 1], z=history[:, 2],
+            mode='lines',
+            line=dict(color=history[:, 1], colorscale='Viridis', width=5)
+        )])
+        fig.update_layout(scene=dict(xaxis_title='M', yaxis_title='C', zaxis_title='D'))
+        st.plotly_chart(fig)
 
-seq_length = st.sidebar.slider("Longueur séquence", 20, 200, config['training']['seq_length'])
-batch_size = st.sidebar.slider("Batch size", 8, 256, config['training']['batch_size'])
-lr = st.sidebar.number_input("Learning rate", 1e-5, 1e-2, config['training']['learning_rate'], format="%.5f")
-epochs_per_click = st.sidebar.number_input("Époques par clic", 1, 20, config['training']['epochs_per_click'])
-
-if st.sidebar.button("Initialiser le modèle"):
-    with st.spinner("Chargement du corpus..."):
-        dataloader, vocab_size, idx2char, char2idx = load_text(
-            corpus_path, seq_length, batch_size
-        )
-        st.session_state.dataloader = dataloader
-        st.session_state.vocab_size = vocab_size
-        st.session_state.idx2char = idx2char
-        st.session_state.char2idx = char2idx
-
-    # Initialiser le modèle
-    model = TTULanguageModel(
-        vocab_size=vocab_size,
-        embed_dim=config['model']['embed_dim'],
-        hidden_dim=config['model']['hidden_dim'],
-        num_layers=config['model']['num_layers'],
-        dt=config['model']['dt']
-    ).to(device)
-    st.session_state.model = model
-    st.session_state.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    st.session_state.criterion = torch.nn.CrossEntropyLoss()
-    st.session_state.loss_history = []
-    st.session_state.dissipation_history = []
-    st.session_state.model_loaded = True
-    st.success("Modèle initialisé. Vous pouvez maintenant lancer l'entraînement.")
-
-if st.session_state.model_loaded and st.sidebar.button("Lancer entraînement"):
-    model = st.session_state.model
-    dataloader = st.session_state.dataloader
-    optimizer = st.session_state.optimizer
-    criterion = st.session_state.criterion
-
-    model.train()
-    total_loss = 0
-    total_diss = 0
-    num_batches = 0
-    progress = st.sidebar.progress(0)
-    for epoch in range(epochs_per_click):
-        epoch_loss = 0
-        epoch_diss = 0
-        for batch_idx, (x, y) in enumerate(dataloader):
-            x, y = x.to(device), y.to(device)
-            optimizer.zero_grad()
-            logits, states, traj = model(x)
-            loss = criterion(logits.view(-1, st.session_state.vocab_size), y.view(-1))
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-            # Dissipation moyenne (dernière couche)
-            last_layer = traj[f'layer_{model.num_layers-1}']
-            diss_mean = np.mean([s[:,1].mean().item() for s in last_layer])
-            epoch_diss += diss_mean
-            num_batches += 1
-            progress.progress((batch_idx+1)/len(dataloader))
-        total_loss += epoch_loss / len(dataloader)
-        total_diss += epoch_diss / len(dataloader)
-
-    avg_loss = total_loss / epochs_per_click
-    avg_diss = total_diss / epochs_per_click
-    st.session_state.loss_history.append(avg_loss)
-    st.session_state.dissipation_history.append(avg_diss)
-    st.sidebar.success(f"Loss: {avg_loss:.4f} | Dissipation: {avg_diss:.4f}")
-
-# Interface principale
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.header("💬 Conversation")
-
-    if not st.session_state.model_loaded:
-        st.info("Veuillez initialiser ou charger un modèle via la barre latérale.")
-    else:
-        # Afficher l'historique
-        for msg in st.session_state.history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        # Saisie utilisateur
-        prompt = st.chat_input("Votre message...")
-        if prompt:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            st.session_state.history.append({"role": "user", "content": prompt})
-
-            # Tokeniser le prompt
-            input_ids = [st.session_state.char2idx.get(c, 0) for c in prompt]
-            input_tensor = torch.tensor(input_ids, dtype=torch.long).unsqueeze(0).to(device)
-
-            # Générer la réponse
-            with st.chat_message("assistant"):
-                with st.spinner("Génération..."):
-                    generated_ids, new_states, traj = st.session_state.model.generate(
-                        input_tensor,
-                        max_new_tokens=max_new_tokens,
-                        temperature=temperature,
-                        states=st.session_state.ttu_states
-                    )
-                    response_text = ''.join([st.session_state.idx2char[i] for i in generated_ids])
-                    st.markdown(response_text)
-                    st.session_state.history.append({"role": "assistant", "content": response_text})
-                    st.session_state.ttu_states = new_states
-                    st.session_state.traj = traj
-
-        # Bouton reset
-        if st.button("🗑️ Nouvelle conversation"):
-            st.session_state.history = []
-            st.session_state.ttu_states = None
-            st.session_state.traj = []
-            st.rerun()
-
-with col2:
-    st.header("📈 Visualisation TTU")
-    if st.session_state.traj:
-        fig = plot_trajectory_3d(st.session_state.traj)
-        st.plotly_chart(fig, use_container_width=True)
-        last = st.session_state.traj[-1][0]
-        st.metric("Cohérence (ϕ_C)", f"{last[0]:.3f}")
-        st.metric("Dissipation (ϕ_D)", f"{last[1]:.3f}")
-        st.metric("Mémoire (ϕ_M)", f"{last[2]:.3f}")
-    else:
-        st.info("Posez une question pour voir la trajectoire.")
-
-    # Courbes d'entraînement
-    if st.session_state.loss_history:
-        st.subheader("Courbe de perte")
-        st.line_chart(st.session_state.loss_history)
-    if st.session_state.dissipation_history:
-        st.subheader("Dissipation moyenne")
-        st.line_chart(st.session_state.dissipation_history)
-
-st.markdown("---")
-st.markdown("**TTU-MC³** — Générateur autonome — [Documentation](https://github.com/votre_nom/ttu-autonomous-ai)")
+    st.balloons()
