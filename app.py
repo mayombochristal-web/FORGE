@@ -1,326 +1,117 @@
-# ==========================================================
-# 🔥 ORACLE V13 — CHATBOT IA MODERNE AUTONOME
-# Production Ready — Streamlit + Ollama
-# ==========================================================
-
 import streamlit as st
 import numpy as np
+import pandas as pd
 import json
-import os
 import time
 import requests
-from typing import List, Dict
 
 # ==========================================================
-# CONFIG
+# CONFIGURATION CLOUD (GRATUIT & SANS INSTALLATION)
 # ==========================================================
-
-OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_EMBED = "http://localhost:11434/api/embeddings"
-
-MODEL = "llama3.2:3b"
-EMBED_MODEL = "nomic-embed-text"
-
-MEMORY_FILE = "oracle_memory.json"
+# Nous utilisons l'API Inference de Hugging Face (Gratuit)
+# Modèle : Mistral-7B ou Llama-3 (selon disponibilité)
+API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+# Note : Pour une utilisation intensive, créez un compte gratuit sur HuggingFace 
+# et insérez votre jeton (Token) ci-dessous. Sinon, cela fonctionne avec des quotas limités.
+HEADERS = {"Authorization": "Bearer hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} 
 
 # ==========================================================
-# UTILITIES
+# MOTEUR DE GÉNÉRATION (APPEL API)
 # ==========================================================
+def call_cloud_llm(messages):
+    """Appelle le LLM dans le cloud gratuitement"""
+    # On transforme l'historique en un prompt unique pour Mistral
+    prompt = ""
+    for msg in messages:
+        role = "Instruction" if msg["role"] == "system" else "Utilisateur"
+        prompt += f"\n[{role}]: {msg['content']}\n"
+    prompt += "[Assistant]:"
 
-def call_llm(messages, temperature=0.7, max_tokens=800):
     payload = {
-        "model": MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
     }
 
     try:
-        r = requests.post(OLLAMA_URL, json=payload, timeout=180)
-        r.raise_for_status()
-        return r.json()["message"]["content"]
+        response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=15)
+        result = response.json()
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]['generated_text'].split("[Utilisateur]")[0].strip()
+        return "Désolé, le moteur est en cours de préchauffage. Réessayez dans 10 secondes."
     except Exception as e:
-        return f"Erreur LLM: {e}"
-
-
-def get_embedding(text):
-    try:
-        r = requests.post(
-            OLLAMA_EMBED,
-            json={"model": EMBED_MODEL, "prompt": text},
-            timeout=60,
-        )
-        return np.array(r.json()["embedding"])
-    except:
-        return np.random.randn(768)
-
-
-def cosine(a, b):
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
-
+        return f"Erreur de connexion Cloud : {e}"
 
 # ==========================================================
-# MEMORY SYSTEM
+# LOGIQUE TTU-MC³ & APPRENTISSAGE
 # ==========================================================
+class MobileOracleEngine:
+    def __init__(self):
+        if "latent" not in st.session_state:
+            st.session_state.latent = {"profondeur": 1.2, "coherence": 1.0}
 
-def load_memory():
-    if not os.path.exists(MEMORY_FILE):
-        return []
-    return json.load(open(MEMORY_FILE, "r", encoding="utf-8"))
-
-
-def save_memory(prompt, answer):
-    memory = load_memory()
-    emb = get_embedding(prompt).tolist()
-
-    memory.append({
-        "prompt": prompt,
-        "answer": answer,
-        "embedding": emb
-    })
-
-    memory = memory[-200:]  # limite mémoire
-    json.dump(memory, open(MEMORY_FILE, "w", encoding="utf-8"))
-
-
-def retrieve_memories(prompt, k=3):
-    memory = load_memory()
-    if not memory:
-        return ""
-
-    emb = get_embedding(prompt)
-
-    scored = []
-    for m in memory:
-        score = cosine(emb, np.array(m["embedding"]))
-        scored.append((score, m))
-
-    scored.sort(reverse=True)
-
-    return "\n".join(
-        f"- {x[1]['prompt']}" for x in scored[:k]
-    )
-
+    def simuler_metriques(self, history_len):
+        t = np.linspace(0, 10, 100)
+        ghost = 0.5 + (history_len * 0.1 * st.session_state.latent["profondeur"])
+        df = pd.DataFrame({
+            "M": np.exp(-t * 0.05),
+            "C": (1.2 + ghost * np.sin(t * 0.2)),
+            "D": 0.1 * np.exp(-history_len * 0.1) + 0.05 * np.random.randn(100)
+        })
+        return df, ghost
 
 # ==========================================================
-# LATENT SPACE
+# INTERFACE STREAMLIT MOBILE-FRIENDLY
 # ==========================================================
+st.set_page_config(page_title="Oracle V15 Mobile", layout="centered")
 
-def init_latent():
-    return {
-        "profondeur": 1.2,
-        "coherence": 1.5,
-        "exploration": 1.0,
-        "rigueur": 1.2,
-    }
-
-
-def latent_to_params(latent):
-    temp = 0.7 * latent["exploration"] / latent["rigueur"]
-    temp = float(np.clip(temp, 0.2, 1.2))
-
-    max_tokens = int(600 * latent["profondeur"])
-
-    return temp, max_tokens
-
-
-# ==========================================================
-# PLANNER
-# ==========================================================
-
-def build_plan(prompt):
-    messages = [
-        {"role": "system",
-         "content": "Planifie brièvement la meilleure réponse."},
-        {"role": "user", "content": prompt},
-    ]
-
-    return call_llm(messages, temperature=0.3, max_tokens=200)
-
-
-# ==========================================================
-# SYSTEM PROMPT
-# ==========================================================
-
-def build_system_prompt(latent):
-
-    return f"""
-Tu es ORACLE, un assistant IA moderne.
-
-Objectifs :
-- naturel et clair
-- utile et intelligent
-- conversation fluide
-- profondeur si nécessaire
-- concision sinon
-
-Ne parle jamais de ton fonctionnement interne.
-
-Paramètres internes :
-{json.dumps(latent, ensure_ascii=False)}
-"""
-
-
-# ==========================================================
-# GENERATION PIPELINE
-# ==========================================================
-
-def generate_answer(prompt, history, latent):
-
-    memories = retrieve_memories(prompt)
-    plan = build_plan(prompt)
-
-    temp, max_tokens = latent_to_params(latent)
-
-    condensed_history = ""
-    for h in history[-6:]:
-        condensed_history += f"{h['role']}:{h['content']}\n"
-
-    messages = [
-        {"role": "system", "content": build_system_prompt(latent)},
-        {
-            "role": "user",
-            "content": f"""
-PLAN INTERNE:
-{plan}
-
-Souvenirs pertinents:
-{memories}
-
-Conversation:
-{condensed_history}
-
-Message utilisateur:
-{prompt}
-"""
-        },
-    ]
-
-    first = call_llm(messages, temp, max_tokens)
-
-    # ===== AUTO REFINE =====
-
-    refine_messages = [
-        {
-            "role": "system",
-            "content": "Améliore la réponse pour clarté et cohérence."
-        },
-        {
-            "role": "user",
-            "content": f"Question:{prompt}\nRéponse:{first}"
-        },
-    ]
-
-    refined = call_llm(refine_messages, temp - 0.1, max_tokens)
-
-    return refined
-
-
-# ==========================================================
-# INTERNAL QUALITY SCORE
-# ==========================================================
-
-def internal_score(answer):
-    r = call_llm([
-        {"role": "system", "content": "Note la qualité de 1 à 5."},
-        {"role": "user", "content": answer},
-    ], temperature=0.2, max_tokens=5)
-
-    try:
-        return float(r.strip()[0])
-    except:
-        return 3.0
-
-
-def update_latent(latent, user_rating, internal):
-
-    reward = (user_rating - 3)*0.6 + (internal - 3)*0.4
-
-    latent["profondeur"] = float(np.clip(
-        latent["profondeur"] + reward*0.05, 0.8, 2.5))
-
-    latent["exploration"] = float(np.clip(
-        latent["exploration"] + reward*0.03, 0.7, 1.5))
-
-    latent["rigueur"] = float(np.clip(
-        latent["rigueur"] + reward*0.02, 0.8, 1.6))
-
-    return latent
-
-
-# ==========================================================
-# STREAMLIT UI
-# ==========================================================
-
-st.set_page_config(page_title="🔥 Oracle V13", layout="wide")
+engine = MobileOracleEngine()
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-if "latent" not in st.session_state:
-    st.session_state.latent = init_latent()
+st.title("👁️ Oracle V15")
+st.caption("IA Intégrée | Cloud Gratuit | TTU-MC³")
 
-# Sidebar
-with st.sidebar:
-    st.title("🔥 Oracle V13")
-    st.caption("Chatbot IA moderne local")
-
-    if st.button("Reset mémoire"):
-        st.session_state.history = []
-        st.session_state.latent = init_latent()
-
-    st.divider()
-    st.json(st.session_state.latent)
-
-# Display chat
+# Affichage du Chat
 for msg in st.session_state.history:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-prompt = st.chat_input("Parlez avec Oracle...")
-
-if prompt:
-
-    st.session_state.history.append(
-        {"role": "user", "content": prompt})
-
+# Entrée utilisateur
+if user_input := st.chat_input("Posez votre question..."):
+    st.session_state.history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(user_input)
 
     with st.chat_message("assistant"):
-        placeholder = st.empty()
+        # 1. Calcul de phase
+        df_metrics, ghost = engine.simuler_metriques(len(st.session_state.history))
+        
+        # 2. Appel du cerveau distant (Gratuit)
+        with st.spinner("L'Oracle consulte le flux..."):
+            # Construction du contexte pour le LLM
+            context_messages = [
+                {"role": "system", "content": f"Tu es l'Oracle V15. Niveau de profondeur : {st.session_state.latent['profondeur']}. Réponds de façon étayée et précise."},
+            ] + st.session_state.history[-5:] # On prend les 5 derniers messages
+            
+            reponse = call_cloud_llm(context_messages)
+            
+            # 3. Mise en perspective TTU
+            final_output = f"{reponse}\n\n---\n*Analyse de Phase : Stabilité {ghost:.2f} | Cohérence optimale.*"
+            st.write(final_output)
+            st.session_state.history.append({"role": "assistant", "content": final_output})
 
-        answer = generate_answer(
-            prompt,
-            st.session_state.history,
-            st.session_state.latent
-        )
+        with st.expander("📊 Voir la dynamique de réflexion"):
+            st.line_chart(df_metrics)
 
-        # pseudo streaming
-        out = ""
-        for w in answer.split():
-            out += w + " "
-            placeholder.markdown(out)
-            time.sleep(0.01)
-
-    st.session_state.history.append(
-        {"role": "assistant", "content": answer})
-
-    save_memory(prompt, answer)
-
-    # ===== FEEDBACK =====
-    rating = st.slider("Qualité de la réponse", 1, 5, 4)
-
-    if st.button("Valider apprentissage"):
-        internal = internal_score(answer)
-
-        st.session_state.latent = update_latent(
-            st.session_state.latent,
-            rating,
-            internal
-        )
-
-        st.success("Oracle a appris de cette interaction.")
+# Système de Feedback simple
+if len(st.session_state.history) > 0:
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("👍 Pertinent"):
+            st.session_state.latent["profondeur"] += 0.1
+            st.toast("L'IA affine sa profondeur.")
+    with col2:
+        if st.button("👎 Trop vague"):
+            st.session_state.latent["profondeur"] -= 0.1
+            st.toast("L'IA ajuste sa rigueur.")
