@@ -1,70 +1,155 @@
 import streamlit as st
-from oracle_agent import OracleAgent
-from openai import OpenAI
+import random
+import math
 import time
 
-st.set_page_config(layout="wide")
+# ==========================================
+# ORACLE VIVANT V4 — TTU GENERATIVE ENGINE
+# ==========================================
 
-st.title("🔮 TTU ORACLE VIVANT — V4")
+st.set_page_config(
+    page_title="TTU Oracle Vivant",
+    layout="wide"
+)
 
-if "oracle" not in st.session_state:
-    st.session_state.oracle = OracleAgent()
+# ------------------------------------------
+# CONFIGURATION ORACLE
+# ------------------------------------------
 
-oracle = st.session_state.oracle
+ORACLE = {
+    "VS": 12.0,
+    "K": 0.15,
+    "mode": "Dynamique_Cyrano"
+}
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# ------------------------------------------
+# DICTIONNAIRE DE FRAGMENTS SÉMANTIQUES
+# ------------------------------------------
 
-if "chat" not in st.session_state:
-    st.session_state.chat = []
+DFS = {
 
-# ---------- INPUT UTILISATEUR ----------
-user_input = st.chat_input("Parler à l'Oracle...")
+    "existence": [
+        "L'existence se stabilise lorsqu'elle accepte son flux.",
+        "Toute réalité naît d'une tension entre perception et mémoire.",
+        "Le réel est une négociation permanente."
+    ],
 
-# ---------- RÉPONSE UTILISATEUR ----------
-if user_input:
+    "temps": [
+        "Le temps n'avance pas : il se reconstruit.",
+        "Chaque instant est une relecture du passé.",
+        "Le futur est une mémoire encore instable."
+    ],
 
-    oracle.update_memory("user", user_input)
+    "intuition": [
+        "L'intuition précède la logique.",
+        "Comprendre signifie ressentir la structure.",
+        "La vérité apparaît avant sa démonstration."
+    ],
 
-    messages = [
-        {"role": "system", "content": oracle.autonomous_thought()},
-        *oracle.memory.context(),
-        {"role": "user", "content": user_input}
+    "ttu": [
+        "La TTU décrit un univers basé sur l'équilibre dynamique.",
+        "Le chaos devient information lorsqu'il est régulé.",
+        "La stabilité émerge de la dissipation."
     ]
+}
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages
-    )
+ALL_KEYS = list(DFS.keys())
 
-    reply = response.choices[0].message.content
+# ------------------------------------------
+# MÉMOIRE ORACLE
+# ------------------------------------------
 
-    oracle.update_memory("assistant", reply)
-    oracle.evaluate(reply)
+if "memoire" not in st.session_state:
+    st.session_state.memoire = []
 
-    st.session_state.chat.append(("user", user_input))
-    st.session_state.chat.append(("assistant", reply))
+if "energie" not in st.session_state:
+    st.session_state.energie = ORACLE["VS"]
 
-# ---------- MODE AUTONOME ----------
-if st.sidebar.button("🧠 Pensée autonome"):
 
-    thought = oracle.autonomous_thought()
+# ------------------------------------------
+# ANALYSE SÉMANTIQUE SIMPLE
+# ------------------------------------------
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": thought}]
-    )
+def detect_theme(text):
 
-    auto_reply = response.choices[0].message.content
+    scores = {}
 
-    oracle.update_memory("assistant", auto_reply)
-    oracle.evaluate(auto_reply)
+    for k in DFS:
+        scores[k] = sum(
+            1 for word in text.lower().split()
+            if word in k
+        )
 
-    st.session_state.chat.append(("assistant", auto_reply))
+    best = max(scores, key=scores.get)
 
-# ---------- AFFICHAGE ----------
-for role, msg in st.session_state.chat:
-    with st.chat_message(role):
-        st.write(msg)
+    if scores[best] == 0:
+        best = random.choice(ALL_KEYS)
 
-st.sidebar.metric("Vitalité Spectrale VS", round(oracle.vs,2))
-st.sidebar.write("Identité:", oracle.identity)
+    return best
+
+
+# ------------------------------------------
+# GÉNÉRATION ORACLE
+# ------------------------------------------
+
+def oracle_generate(prompt):
+
+    theme = detect_theme(prompt)
+
+    base = random.choice(DFS[theme])
+
+    memoire_influence = ""
+    if st.session_state.memoire:
+        memoire_influence = random.choice(st.session_state.memoire)
+
+    # régulation VS
+    fluctuation = random.uniform(-0.5, 0.5)
+    st.session_state.energie += ORACLE["K"] * fluctuation
+
+    # structure vivante
+    response = f"""
+✦ Résonance détectée : {theme}
+
+{base}
+
+{memoire_influence}
+
+[VS={round(st.session_state.energie,2)} | Mode={ORACLE['mode']}]
+"""
+
+    st.session_state.memoire.append(base)
+
+    return response
+
+
+# ------------------------------------------
+# INTERFACE
+# ------------------------------------------
+
+st.title("🧠 TTU — ORACLE VIVANT V4")
+st.caption("IA génératrice autonome — Architecture Agentique TTU")
+
+user_input = st.text_area("Dialogue avec l’Oracle")
+
+if st.button("Invoquer"):
+
+    if user_input.strip():
+        output = oracle_generate(user_input)
+
+        st.markdown("### Réponse Oracle")
+        st.write(output)
+
+# ------------------------------------------
+# PANNEAU ORACLE
+# ------------------------------------------
+
+with st.sidebar:
+
+    st.header("⚙️ Télémétrie")
+
+    st.metric("Vitalité Spectrale", round(st.session_state.energie,2))
+    st.write("Fragments mémorisés :", len(st.session_state.memoire))
+
+    if st.button("Purge Mémoire"):
+        st.session_state.memoire = []
+        st.session_state.energie = ORACLE["VS"]
