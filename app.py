@@ -2,6 +2,11 @@
 # 🧠 ORACLE V11 — SHADOW STATE + ANALYSE SPECTRALE V1
 # TST Ghost Memory + Auto Diagnostic AI + Premiers pas
 # vers la Sémantique Spectrale
+#
+# 📦 Dépendances requises :
+#    streamlit, pandas, numpy, scipy, matplotlib
+# Pour installer :
+#    pip install streamlit pandas numpy scipy matplotlib
 # =====================================================
 
 import streamlit as st
@@ -10,8 +15,18 @@ import numpy as np
 import json, os, re, io, zipfile, datetime
 import xml.etree.ElementTree as ET
 from collections import Counter
-from scipy.signal import stft
-import matplotlib.pyplot as plt
+
+# Tentative d'import des modules pour l'analyse spectrale
+try:
+    from scipy.signal import stft
+    import matplotlib.pyplot as plt
+    SPECTRAL_AVAILABLE = True
+except ImportError:
+    SPECTRAL_AVAILABLE = False
+    # On définit des fonctions factices pour éviter les erreurs
+    def stft(*args, **kwargs):
+        raise ImportError("scipy.signal.stft non disponible")
+    # On ne peut pas vraiment définir plt, mais on ne l'utilisera pas
 
 # Configuration de la page
 st.set_page_config(page_title="ORACLE V11 SPECTRAL", layout="wide")
@@ -222,7 +237,7 @@ def diagnose():
     return "🧠 Apprentissage actif."
 
 # --------------------------------------------------
-# FONCTIONS POUR L'ANALYSE SPECTRALE
+# FONCTIONS POUR L'ANALYSE SPECTRALE (si disponibles)
 # --------------------------------------------------
 def build_signal_from_timeline(word):
     """
@@ -238,7 +253,12 @@ def build_signal_from_timeline(word):
 def spectral_analysis(word, nperseg=256):
     """
     Calcule la STFT du signal binaire du mot et retourne les résultats + figures.
+    Nécessite scipy et matplotlib.
     """
+    if not SPECTRAL_AVAILABLE:
+        st.error("Les bibliothèques scipy et/ou matplotlib ne sont pas installées. Impossible de faire l'analyse spectrale.")
+        return None
+
     signal = build_signal_from_timeline(word)
     if len(signal) < nperseg:
         return {"error": f"Signal trop court (taille={len(signal)}). Augmentez la quantité de textes ou réduisez nperseg."}
@@ -346,43 +366,49 @@ if st.button("Penser"):
 # --------------------------------------------------
 st.subheader("🔬 Analyse Spectrale (première version)")
 
-with st.expander("Voir l'analyse spectrale d'un mot"):
-    fragments = st.session_state.shadow_frag["fragment"].tolist()
-    if fragments:
-        word_to_analyze = st.selectbox("Choisissez un mot", fragments)
-        nperseg = st.slider("Taille de la fenêtre STFT", min_value=32, max_value=512, value=128, step=32)
+if not SPECTRAL_AVAILABLE:
+    st.error("⚠️ Les bibliothèques `scipy` et/ou `matplotlib` ne sont pas installées. L'analyse spectrale est désactivée. Pour l'activer, installez-les avec : `pip install scipy matplotlib`.")
+else:
+    with st.expander("Voir l'analyse spectrale d'un mot"):
+        fragments = st.session_state.shadow_frag["fragment"].tolist()
+        if fragments:
+            word_to_analyze = st.selectbox("Choisissez un mot", fragments)
+            nperseg = st.slider("Taille de la fenêtre STFT", min_value=32, max_value=512, value=128, step=32)
 
-        if st.button("Lancer l'analyse"):
-            with st.spinner("Calcul en cours..."):
-                output = spectral_analysis(word_to_analyze, nperseg=nperseg)
-                if "error" in output:
-                    st.error(output["error"])
-                else:
-                    res = output["results"]
-                    fig1, fig2 = output["figures"]
-
-                    # Affichage des métriques
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Fréquence (cycles/mot)", f"{res['freq_dominant']:.4f}")
-                    col2.metric("Omega (rad/mot)", f"{res['omega']:.4f}")
-                    col3.metric("Alpha (amort.)", f"{res['alpha']:.4f}")
-                    col4.metric("Linéarité phase", f"{res['linearity']:.2f}")
-
-                    # Graphiques
-                    st.pyplot(fig1)
-                    st.pyplot(fig2)
-
-                    # Interprétation simple
-                    if res['linearity'] > 0.8:
-                        st.success("La phase est très linéaire → oscillation régulière (mode complexe pur).")
-                    elif res['linearity'] < 0.3:
-                        st.info("Phase non linéaire → modulation ou comportement chaotique.")
+            if st.button("Lancer l'analyse"):
+                with st.spinner("Calcul en cours..."):
+                    output = spectral_analysis(word_to_analyze, nperseg=nperseg)
+                    if output is None:
+                        # L'erreur a déjà été affichée dans la fonction
+                        pass
+                    elif "error" in output:
+                        st.error(output["error"])
                     else:
-                        st.warning("Linéarité modérée.")
+                        res = output["results"]
+                        fig1, fig2 = output["figures"]
 
-                    if res['alpha'] < 0.01:
-                        st.write("Amortissement très faible → persistance du sens.")
-                    elif res['alpha'] > 0.1:
-                        st.write("Amortissement élevé → sens éphémère.")
-    else:
-        st.info("Aucun mot disponible. Commencez par nourrir l'IA.")
+                        # Affichage des métriques
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("Fréquence (cycles/mot)", f"{res['freq_dominant']:.4f}")
+                        col2.metric("Omega (rad/mot)", f"{res['omega']:.4f}")
+                        col3.metric("Alpha (amort.)", f"{res['alpha']:.4f}")
+                        col4.metric("Linéarité phase", f"{res['linearity']:.2f}")
+
+                        # Graphiques
+                        st.pyplot(fig1)
+                        st.pyplot(fig2)
+
+                        # Interprétation simple
+                        if res['linearity'] > 0.8:
+                            st.success("La phase est très linéaire → oscillation régulière (mode complexe pur).")
+                        elif res['linearity'] < 0.3:
+                            st.info("Phase non linéaire → modulation ou comportement chaotique.")
+                        else:
+                            st.warning("Linéarité modérée.")
+
+                        if res['alpha'] < 0.01:
+                            st.write("Amortissement très faible → persistance du sens.")
+                        elif res['alpha'] > 0.1:
+                            st.write("Amortissement élevé → sens éphémère.")
+        else:
+            st.info("Aucun mot disponible. Commencez par nourrir l'IA.")
