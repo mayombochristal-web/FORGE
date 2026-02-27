@@ -3,10 +3,9 @@
 # TST Ghost Memory + Auto Diagnostic AI + Premiers pas
 # vers la Sémantique Spectrale
 #
-# 📦 Dépendances requises :
-#    streamlit, pandas, numpy, scipy, matplotlib
-# Pour installer :
-#    pip install streamlit pandas numpy scipy matplotlib
+# 📦 Dépendances optionnelles pour l'analyse spectrale :
+#    scipy, matplotlib
+#    Pour les installer : pip install scipy matplotlib
 # =====================================================
 
 import streamlit as st
@@ -323,6 +322,21 @@ def spectral_analysis(word, nperseg=256):
     return {"results": results, "figures": (fig1, fig2)}
 
 # --------------------------------------------------
+# FONCTION DE TÉLÉCHARGEMENT DES DONNÉES
+# --------------------------------------------------
+def get_download_data():
+    """
+    Prépare un dictionnaire contenant toutes les données de l'IA pour téléchargement.
+    """
+    data = {
+        "fragments": st.session_state.shadow_frag.to_dict(orient="records"),
+        "concepts": st.session_state.shadow_concepts.to_dict(orient="records"),
+        "relations": st.session_state.shadow_rel,
+        "cortex": st.session_state.shadow_cortex
+    }
+    return json.dumps(data, indent=2, ensure_ascii=False)
+
+# --------------------------------------------------
 # INTERFACE STREAMLIT
 # --------------------------------------------------
 st.title("🧠 ORACLE V11 — SHADOW STATE + ANALYSE SPECTRALE V1")
@@ -362,12 +376,13 @@ if st.button("Penser"):
         st.write(think(tokens[0]))
 
 # --------------------------------------------------
-# SECTION D'ANALYSE SPECTRALE (NOUVEAU)
+# SECTION D'ANALYSE SPECTRALE (si disponible)
 # --------------------------------------------------
-st.subheader("🔬 Analyse Spectrale (première version)")
+st.subheader("🔬 Analyse Spectrale")
 
 if not SPECTRAL_AVAILABLE:
-    st.error("⚠️ Les bibliothèques `scipy` et/ou `matplotlib` ne sont pas installées. L'analyse spectrale est désactivée. Pour l'activer, installez-les avec : `pip install scipy matplotlib`.")
+    st.warning("⚠️ Les bibliothèques `scipy` et/ou `matplotlib` ne sont pas installées. L'analyse spectrale est désactivée. Pour l'activer, installez-les avec : `pip install scipy matplotlib`.")
+    st.info("Vous pouvez néanmoins télécharger les données brutes de l'IA pour une analyse externe (voir section suivante).")
 else:
     with st.expander("Voir l'analyse spectrale d'un mot"):
         fragments = st.session_state.shadow_frag["fragment"].tolist()
@@ -412,3 +427,18 @@ else:
                             st.write("Amortissement élevé → sens éphémère.")
         else:
             st.info("Aucun mot disponible. Commencez par nourrir l'IA.")
+
+# --------------------------------------------------
+# SECTION DE TÉLÉCHARGEMENT DES DONNÉES
+# --------------------------------------------------
+st.subheader("📤 Télécharger les données de l'IA")
+st.markdown("Exportez toutes les données (fragments, concepts, relations, cortex) au format JSON pour une contre-expertise externe.")
+
+if st.button("Préparer l'export"):
+    data_json = get_download_data()
+    st.download_button(
+        label="📥 Télécharger oracle_data.json",
+        data=data_json,
+        file_name=f"oracle_data_{datetime.date.today()}.json",
+        mime="application/json"
+    )
