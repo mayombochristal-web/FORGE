@@ -1,223 +1,225 @@
 # =====================================================
-# TTU ORACLE V9 — STABLE CORE
-# IA cognitive autonome (sans LLM)
+# 🧠 TTU ORACLE V10 — CORTEX ENFANT
+# IA cognitive auto-organisée (sans LLM)
 # =====================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import json
-import os
-import re
-from collections import Counter
+import json, os, re, io, zipfile
+import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
 
 # -----------------------------------------------------
-# CONFIG STREAMLIT (ANTI CRASH UI)
+# CONFIG
 # -----------------------------------------------------
 
-st.set_page_config(
-    page_title="TTU Oracle V9",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="TTU Oracle V10", layout="wide")
+
+MEM = "memory"
+
+# FIX crash Streamlit Cloud
+if os.path.exists(MEM) and not os.path.isdir(MEM):
+    os.remove(MEM)
+
+os.makedirs(MEM, exist_ok=True)
+
+FILES = {
+    "fragments": f"{MEM}/fragments.csv",
+    "concepts": f"{MEM}/concepts.csv",
+    "associations": f"{MEM}/associations.json",
+    "cortex": f"{MEM}/cortex.json"
+}
 
 # -----------------------------------------------------
-# DOSSIER MEMOIRE
+# INIT MEMORY
 # -----------------------------------------------------
 
-MEM_PATH = "memory"
-os.makedirs(MEM_PATH, exist_ok=True)
+def init():
+    if not os.path.exists(FILES["fragments"]):
+        pd.DataFrame(columns=["fragment","count"]).to_csv(FILES["fragments"],index=False)
 
-FRAG_FILE = f"{MEM_PATH}/fragments.csv"
-CONCEPT_FILE = f"{MEM_PATH}/concepts.csv"
-CORTEX_FILE = f"{MEM_PATH}/cortex.json"
+    if not os.path.exists(FILES["concepts"]):
+        pd.DataFrame(columns=["concept","weight"]).to_csv(FILES["concepts"],index=False)
 
-# -----------------------------------------------------
-# INITIALISATION MEMOIRE
-# -----------------------------------------------------
+    if not os.path.exists(FILES["associations"]):
+        json.dump({}, open(FILES["associations"],"w"))
 
-def init_memory():
+    if not os.path.exists(FILES["cortex"]):
+        json.dump({"VS":12.0,"age":0}, open(FILES["cortex"],"w"))
 
-    if not os.path.exists(FRAG_FILE):
-        pd.DataFrame(columns=["fragment","count"]).to_csv(FRAG_FILE,index=False)
-
-    if not os.path.exists(CONCEPT_FILE):
-        pd.DataFrame(columns=["concept","weight"]).to_csv(CONCEPT_FILE,index=False)
-
-    if not os.path.exists(CORTEX_FILE):
-        with open(CORTEX_FILE,"w") as f:
-            json.dump({"VS":12.0,"learned":0},f)
-
-init_memory()
+init()
 
 # -----------------------------------------------------
-# CHARGEMENT
+# UNIVERSAL FILE READER (NO DEPENDENCY)
 # -----------------------------------------------------
 
-def load_fragments():
-    return pd.read_csv(FRAG_FILE)
+def read_uploaded_file(file):
 
-def save_fragments(df):
-    df.to_csv(FRAG_FILE,index=False)
+    name=file.name.lower()
 
-def load_cortex():
-    return json.load(open(CORTEX_FILE))
+    if name.endswith(".txt"):
+        return file.read().decode("utf-8","ignore")
 
-def save_cortex(data):
-    json.dump(data,open(CORTEX_FILE,"w"))
+    if name.endswith(".csv"):
+        return pd.read_csv(file).to_string()
+
+    if name.endswith(".pdf"):
+        return file.read().decode("latin-1","ignore")
+
+    if name.endswith(".docx"):
+        doc=zipfile.ZipFile(io.BytesIO(file.read()))
+        xml=doc.read("word/document.xml")
+        tree=ET.fromstring(xml)
+        return " ".join([n.text for n in tree.iter() if n.text])
+
+    if name.endswith(".xlsx"):
+        return pd.read_excel(file).to_string()
+
+    return ""
 
 # -----------------------------------------------------
-# OUTILS LINGUISTIQUES
+# LANGUAGE CORE
 # -----------------------------------------------------
 
-VOWELS = "aeiouyàâéèêëîïôùûüœ"
+VOWELS="aeiouyàâéèêëîïôùûüœ"
 
-def clean_text(text):
-    text = text.lower()
-    text = re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", text)
-    return text
+def clean(text):
+    text=text.lower()
+    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]"," ",text)
 
 def tokenize(text):
-    return [w for w in clean_text(text).split() if w]
+    return [w for w in clean(text).split() if w]
 
-# syllabification SAFE (corrige V7)
 def syllabify(word):
-
-    if not word:
-        return []
-
-    syllables=[]
-    current=""
-
+    syll=[]
+    cur=""
     for c in word:
-        current+=c
+        cur+=c
         if c in VOWELS:
-            syllables.append(current)
-            current=""
-
-    if current:
-        if syllables:
-            syllables[-1]+=current
-        else:
-            syllables.append(current)
-
-    return syllables
+            syll.append(cur)
+            cur=""
+    if cur:
+        syll[-1]+=cur if syll else cur
+    return syll
 
 # -----------------------------------------------------
-# APPRENTISSAGE
+# LOAD / SAVE
+# -----------------------------------------------------
+
+def load_frag(): return pd.read_csv(FILES["fragments"])
+def save_frag(df): df.to_csv(FILES["fragments"],index=False)
+
+def load_assoc(): return json.load(open(FILES["associations"]))
+def save_assoc(a): json.dump(a,open(FILES["associations"],"w"))
+
+def load_cortex(): return json.load(open(FILES["cortex"]))
+def save_cortex(c): json.dump(c,open(FILES["cortex"],"w"))
+
+# -----------------------------------------------------
+# 🧠 LEARNING (ENFANT)
 # -----------------------------------------------------
 
 def learn(text):
 
-    words = tokenize(text)
-    counter = Counter(words)
+    words=tokenize(text)
+    pairs=zip(words[:-1],words[1:])
 
-    df = load_fragments()
+    # ---- fragments
+    df=load_frag()
+    counter=Counter(words)
 
     for w,c in counter.items():
-
-        if w in df["fragment"].values:
+        if w in df.fragment.values:
             df.loc[df.fragment==w,"count"]+=c
         else:
-            df.loc[len(df)] = [w,c]
+            df.loc[len(df)]=[w,c]
 
-    save_fragments(df)
+    save_frag(df)
 
-    cortex = load_cortex()
-    cortex["learned"] += len(words)
-    cortex["VS"] = 10 + np.log1p(cortex["learned"])
+    # ---- associations (cognition)
+    assoc=load_assoc()
+
+    for a,b in pairs:
+        assoc.setdefault(a,{})
+        assoc[a][b]=assoc[a].get(b,0)+1
+
+    save_assoc(assoc)
+
+    # ---- cortex growth
+    cortex=load_cortex()
+    cortex["age"]+=len(words)
+    cortex["VS"]=10+np.log1p(cortex["age"])
     save_cortex(cortex)
 
     return len(words)
 
 # -----------------------------------------------------
-# GENERATION AUTONOME
+# 🧠 THINKING ENGINE
 # -----------------------------------------------------
 
-def generate(prompt, size=30):
+def think(seed,steps=25):
 
-    df = load_fragments()
+    assoc=load_assoc()
 
-    if len(df)==0:
-        return "Oracle silencieux : aucune mémoire."
+    if seed not in assoc:
+        return seed
 
-    weights = df["count"].values
-    vocab = df["fragment"].values
+    sentence=[seed]
+    current=seed
 
-    probs = weights / weights.sum()
+    for _ in range(steps):
 
-    words = list(np.random.choice(vocab,size,p=probs))
+        nxt=assoc.get(current)
+        if not nxt:
+            break
 
+        words=list(nxt.keys())
+        weights=np.array(list(nxt.values()))
+        probs=weights/weights.sum()
+
+        current=np.random.choice(words,p=probs)
+        sentence.append(current)
+
+    return " ".join(sentence).capitalize()+"."
+
+# -----------------------------------------------------
+# UI
+# -----------------------------------------------------
+
+st.title("🧠 TTU ORACLE V10 — CORTEX ENFANT")
+
+cortex=load_cortex()
+c1,c2=st.columns(2)
+c1.metric("Vitalité Spectrale",round(cortex["VS"],2))
+c2.metric("Âge cognitif",cortex["age"])
+
+# -----------------------------------------------------
+# LEARN
+# -----------------------------------------------------
+
+st.subheader("📥 Nourrir l'enfant")
+
+uploaded_file=st.file_uploader(
+    "Importer connaissance",
+    type=["txt","csv","pdf","docx","xlsx","json","md"]
+)
+
+if uploaded_file:
+    text=read_uploaded_file(uploaded_file)
+    n=learn(text)
+    st.success(f"{n} unités cognitives assimilées")
+
+# -----------------------------------------------------
+# CHAT
+# -----------------------------------------------------
+
+st.subheader("💬 Dialogue")
+
+prompt=st.text_input("Intention")
+
+if st.button("Penser"):
     if prompt:
-        words.insert(0,prompt)
-
-    sentence = " ".join(words)
-    return sentence.capitalize()+"."
-
-
-# -----------------------------------------------------
-# UI FIXE (ANTI V8)
-# -----------------------------------------------------
-
-header = st.container()
-chat = st.container()
-metrics = st.container()
-learn_box = st.container()
-
-# -----------------------------------------------------
-# HEADER
-# -----------------------------------------------------
-
-with header:
-    st.title("🧠 TTU — ORACLE STABLE V9")
-    st.caption("IA génératrice autonome — Cortex symbolique")
-
-# -----------------------------------------------------
-# METRICS
-# -----------------------------------------------------
-
-cortex = load_cortex()
-
-with metrics:
-    col1,col2 = st.columns(2)
-    col1.metric("Vitalité Spectrale", round(cortex["VS"],2))
-    col2.metric("Fragments appris", cortex["learned"])
-
-# -----------------------------------------------------
-# APPRENTISSAGE
-# -----------------------------------------------------
-
-with learn_box:
-
-    st.subheader("📥 Nourrir l'Oracle")
-
-    uploaded = st.file_uploader(
-        "Importer texte / CSV",
-        type=["txt","csv"]
-    )
-
-    if uploaded:
-
-        if uploaded.name.endswith(".csv"):
-            df = pd.read_csv(uploaded)
-            text = " ".join(df.astype(str).values.flatten())
-        else:
-            text = uploaded.read().decode("utf-8")
-
-        n = learn(text)
-        st.success(f"{n} mots assimilés.")
-
-# -----------------------------------------------------
-# CHAT ORACLE
-# -----------------------------------------------------
-
-with chat:
-
-    st.subheader("💬 Dialogue")
-
-    prompt = st.text_input("Intention")
-
-    if st.button("Interroger l'Oracle"):
-        response = generate(prompt)
-        st.write("### Réponse Oracle")
+        response=think(prompt.split()[0])
+        st.write("### Réponse")
         st.write(response)
