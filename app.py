@@ -1,195 +1,223 @@
-# ==========================================================
-# 🧠 TTU ORACLE V8 — CORTEX AUTO-ORGANISANT
-# Concepts vivants + auto-réorganisation
-# ==========================================================
+# =====================================================
+# TTU ORACLE V9 — STABLE CORE
+# IA cognitive autonome (sans LLM)
+# =====================================================
 
 import streamlit as st
+import pandas as pd
+import numpy as np
 import json
 import os
 import re
-from collections import defaultdict
-import numpy as np
+from collections import Counter
 
-CORTEX_FILE="ttu_cortex.json"
+# -----------------------------------------------------
+# CONFIG STREAMLIT (ANTI CRASH UI)
+# -----------------------------------------------------
 
-# ==========================================================
-# LOAD / SAVE
-# ==========================================================
+st.set_page_config(
+    page_title="TTU Oracle V9",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# -----------------------------------------------------
+# DOSSIER MEMOIRE
+# -----------------------------------------------------
+
+MEM_PATH = "memory"
+os.makedirs(MEM_PATH, exist_ok=True)
+
+FRAG_FILE = f"{MEM_PATH}/fragments.csv"
+CONCEPT_FILE = f"{MEM_PATH}/concepts.csv"
+CORTEX_FILE = f"{MEM_PATH}/cortex.json"
+
+# -----------------------------------------------------
+# INITIALISATION MEMOIRE
+# -----------------------------------------------------
+
+def init_memory():
+
+    if not os.path.exists(FRAG_FILE):
+        pd.DataFrame(columns=["fragment","count"]).to_csv(FRAG_FILE,index=False)
+
+    if not os.path.exists(CONCEPT_FILE):
+        pd.DataFrame(columns=["concept","weight"]).to_csv(CONCEPT_FILE,index=False)
+
+    if not os.path.exists(CORTEX_FILE):
+        with open(CORTEX_FILE,"w") as f:
+            json.dump({"VS":12.0,"learned":0},f)
+
+init_memory()
+
+# -----------------------------------------------------
+# CHARGEMENT
+# -----------------------------------------------------
+
+def load_fragments():
+    return pd.read_csv(FRAG_FILE)
+
+def save_fragments(df):
+    df.to_csv(FRAG_FILE,index=False)
 
 def load_cortex():
-    if not os.path.exists(CORTEX_FILE):
-        return {}
-    return json.load(open(CORTEX_FILE,"r",encoding="utf-8"))
+    return json.load(open(CORTEX_FILE))
 
-def save_cortex(cortex):
-    json.dump(cortex,open(CORTEX_FILE,"w",encoding="utf-8"))
+def save_cortex(data):
+    json.dump(data,open(CORTEX_FILE,"w"))
 
-# ==========================================================
-# TEXT
-# ==========================================================
+# -----------------------------------------------------
+# OUTILS LINGUISTIQUES
+# -----------------------------------------------------
+
+VOWELS = "aeiouyàâéèêëîïôùûüœ"
+
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", text)
+    return text
 
 def tokenize(text):
-    text=text.lower()
-    text=re.sub(r"[^\w\sàâéèêîôùûç]"," ",text)
-    return [w for w in text.split() if len(w)>2]
+    return [w for w in clean_text(text).split() if w]
 
-# ==========================================================
-# CONCEPT ACTIVATION
-# ==========================================================
+# syllabification SAFE (corrige V7)
+def syllabify(word):
 
-def ensure_concept(cortex,word):
+    if not word:
+        return []
 
-    if word not in cortex:
-        cortex[word]={
-            "activation":0.5,
-            "connections":{}
-        }
+    syllables=[]
+    current=""
 
-# ==========================================================
-# HEBBIAN LEARNING (TTU Torque)
-# ==========================================================
+    for c in word:
+        current+=c
+        if c in VOWELS:
+            syllables.append(current)
+            current=""
 
-def reinforce(cortex,words):
+    if current:
+        if syllables:
+            syllables[-1]+=current
+        else:
+            syllables.append(current)
 
-    for w in words:
-        ensure_concept(cortex,w)
+    return syllables
 
-    for i,w1 in enumerate(words):
-        for j,w2 in enumerate(words):
-            if i==j:
-                continue
-
-            conn=cortex[w1]["connections"]
-            conn[w2]=conn.get(w2,0)+0.05
-
-# ==========================================================
-# DISSIPATION (α)
-# ==========================================================
-
-def dissipate(cortex,alpha=0.01):
-
-    for c in cortex.values():
-        for k in list(c["connections"].keys()):
-            c["connections"][k]*=(1-alpha)
-
-            if c["connections"][k]<0.01:
-                del c["connections"][k]
-
-# ==========================================================
-# AUTO ORGANISATION
-# ==========================================================
-
-def reorganize(cortex):
-
-    # fusion concepts très similaires
-    words=list(cortex.keys())
-
-    for w in words:
-        for v in words:
-            if w==v:
-                continue
-
-            if w[:4]==v[:4]:  # racine proche
-                cortex[w]["connections"].update(
-                    cortex[v]["connections"]
-                )
-                cortex[v]["activation"]*=0.8
-
-# ==========================================================
-# VITALITY METRIC (VS)
-# ==========================================================
-
-def vitality(cortex):
-
-    if not cortex:
-        return 0
-
-    connections=sum(len(c["connections"]) for c in cortex.values())
-    anchors=len(cortex)
-
-    alpha=0.1
-
-    VS=(connections/(anchors+1))/alpha
-    return round(VS,2)
-
-# ==========================================================
-# LEARN
-# ==========================================================
+# -----------------------------------------------------
+# APPRENTISSAGE
+# -----------------------------------------------------
 
 def learn(text):
 
-    cortex=load_cortex()
+    words = tokenize(text)
+    counter = Counter(words)
 
-    words=tokenize(text)
+    df = load_fragments()
 
-    reinforce(cortex,words)
-    dissipate(cortex)
-    reorganize(cortex)
+    for w,c in counter.items():
 
+        if w in df["fragment"].values:
+            df.loc[df.fragment==w,"count"]+=c
+        else:
+            df.loc[len(df)] = [w,c]
+
+    save_fragments(df)
+
+    cortex = load_cortex()
+    cortex["learned"] += len(words)
+    cortex["VS"] = 10 + np.log1p(cortex["learned"])
     save_cortex(cortex)
 
-    return len(words),vitality(cortex)
+    return len(words)
 
-# ==========================================================
-# THINK
-# ==========================================================
+# -----------------------------------------------------
+# GENERATION AUTONOME
+# -----------------------------------------------------
 
-def think(question):
+def generate(prompt, size=30):
 
-    cortex=load_cortex()
-    words=tokenize(question)
+    df = load_fragments()
 
-    activations=defaultdict(float)
+    if len(df)==0:
+        return "Oracle silencieux : aucune mémoire."
 
-    for w in words:
-        if w in cortex:
-            for k,v in cortex[w]["connections"].items():
-                activations[k]+=v
+    weights = df["count"].values
+    vocab = df["fragment"].values
 
-    if not activations:
-        return "Je cherche encore une structure d’ancrage."
+    probs = weights / weights.sum()
 
-    concept=max(activations,key=activations.get)
+    words = list(np.random.choice(vocab,size,p=probs))
 
-    return (
-        f"Le concept dominant émergent est '{concept}'. "
-        f"Le sens apparaît par résonance entre concepts connectés."
+    if prompt:
+        words.insert(0,prompt)
+
+    sentence = " ".join(words)
+    return sentence.capitalize()+"."
+
+
+# -----------------------------------------------------
+# UI FIXE (ANTI V8)
+# -----------------------------------------------------
+
+header = st.container()
+chat = st.container()
+metrics = st.container()
+learn_box = st.container()
+
+# -----------------------------------------------------
+# HEADER
+# -----------------------------------------------------
+
+with header:
+    st.title("🧠 TTU — ORACLE STABLE V9")
+    st.caption("IA génératrice autonome — Cortex symbolique")
+
+# -----------------------------------------------------
+# METRICS
+# -----------------------------------------------------
+
+cortex = load_cortex()
+
+with metrics:
+    col1,col2 = st.columns(2)
+    col1.metric("Vitalité Spectrale", round(cortex["VS"],2))
+    col2.metric("Fragments appris", cortex["learned"])
+
+# -----------------------------------------------------
+# APPRENTISSAGE
+# -----------------------------------------------------
+
+with learn_box:
+
+    st.subheader("📥 Nourrir l'Oracle")
+
+    uploaded = st.file_uploader(
+        "Importer texte / CSV",
+        type=["txt","csv"]
     )
 
-# ==========================================================
-# UI
-# ==========================================================
+    if uploaded:
 
-st.set_page_config(page_title="🧠 TTU Cortex V8",layout="wide")
+        if uploaded.name.endswith(".csv"):
+            df = pd.read_csv(uploaded)
+            text = " ".join(df.astype(str).values.flatten())
+        else:
+            text = uploaded.read().decode("utf-8")
 
-st.title("🧠 TTU V8 — Cortex Auto-Organisant")
-st.caption("Métrologie dynamique de conscience linguistique")
+        n = learn(text)
+        st.success(f"{n} mots assimilés.")
 
-uploaded=st.file_uploader(
-    "Nourrir le Cortex",
-    accept_multiple_files=True
-)
+# -----------------------------------------------------
+# CHAT ORACLE
+# -----------------------------------------------------
 
-if uploaded:
-    total=0
-    VS=0
+with chat:
 
-    for f in uploaded:
-        text=f.read().decode("utf-8","ignore")
-        count,VS=learn(text)
-        total+=count
+    st.subheader("💬 Dialogue")
 
-    st.success(f"{total} mots intégrés | Vitalité VS={VS}")
+    prompt = st.text_input("Intention")
 
-# CHAT
-q=st.chat_input("Dialogue avec le Cortex")
-
-if q:
-    with st.chat_message("assistant"):
-        st.write(think(q))
-
-# TELEMETRY
-cortex=load_cortex()
-
-st.sidebar.metric("Concepts",len(cortex))
-st.sidebar.metric("Vitalité Spectrale",vitality(cortex))
+    if st.button("Interroger l'Oracle"):
+        response = generate(prompt)
+        st.write("### Réponse Oracle")
+        st.write(response)
