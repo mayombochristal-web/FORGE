@@ -390,6 +390,45 @@ def diagnose():
     return "🧠 Absorption de bibliothèques en cours."
 
 # =====================================================
+# S+15B — DIRECT_INGESTION_ENGINE (Local)
+# =====================================================
+
+import glob
+
+SOURCE_DIR = "source_data"
+os.makedirs(SOURCE_DIR, exist_ok=True)
+
+st.subheader("📁 Ingestion Haute Vélocité")
+
+if st.button("Scanner le dossier source_data"):
+    # Récupérer tous les fichiers compatibles
+    files = glob.glob(f"{SOURCE_DIR}/*.txt") + glob.glob(f"{SOURCE_DIR}/*.docx")
+    
+    if not files:
+        st.warning("Le dossier 'source_data' est vide.")
+    else:
+        progress_bar = st.progress(0)
+        for i, file_path in enumerate(files):
+            file_name = os.path.basename(file_path)
+            
+            with st.status(f"Assimilation de {file_name}...", expanded=False):
+                if file_name.endswith(".docx"):
+                    # On ouvre le fichier en mode binaire local
+                    with open(file_path, "rb") as f:
+                        text = read_docx(f)
+                else:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        text = f.read()
+                
+                n = learn(text)
+                st.write(f"Succès : {n} fragments extraits.")
+            
+            progress_bar.progress((i + 1) / len(files))
+        
+        st.success(f"Traitement terminé : {len(files)} fichiers assimilés.")
+        st.rerun()
+
+# =====================================================
 # S+15 — USER_DIALOG_INTERFACE
 # =====================================================
 
