@@ -29,7 +29,8 @@ st.set_page_config(page_title="ORACLE S+", layout="wide")
 # S+03 — MEMORY_PATH_MANAGER
 # =====================================================
 
-MEM = "oracle_memory"
+BASE_DIR = os.path.dirname(__file__) if "__file__" in globals() else "."
+MEM = os.path.join(BASE_DIR, "oracle_memory")
 os.makedirs(MEM, exist_ok=True)
 
 FILES = {
