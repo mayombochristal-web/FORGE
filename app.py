@@ -444,10 +444,3 @@ if st.button("Préparer l'export"):
         mime="application/json"
     )
 
-
-
-streamlit
-pandas
-numpy
-scipy
-matplotlib
