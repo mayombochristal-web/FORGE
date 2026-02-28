@@ -14,8 +14,11 @@ import numpy as np
 import json, os, re, io, zipfile, datetime, time
 import xml.etree.ElementTree as ET
 from collections import Counter
-from spectral_module import spectral_ui
-
+try:
+    from spectral_module import spectral_ui
+except ImportError:
+    def spectral_ui(*args, **kwargs):
+        pass
 # =====================================================
 # S+02 — STREAMLIT_PAGE_CONFIG
 # =====================================================
