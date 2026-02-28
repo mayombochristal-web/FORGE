@@ -1,984 +1,298 @@
 # =====================================================
-# 🧠 ORACLE V18 — AUTO-STABILIZING COGNITIVE ENGINE
-# Opérateur L Auto-Apprenant avec Minimisation λ
+# 🧠 ORACLE S+ — ARCHITECTURE COGNITIVE STABLE
+# Pipeline officiel :
+# S+01 → S+16
 # =====================================================
+
+# =====================================================
+# S+01 — IMPORT_SYSTEM_CORE
+# =====================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import json
-import os
-import re
-import datetime
-from collections import Counter, defaultdict
-from pathlib import Path
+import json, os, re, io, zipfile, datetime, time
+import xml.etree.ElementTree as ET
+from collections import Counter
+
 # =====================================================
-# OPTIONAL IMPORTS (gestion gracieuse)
+# S+02 — STREAMLIT_PAGE_CONFIG
 # =====================================================
-try:
-from scipy.signal import stft, welch
-from scipy.stats import entropy
-from scipy.optimize import minimize
-SCIPY_AVAILABLE = True
-except ImportError:
-SCIPY_AVAILABLE = False
-try:
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
-MATPLOTLIB_AVAILABLE = True
-except ImportError:
-MATPLOTLIB_AVAILABLE = False
-try:
-import seaborn as sns
-SEABORN_AVAILABLE = True
-except ImportError:
-SEABORN_AVAILABLE = False
+
+st.set_page_config(page_title="ORACLE S+", layout="wide")
+
 # =====================================================
-# CONFIGURATION UNIQUE
+# S+03 — MEMORY_PATH_MANAGER
 # =====================================================
-st.set_page_config(
-page_title="🧠 ORACLE V18 TTU",
-layout="wide",
-initial_sidebar_state="expanded"
-)
-# =====================================================
-# CONFIGURATION GLOBALE
-# =====================================================
-class OracleConfig:
-"""Configuration centralisée"""
-# Chemins
-MEMORY_DIR = "oracle_memory"
-BACKUP_DIR = "oracle_backups"
-# Fichiers de données
+
+MEM = "oracle_memory"
+os.makedirs(MEM, exist_ok=True)
+
 FILES = {
-"fragments": "fragments.csv",
-"concepts": "concepts.csv",
-"relations": "relations.json",
-"intentions": "intentions.csv",
-"cortex": "cortex.json",
-"metadata": "metadata.json",
-"lyapunov_history": "lyapunov_history.json"
+    "fragments": f"{MEM}/fragments.csv",
+    "relations": f"{MEM}/relations.json",
+    "cortex": f"{MEM}/cortex.json"
 }
-# Paramètres d'apprentissage
-LEARNING = {
-"min_word_length": 2,
-"max_word_length": 50,
-"ngram_range": (1, 3),
-"association_threshold": 2,
-"decay_factor": 0.95,
-"learning_rate": 1.0,
-"L_learning_rate": 0.01,
-"lambda_target": -0.1,
-"stability_threshold": 0.05
-}
-# Paramètres de génération
-GENERATION = {
-"default_temperature": 0.8,
-"min_temperature": 0.05,
-"max_temperature": 2.0,
-"default_steps": 30,
-"max_steps": 200,
-"top_k": 10,
-"nucleus_p": 0.9,
-"L_influence": 0.5
-}
-# Paramètres d'analyse spectrale
-SPECTRAL = {
-"default_nperseg": 128,
-"min_nperseg": 32,
-"max_nperseg": 1024,
-"overlap_ratio": 0.5,
-"window_types": ['hann', 'hamming', 'blackman', 'blackmanharris', 'bartlett'],
-"default_window": 'blackmanharris'
-}
-# Métriques
-METRICS = {
-"high_density_threshold": 4.0,
-"low_density_threshold": 1.5,
-"min_daily_intake": 20,
-"coherence_scaling": 10,
-"vitalite_base": 10.0
-}
-# Interface
-UI = {
-"chunk_size": 5000,
-"max_display_items": 100,
-"chart_height": 400,
-"chart_width": 800
-}
+
 # =====================================================
-# INITIALISATION
+# S+04 — SAFE_IO_LAYER
 # =====================================================
-def init_directories():
-"""Crée les répertoires nécessaires"""
-Path(OracleConfig.MEMORY_DIR).mkdir(exist_ok=True)
-Path(OracleConfig.BACKUP_DIR).mkdir(exist_ok=True)
-def get_file_path(key):
-"""Retourne le chemin complet d'un fichier"""
-return os.path.join(OracleConfig.MEMORY_DIR, OracleConfig.FILES[key])
+
+def load_json(p):
+    with open(p, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_json(p, d):
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+
+def load_frag():
+    return pd.read_csv(FILES["fragments"])
+
+def save_frag(df):
+    df.to_csv(FILES["fragments"], index=False)
+
 # =====================================================
-# JSON IO SAFE
+# S+05 — MEMORY_INITIALIZER
 # =====================================================
-def load_json(path, default=None):
-"""Charge un fichier JSON de manière sûre"""
-if not os.path.exists(path):
-return default if default is not None else {}
-try:
-with open(path, "r", encoding="utf-8") as f:
-return json.load(f)
-except (json.JSONDecodeError, IOError):
-return default if default is not None else {}
-def save_json(path, data):
-"""Sauvegarde un fichier JSON"""
-with open(path, "w", encoding="utf-8") as f:
-json.dump(data, f, ensure_ascii=False, indent=2)
+
+def init_memory():
+
+    if not os.path.exists(FILES["fragments"]):
+        pd.DataFrame(columns=["fragment","count"]).to_csv(
+            FILES["fragments"], index=False
+        )
+
+    if not os.path.exists(FILES["relations"]):
+        save_json(FILES["relations"], {})
+
+    if not os.path.exists(FILES["cortex"]):
+        save_json(FILES["cortex"], {
+            "VS":12,
+            "age":0,
+            "new_today":0,
+            "last_day":str(datetime.date.today()),
+            "timeline":[]
+        })
+
+init_memory()
+
 # =====================================================
-# CSV IO
+# S+06 — SHADOW_STATE_LOADER
 # =====================================================
-def load_csv_lazy(path, chunksize=None):
-"""Charge un CSV par chunks"""
-if not os.path.exists(path):
-return pd.DataFrame()
-chunksize = chunksize or OracleConfig.UI["chunk_size"]
-chunks = []
-try:
-for chunk in pd.read_csv(path, chunksize=chunksize):
-chunks.append(chunk)
-return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
-except (pd.errors.EmptyDataError, IOError):
-return pd.DataFrame()
-def save_csv(df, path):
-"""Sauvegarde un DataFrame en CSV"""
-df.reset_index(drop=True).to_csv(path, index=False)
+
+def sync_shadow():
+
+    if "shadow_loaded" not in st.session_state:
+
+        st.session_state.shadow_frag = load_frag().copy()
+        st.session_state.shadow_rel = load_json(FILES["relations"])
+        st.session_state.shadow_cortex = load_json(FILES["cortex"])
+
+        st.session_state.shadow_loaded = True
+
+sync_shadow()
+
 # =====================================================
-# INITIALISATION DES FICHIERS
+# S+07 — COGNITIVE_TIME_TRACKER
 # =====================================================
-def init_files():
-"""Initialise les fichiers de données s'ils n'existent pas"""
-# Fragments
-fragments_path = get_file_path("fragments")
-if not os.path.exists(fragments_path):
-pd.DataFrame(columns=["fragment", "count", "last_seen", "weight"]).to_csv(
-fragments_path, index=False
-)
-# Concepts
-concepts_path = get_file_path("concepts")
-if not os.path.exists(concepts_path):
-pd.DataFrame(columns=["concept", "weight", "category", "created"]).to_csv(
-concepts_path, index=False
-)
-# Intentions
-intentions_path = get_file_path("intentions")
-if not os.path.exists(intentions_path):
-pd.DataFrame(columns=["intent", "count", "last_used", "success_rate"]).to_csv(
-intentions_path, index=False
-)
-# Relations
-relations_path = get_file_path("relations")
-if not os.path.exists(relations_path):
-save_json(relations_path, {})
-# Cortex
-cortex_path = get_file_path("cortex")
-if not os.path.exists(cortex_path):
-cortex_data = {
-"version": "18.0",
-"created": str(datetime.datetime.now()),
-"age": 0,
-"vitalite_spectrale": OracleConfig.METRICS["vitalite_base"],
-"temperature": OracleConfig.GENERATION["default_temperature"],
-"new_today": 0,
-"last_day": str(datetime.date.today()),
-"timeline": [],
-"L_timeline": [],
-"lambda_timeline": [],
-"session_history": [],
-"total_sessions": 0,
-"auto_stabilization_active": True
-}
-save_json(cortex_path, cortex_data)
-# Metadata
-metadata_path = get_file_path("metadata")
-if not os.path.exists(metadata_path):
-metadata = {
-"created": str(datetime.datetime.now()),
-"version": "18.0",
-"capabilities": {
-"scipy": SCIPY_AVAILABLE,
-"matplotlib": MATPLOTLIB_AVAILABLE,
-"seaborn": SEABORN_AVAILABLE,
-"auto_learning_L": True
-}
-}
-save_json(metadata_path, metadata)
-# Lyapunov history
-lyapunov_path = get_file_path("lyapunov_history")
-if not os.path.exists(lyapunov_path):
-save_json(lyapunov_path, {
-"history": [],
-"optimal_weights": {},
-"last_optimization": None
-})
+
+def cognitive_tick():
+
+    if "t0" not in st.session_state:
+        st.session_state.t0 = time.time()
+
+    st.session_state.cognitive_time = time.time() - st.session_state.t0
+
+cognitive_tick()
+
 # =====================================================
-# TRAITEMENT LINGUISTIQUE
+# S+08 — TEXT_NORMALIZER_TOKENIZER
 # =====================================================
-class LinguisticProcessor:
-"""Traitement linguistique avancé"""
-@staticmethod
-def tokenize(text, min_length=None, max_length=None):
-"""Tokenisation avec filtrage"""
-min_length = min_length or OracleConfig.LEARNING["min_word_length"]
-max_length = max_length or OracleConfig.LEARNING["max_word_length"]
-tokens = re.findall(r"[a-zàâäéèêëîïôùûüœç]+", text.lower())
-return [t for t in tokens if min_length <= len(t) <= max_length]
-@staticmethod
-def extract_ngrams(tokens, n=2):
-"""Extrait les n-grammes"""
-return [tuple(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
-@staticmethod
-def phonemes(text):
-"""Extraction approximative de phonèmes"""
-text = text.lower()
-return list(re.sub(r"[^a-zàâäéèêëîïôùûüœç]", "", text))
-@staticmethod
-def syllables(word):
-"""Découpage approximatif en syllabes"""
-pattern = r"[bcdfghjklmnpqrstvwxz]*[aeiouyàâäéèêëîïôùûüœ]+"
-return re.findall(pattern, word.lower())
+
+def clean(t):
+    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
+
+def tokenize(t):
+    return [w for w in clean(t).split() if len(w) > 1]
+
 # =====================================================
-# SHADOW STATE
+# S+09 — LEARNING_ENGINE_CORE
 # =====================================================
-class ShadowState:
-"""Gestion de l'état en mémoire pour performance"""
-@staticmethod
-def initialize():
-"""Charge toutes les données en session_state"""
-if "shadow_initialized" in st.session_state:
-return
-st.session_state.shadow_fragments = load_csv_lazy(get_file_path("fragments"))
-st.session_state.shadow_concepts = load_csv_lazy(get_file_path("concepts"))
-st.session_state.shadow_intentions = load_csv_lazy(get_file_path("intentions"))
-st.session_state.shadow_rel = load_json(get_file_path("relations"))
-st.session_state.shadow_cortex = load_json(get_file_path("cortex"))
-st.session_state.shadow_metadata = load_json(get_file_path("metadata"))
-st.session_state.lyapunov_data = load_json(get_file_path("lyapunov_history"))
-st.session_state.shadow_initialized = True
-@staticmethod
-def persist():
-"""Sauvegarde l'état en mémoire vers les fichiers"""
-save_csv(st.session_state.shadow_fragments, get_file_path("fragments"))
-save_csv(st.session_state.shadow_concepts, get_file_path("concepts"))
-save_csv(st.session_state.shadow_intentions, get_file_path("intentions"))
-save_json(get_file_path("relations"), st.session_state.shadow_rel)
-save_json(get_file_path("cortex"), st.session_state.shadow_cortex)
-save_json(get_file_path("metadata"), st.session_state.shadow_metadata)
-save_json(get_file_path("lyapunov_history"), st.session_state.lyapunov_data)
-@staticmethod
-def reload():
-"""Recharge les données depuis les fichiers"""
-st.session_state.pop("shadow_initialized", None)
-ShadowState.initialize()
+
+def learn(text):
+
+    words = tokenize(text)
+    if not words:
+        return 0
+
+    df = st.session_state.shadow_frag.copy()
+    counts = Counter(words)
+
+    for w,c in counts.items():
+        mask = df["fragment"] == w
+        if mask.any():
+            df.loc[mask,"count"] += c
+        else:
+            df = pd.concat(
+                [df, pd.DataFrame([[w,c]],columns=df.columns)],
+                ignore_index=True
+            )
+
+    save_frag(df)
+    st.session_state.shadow_frag = df
+
+    assoc = st.session_state.shadow_rel
+
+    for i in range(len(words)-1):
+        a,b = words[i],words[i+1]
+        assoc.setdefault(a,{})
+        assoc[a][b] = assoc[a].get(b,0)+2
+
+    save_json(FILES["relations"],assoc)
+
+    cortex = st.session_state.shadow_cortex
+
+    today=str(datetime.date.today())
+    if cortex["last_day"]!=today:
+        cortex["new_today"]=0
+        cortex["last_day"]=today
+
+    cortex["age"]+=len(words)
+    cortex["new_today"]+=len(counts)
+    cortex["VS"]=10+float(np.log1p(cortex["age"]))
+
+    cortex["timeline"].extend(words)
+
+    save_json(FILES["cortex"],cortex)
+
+    return len(words)
+
 # =====================================================
-# 🧠 OPERATEUR L DYNAMIQUE TTU
+# S+10 — SEMANTIC_SEARCH_ENGINE
 # =====================================================
-class OperatorL:
-"""
-"""
-@staticmethod
-def compute(tokens):
-"""
-"""
-if not tokens:
-return {
-'L': 0.0,
-'lambda': 0.0,
-'stability': 'neutral',
-'gradient': 0.0,
-'divergence': 0.0,
-'concept_hits': []
-}
-relations = st.session_state.shadow_rel
-concepts_df = st.session_state.shadow_concepts
-energy = 0.0
-concept_hits = []
-pair_weights = []
-# Phase 1: Calcul de l'énergie par paires
-for i in range(len(tokens) - 1):
-word_a = tokens[i]
-word_b = tokens[i + 1]
-# Cherche la relation
-if word_a in relations and word_b in relations[word_a]:
-weight = relations[word_a][word_b]
-energy += weight
-pair_weights.append(weight)
-# Vérifie si concept
-if not concepts_df.empty and word_b in concepts_df['concept'].values:
-concept_hits.append(word_b)
-# Phase 2: Facteur conceptuel
-unique_concepts = len(set(concept_hits))
-concept_factor = unique_concepts / (len(tokens) + 1)
-# Phase 3: Gradient (moyenne des poids)
-gradient = np.mean(pair_weights) if pair_weights else 0.0
-# Phase 4: Divergence (variance normalisée)
-divergence = np.std(pair_weights) / (np.mean(pair_weights) + 1e-9) if pair_weights else 0.0
-# Phase 5: Énergie L stabilisée
-L_raw = energy * concept_factor
-L_value = np.tanh(L_raw)
-# Phase 6: Estimation λ
-lambda_estimate = gradient - divergence
-# Phase 7: Classification de stabilité
-if lambda_estimate < -OracleConfig.LEARNING["stability_threshold"]:
-stability = "stable"
-elif lambda_estimate > OracleConfig.LEARNING["stability_threshold"]:
-stability = "chaotic"
-else:
-stability = "neutral"
-return {
-'L': float(L_value),
-'lambda': float(lambda_estimate),
-'stability': stability,
-'gradient': float(gradient),
-'divergence': float(divergence),
-'concept_hits': concept_hits
-}
-@staticmethod
-def auto_adjust_weights(tokens, target_lambda=None):
-"""
-"""
-target_lambda = target_lambda or OracleConfig.LEARNING["lambda_target"]
-learning_rate = OracleConfig.LEARNING["L_learning_rate"]
-relations = st.session_state.shadow_rel
-# Calcul de L actuel
-result = OperatorL.compute(tokens)
-current_lambda = result['lambda']
-# Erreur
-error = target_lambda - current_lambda
-# Ajustement des poids
-for i in range(len(tokens) - 1):
-word_a = tokens[i]
-word_b = tokens[i + 1]
-if word_a in relations and word_b in relations[word_a]:
-adjustment = learning_rate * error
-new_weight = relations[word_a][word_b] + adjustment
-relations[word_a][word_b] = max(0.1, min(100.0, new_weight))
-st.session_state.shadow_rel = relations
-return {
-'error': error,
-'adjustment': learning_rate * error,
-'new_lambda': OperatorL.compute(tokens)['lambda']
-}
-@staticmethod
-def track_evolution(tokens, result):
-"""Enregistre l'évolution de L et λ dans le cortex"""
-cortex = st.session_state.shadow_cortex
-timestamp = str(datetime.datetime.now())
-# Timeline de L
-if "L_timeline" not in cortex:
-cortex["L_timeline"] = []
-cortex["L_timeline"].append({
-"time": timestamp,
-"L": result['L'],
-"tokens": len(tokens),
-"stability": result['stability']
-})
-# Timeline de λ
-if "lambda_timeline" not in cortex:
-cortex["lambda_timeline"] = []
-cortex["lambda_timeline"].append({
-"time": timestamp,
-"lambda": result['lambda'],
-"gradient": result['gradient'],
-"divergence": result['divergence']
-})
-# Limitation
-cortex["L_timeline"] = cortex["L_timeline"][-10000:]
-cortex["lambda_timeline"] = cortex["lambda_timeline"][-10000:]
-st.session_state.shadow_cortex = cortex
-# =====================================================
-# MOTEUR D'APPRENTISSAGE
-# =====================================================
-class LearningEngine:
-"""Moteur d'apprentissage avec intégration de L"""
-@staticmethod
-def learn(text, persist=True, auto_stabilize=True):
-"""Apprentissage complet depuis un texte"""
-tokens = LinguisticProcessor.tokenize(text)
-if not tokens:
-return {"words": 0, "new_words": 0, "associations": 0, "L": 0.0}
-stats = {
-"words": len(tokens),
-"new_words": 0,
-"associations": 0,
-"unique_words": len(set(tokens))
-}
-# Mise à jour des fragments
-stats["new_words"] = LearningEngine._update_fragments(tokens)
-# Mise à jour des associations
-stats["associations"] = LearningEngine._update_associations(tokens)
-# Extraction de concepts
-LearningEngine._extract_concepts(tokens)
-# Calcul de L
-L_result = OperatorL.compute(tokens)
-stats["L"] = L_result['L']
-stats["lambda"] = L_result['lambda']
-stats["stability"] = L_result['stability']
-# Auto-stabilisation
-if auto_stabilize and st.session_state.shadow_cortex.get("auto_stabilization_active", True):
-adjustment = OperatorL.auto_adjust_weights(tokens)
-stats["adjustment"] = adjustment
-# Tracking
-OperatorL.track_evolution(tokens, L_result)
-# Mise à jour du cortex
-LearningEngine._update_cortex(tokens, stats)
-# Sauvegarde
-if persist:
-ShadowState.persist()
-return stats
-@staticmethod
-def _update_fragments(tokens):
-"""Met à jour la table des fragments"""
-df = st.session_state.shadow_fragments
-counts = Counter(tokens)
-new_words = 0
-today = str(datetime.date.today())
-for word, count in counts.items():
-mask = df["fragment"] == word
-if mask.any():
-df.loc[mask, "count"] += count
-df.loc[mask, "last_seen"] = today
-df.loc[mask, "weight"] = df.loc[mask, "count"] * OracleConfig.LEARNING["learning_rate"]
-else:
-new_row = pd.DataFrame([{
-"fragment": word,
-"count": count,
-"last_seen": today,
-"weight": count * OracleConfig.LEARNING["learning_rate"]
-}])
-df = pd.concat([df, new_row], ignore_index=True)
-new_words += 1
-st.session_state.shadow_fragments = df
-return new_words
-@staticmethod
-def _update_associations(tokens):
-"""Met à jour les associations"""
-assoc = st.session_state.shadow_rel
-associations_added = 0
-for i in range(len(tokens) - 1):
-a, b = tokens[i], tokens[i+1]
-if a not in assoc:
-assoc[a] = {}
-assoc[a][b] = assoc[a].get(b, 0) + OracleConfig.LEARNING["association_threshold"]
-associations_added += 1
-st.session_state.shadow_rel = assoc
-return associations_added
-@staticmethod
-def _update_cortex(tokens, stats):
-"""Met à jour le cortex"""
-cortex = st.session_state.shadow_cortex
-today = str(datetime.date.today())
-if cortex.get("last_day") != today:
-cortex["new_today"] = 0
-cortex["last_day"] = today
-cortex["age"] = cortex.get("age", 0) + stats["words"]
-cortex["new_today"] = cortex.get("new_today", 0) + stats["unique_words"]
-cortex["vitalite_spectrale"] = OracleConfig.METRICS["vitalite_base"] + float(np.log1p(cortex["age"]))
-if "timeline" not in cortex:
-cortex["timeline"] = []
-cortex["timeline"].extend(tokens)
-max_timeline = 100000
-if len(cortex["timeline"]) > max_timeline:
-cortex["timeline"] = cortex["timeline"][-max_timeline:]
-st.session_state.shadow_cortex = cortex
-@staticmethod
-def _extract_concepts(tokens):
-"""Extrait et met à jour les concepts"""
-df_concepts = st.session_state.shadow_concepts
-freq = Counter(tokens)
-threshold = 3
-for word, count in freq.items():
-if count >= threshold:
-mask = df_concepts["concept"] == word
-if mask.any():
-df_concepts.loc[mask, "weight"] += count
-else:
-new_concept = pd.DataFrame([{
-"concept": word,
-"weight": count,
-"category": "auto",
-"created": str(datetime.date.today())
-}])
-df_concepts = pd.concat([df_concepts, new_concept], ignore_index=True)
-st.session_state.shadow_concepts = df_concepts
-# =====================================================
-# MOTEUR DE GÉNÉRATION
-# =====================================================
-class GenerationEngine:
-"""Génération de texte avec contrôle par L"""
-@staticmethod
-def think(seed, steps=None, temperature=None, method="weighted", use_L=True):
-"""Génère une séquence de mots"""
-steps = steps or OracleConfig.GENERATION["default_steps"]
-base_temperature = temperature or st.session_state.shadow_cortex.get(
-"temperature", OracleConfig.GENERATION["default_temperature"]
-)
-assoc = st.session_state.shadow_rel
-if seed not in assoc:
-return "Je dois encore apprendre ce concept."
-sequence = [seed]
-current = seed
-for step in range(steps):
-next_words = assoc.get(current)
-if not next_words:
-break
-# Modulation par L
-if use_L:
-L_result = OperatorL.compute(sequence)
-L_value = L_result['L']
-influence = OracleConfig.GENERATION["L_influence"]
-adjusted_temp = max(
-OracleConfig.GENERATION["min_temperature"],
-base_temperature * (1.0 - influence * L_value)
-)
-else:
-adjusted_temp = base_temperature
-# Choix du mot suivant
-if method == "weighted":
-current = GenerationEngine._weighted_choice(next_words, adjusted_temp)
-elif method == "top_k":
-current = GenerationEngine._top_k_choice(next_words, adjusted_temp)
-elif method == "nucleus":
-current = GenerationEngine._nucleus_choice(next_words, adjusted_temp)
-sequence.append(current)
-if sequence.count(current) > 3:
-break
-# Tracking final
-final_L = OperatorL.compute(sequence)
-OperatorL.track_evolution(sequence, final_L)
-return " ".join(sequence).capitalize() + "."
-@staticmethod
-def _weighted_choice(candidates, temperature):
-"""Choix pondéré"""
-words = list(candidates.keys())
-weights = np.array(list(candidates.values()), dtype=float)
-weights = weights ** (1.0 / (temperature + 0.01))
-weights = weights / weights.sum()
-return np.random.choice(words, p=weights)
-@staticmethod
-def _top_k_choice(candidates, temperature):
-"""Top-k sampling"""
-k = OracleConfig.GENERATION["top_k"]
-sorted_candidates = sorted(candidates.items(), key=lambda x: x[1], reverse=True)
-top_candidates = dict(sorted_candidates[:k])
-return GenerationEngine._weighted_choice(top_candidates, temperature)
-@staticmethod
-def _nucleus_choice(candidates, temperature):
-"""Nucleus sampling"""
-p = OracleConfig.GENERATION["nucleus_p"]
-sorted_candidates = sorted(candidates.items(), key=lambda x: x[1], reverse=True)
-weights = np.array([w for _, w in sorted_candidates])
-weights = weights / weights.sum()
-cumsum = np.cumsum(weights)
-cutoff = np.searchsorted(cumsum, p) + 1
-nucleus = dict(sorted_candidates[:cutoff])
-return GenerationEngine._weighted_choice(nucleus, temperature)
-# =====================================================
-# MÉTRIQUES
-# =====================================================
-class MetricsEngine:
-"""Calcul des métriques cognitives"""
-@staticmethod
+
 def association_density():
-"""Densité du graphe"""
-assoc = st.session_state.shadow_rel
-if not assoc:
-return 0.0
-total_links = sum(len(v) for v in assoc.values())
-vocab_size = len(assoc)
-return round(total_links / max(vocab_size, 1), 2)
-@staticmethod
+    assoc=st.session_state.shadow_rel
+    links=sum(len(v) for v in assoc.values())
+    vocab=len(assoc)
+    return round(links/max(vocab,1),2)
+
+# =====================================================
+# S+11 — PRETHINK_ENGINE
+# =====================================================
+
+def prethink(seed):
+
+    assoc=st.session_state.shadow_rel
+
+    if seed in assoc and assoc[seed]:
+        return max(assoc[seed], key=assoc[seed].get)
+
+    return seed
+
+# =====================================================
+# S+12 — THINK_GENERATION_ENGINE
+# =====================================================
+
+def think(seed,steps=30):
+
+    assoc=st.session_state.shadow_rel
+
+    if seed not in assoc:
+        return "Je dois encore apprendre."
+
+    sent=[seed]
+    cur=seed
+
+    for _ in range(steps):
+
+        nxt=assoc.get(cur)
+        if not nxt:
+            break
+
+        w=list(nxt.keys())
+        p=np.array(list(nxt.values()),dtype=float)
+        p=p/p.sum()
+
+        cur=np.random.choice(w,p=p)
+        sent.append(cur)
+
+    return " ".join(sent).capitalize()+"."
+
+# =====================================================
+# S+13 — COGNITIVE_METRICS
+# =====================================================
+
 def semantic_coherence():
-"""Cohérence sémantique"""
-concepts = len(st.session_state.shadow_concepts)
-assoc = len(st.session_state.shadow_rel)
-if assoc == 0:
-return 0.0
-coherence = (concepts / max(assoc, 1)) * OracleConfig.METRICS["coherence_scaling"]
-return round(min(100, coherence), 2)
-@staticmethod
-def vocabulary_diversity():
-"""Diversité du vocabulaire"""
-df = st.session_state.shadow_fragments
-if df.empty:
-return 0.0
-counts = df["count"].values
-probs = counts / counts.sum()
-return round(entropy(probs), 2)
-@staticmethod
-def current_lambda():
-"""λ actuel moyen"""
-cortex = st.session_state.shadow_cortex
-lambda_timeline = cortex.get("lambda_timeline", [])
-if not lambda_timeline:
-return 0.0
-recent = lambda_timeline[-100:]
-return round(np.mean([x['lambda'] for x in recent]), 4)
-@staticmethod
-def stability_score():
-"""Score de stabilité"""
-cortex = st.session_state.shadow_cortex
-L_timeline = cortex.get("L_timeline", [])
-if not L_timeline:
-return 0.0
-recent = L_timeline[-1000:]
-stable_count = sum(1 for x in recent if x.get('stability') == 'stable')
-return round(100 * stable_count / len(recent), 1)
-@staticmethod
+
+    concepts=len(st.session_state.shadow_frag)
+    assoc=len(st.session_state.shadow_rel)
+
+    return round(min(100,(assoc/max(concepts,1))*10),2)
+
+# =====================================================
+# S+14 — AUTO_DIAGNOSTIC_SYSTEM
+# =====================================================
+
 def diagnose():
-"""Diagnostic automatique"""
-density = MetricsEngine.association_density()
-lambda_val = MetricsEngine.current_lambda()
-stability = MetricsEngine.stability_score()
-if lambda_val < -0.1 and stability > 70:
-return "🟢 Système auto-stabilisé (λ < 0)"
-elif lambda_val > 0.1:
-return "🔴 Divergence détectée (λ > 0) — auto-correction active"
-elif density < OracleConfig.METRICS["low_density_threshold"]:
-return "🟡 Réseau faible — besoin d'apprentissage"
-else:
-return "🔵 Apprentissage actif"
+
+    cortex=st.session_state.shadow_cortex
+    density=association_density()
+
+    if cortex["new_today"]<20:
+        return "🧠 J'ai besoin d'apprendre."
+
+    if density<1.5:
+        return "🧠 Donne-moi plus de textes."
+
+    if density>4:
+        return "🧠 Raisonnement émergent."
+
+    return "🧠 Apprentissage actif."
+
 # =====================================================
-# ANALYSE SPECTRALE
+# S+15 — USER_DIALOG_INTERFACE
 # =====================================================
-class SpectralAnalysis:
-"""Analyse spectrale des patterns temporels"""
-@staticmethod
-def is_available():
-return SCIPY_AVAILABLE and MATPLOTLIB_AVAILABLE
-@staticmethod
-def build_signal(word):
-timeline = st.session_state.shadow_cortex.get("timeline", [])
-if not timeline:
-return np.array([])
-return np.array([1 if w == word else 0 for w in timeline])
-@staticmethod
-def analyze_word(word, nperseg=128, window='blackmanharris'):
-"""Analyse spectrale complète"""
-if not SpectralAnalysis.is_available():
-return {"error": "Scipy/matplotlib manquants"}
-signal = SpectralAnalysis.build_signal(word)
-if len(signal) < nperseg:
-return {"error": f"Signal trop court ({len(signal)} < {nperseg})"}
-fs = 1.0
-noverlap = int(nperseg * OracleConfig.SPECTRAL["overlap_ratio"])
-f, t, Zxx = stft(signal, fs, window=window, nperseg=nperseg, noverlap=noverlap)
-mean_amp = np.mean(np.abs(Zxx), axis=1)
-idx_dominant = np.argmax(mean_amp[1:]) + 1
-freq_dominant = f[idx_dominant]
-omega = 2 * np.pi * freq_dominant
-alpha = SpectralAnalysis._estimate_damping(mean_amp, f, idx_dominant)
-phase = np.angle(Zxx[idx_dominant, :])
-phase_unwrapped = np.unwrap(phase)
-linearity = SpectralAnalysis._phase_linearity(t, phase_unwrapped)
-fig1 = SpectralAnalysis._plot_spectrogram(t, f, Zxx, word)
-fig2 = SpectralAnalysis._plot_phase(t, phase_unwrapped, freq_dominant)
-results = {
-"omega": omega,
-"alpha": alpha,
-"lambda": complex(-alpha, omega),
-"freq_dominant": freq_dominant,
-"linearity": linearity,
-"signal_length": len(signal)
-}
-return {"results": results, "figures": (fig1, fig2)}
-@staticmethod
-def _estimate_damping(amplitudes, frequencies, peak_idx):
-peak_amp = amplitudes[peak_idx]
-half_power = peak_amp / np.sqrt(2)
-left_indices = np.where(amplitudes[:peak_idx] <= half_power)[0]
-right_indices = np.where(amplitudes[peak_idx:] <= half_power)[0]
-if len(left_indices) > 0 and len(right_indices) > 0:
-f_left = frequencies[left_indices[-1]]
-f_right = frequencies[peak_idx + right_indices[0]]
-return (f_right - f_left) / 2
-return 0.0
-@staticmethod
-def _phase_linearity(time, phase):
-if len(time) < 2:
-return 0.0
-coeffs = np.polyfit(time, phase, 1)
-trend = np.polyval(coeffs, time)
-residuals = phase - trend
-return 1 - np.std(residuals) / (np.std(phase) + 1e-10)
-@staticmethod
-def _plot_spectrogram(t, f, Zxx, word):
-fig, ax = plt.subplots(figsize=(10, 5))
-magnitude_db = 20 * np.log10(np.abs(Zxx) + 1e-10)
-im = ax.pcolormesh(t, f, magnitude_db, shading='gouraud', cmap='viridis')
-ax.set_ylabel('Fréquence [cycles/mot]')
-ax.set_xlabel('Temps [position]')
-ax.set_title(f'Spectrogramme: "{word}"')
-plt.colorbar(im, ax=ax, label='Magnitude [dB]')
-return fig
-@staticmethod
-def _plot_phase(t, phase, freq):
-fig, ax = plt.subplots(figsize=(10, 4))
-ax.plot(t, phase, 'b-', linewidth=1.5)
-ax.set_xlabel('Temps [position]')
-ax.set_ylabel('Phase [rad]')
-ax.set_title(f'Phase @ f={freq:.4f} cycles/mot')
-ax.grid(True, alpha=0.3)
-return fig
-# =====================================================
-# LECTURE DE FICHIERS
-# =====================================================
-def read_any_file(uploaded_file):
-"""Lit un fichier uploadé"""
-filename = uploaded_file.name.lower()
-try:
-if filename.endswith('.txt'):
-return uploaded_file.read().decode('utf-8', errors='ignore')
-elif filename.endswith('.csv'):
-df = pd.read_csv(uploaded_file)
-return ' '.join(df.astype(str).values.flatten())
-elif filename.endswith('.json'):
-data = json.load(uploaded_file)
-return json.dumps(data)
-else:
-return uploaded_file.read().decode('utf-8', errors='ignore')
-except Exception as e:
-st.error(f"Erreur: {e}")
-return ""
-# =====================================================
-# EXPORT / IMPORT
-# =====================================================
-class DataExporter:
-"""Exportation des données"""
-@staticmethod
-def export_all():
-data = {
-"version": "18.0",
-"exported": str(datetime.datetime.now()),
-"fragments": st.session_state.shadow_fragments.to_dict(orient="records"),
-"concepts": st.session_state.shadow_concepts.to_dict(orient="records"),
-"relations": st.session_state.shadow_rel,
-"cortex": st.session_state.shadow_cortex,
-"lyapunov": st.session_state.lyapunov_data
-}
-return json.dumps(data, indent=2, ensure_ascii=False)
-@staticmethod
-def import_all(json_data):
-try:
-data = json.loads(json_data)
-st.session_state.shadow_fragments = pd.DataFrame(data.get("fragments", []))
-st.session_state.shadow_concepts = pd.DataFrame(data.get("concepts", []))
-st.session_state.shadow_rel = data.get("relations", {})
-st.session_state.shadow_cortex = data.get("cortex", {})
-st.session_state.lyapunov_data = data.get("lyapunov", {})
-ShadowState.persist()
-return True
-except Exception as e:
-st.error(f"Erreur: {e}")
-return False
-# =====================================================
-# INTERFACE STREAMLIT
-# =====================================================
-def main():
-"""Interface principale V18"""
-init_directories()
-init_files()
-ShadowState.initialize()
-st.markdown("""
-""", unsafe_allow_html=True)
-st.markdown('<p class="main-header">🧠 ORACLE V18 — AUTO-STABILIZING ENGINE</p>', unsafe_allow_html=True)
-with st.sidebar:
-st.header("⚙️ Configuration")
-auto_stab = st.checkbox(
-"Auto-stabilisation",
-value=st.session_state.shadow_cortex.get("auto_stabilization_active", True)
+
+st.title("🧠 ORACLE S+")
+
+ctx=st.session_state.shadow_cortex
+
+c1,c2,c3,c4=st.columns(4)
+c1.metric("Vitalité",round(ctx["VS"],2))
+c2.metric("Age",ctx["age"])
+c3.metric("Densité",association_density())
+c4.metric("Cohérence",semantic_coherence())
+
+st.info(diagnose())
+
+uploaded=st.file_uploader(
+    "Nourrir l'IA",
+    type=["txt","csv"]
 )
-st.session_state.shadow_cortex["auto_stabilization_active"] = auto_stab
-temp = st.slider("Température", 0.1, 2.0, 0.8, 0.1)
-st.session_state.shadow_cortex["temperature"] = temp
-l_influence = st.slider("Influence L", 0.0, 1.0, 0.5, 0.1)
-OracleConfig.GENERATION["L_influence"] = l_influence
-gen_method = st.selectbox("Méthode", ["weighted", "top_k", "nucleus"])
-gen_steps = st.slider("Longueur", 10, 200, 30)
-st.divider()
-st.header("🔧 Actions")
-if st.button("💾 Sauvegarder"):
-ShadowState.persist()
-st.success("✅ OK")
-if st.button("🔄 Recharger"):
-ShadowState.reload()
-st.success("✅ OK")
-st.divider()
-st.header("🎯 Système")
-st.write(f"**Scipy**: {'✅' if SCIPY_AVAILABLE else '❌'}")
-st.write(f"**Matplotlib**: {'✅' if MATPLOTLIB_AVAILABLE else '❌'}")
-st.write(f"**Auto-Learning**: ✅")
-st.header("📊 Tableau de Bord")
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-cortex = st.session_state.shadow_cortex
-with col1:
-st.metric("Vitalité", f"{cortex.get('vitalite_spectrale', 10):.1f}")
-with col2:
-st.metric("Âge", cortex.get("age", 0))
-with col3:
-st.metric("Densité", MetricsEngine.association_density())
-with col4:
-st.metric("Cohérence %", MetricsEngine.semantic_coherence())
-with col5:
-lambda_val = MetricsEngine.current_lambda()
-st.metric("λ", f"{lambda_val:.4f}",
-delta="stable" if lambda_val < 0 else "diverge")
-with col6:
-st.metric("Stabilité %", MetricsEngine.stability_score())
-st.info(f"**État**: {MetricsEngine.diagnose()}")
-st.divider()
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-"📚 Apprentissage",
-"💬 Génération",
-"🔬 Spectral",
-"📈 λ Evolution",
-"🎯 Auto-Stab",
-"⚡ Export"
-])
-with tab1:
-st.header("📚 Apprentissage")
-uploaded = st.file_uploader("Fichier", type=["txt", "csv", "json"])
+
 if uploaded:
-text = read_any_file(uploaded)
-st.text_area("Aperçu", text[:500], height=150)
-if st.button("🧠 Apprendre"):
-with st.spinner("..."):
-stats = LearningEngine.learn(text)
-st.success("✅ OK")
-col_a, col_b, col_c = st.columns(3)
-col_a.metric("Mots", stats['words'])
-col_b.metric("Nouveaux", stats['new_words'])
-col_c.metric("L", f"{stats['L']:.3f}")
-if 'adjustment' in stats:
-st.info(f"Δλ = {stats['adjustment']['error']:.4f}")
-st.subheader("Manuel")
-manual = st.text_area("Texte", height=100)
-if st.button("Apprendre"):
-if manual.strip():
-stats = LearningEngine.learn(manual)
-st.success(f"✅ {stats['words']} | L={stats['L']:.3f}")
-with tab2:
-st.header("💬 Génération")
-seed = st.text_input("Mot")
-use_L = st.checkbox("Modulation L", value=True)
-if st.button("🚀 Générer"):
-if seed.strip():
-tokens = LinguisticProcessor.tokenize(seed)
-if tokens:
-result = GenerationEngine.think(
-tokens[0], gen_steps, temp, gen_method, use_L
+    text=uploaded.read().decode("utf-8","ignore")
+    n=learn(text)
+    st.success(f"{n} unités assimilées")
+
+prompt=st.text_input("Intention")
+
+if st.button("Penser"):
+
+    tokens=tokenize(prompt)
+
+    if tokens:
+        seed=prethink(tokens[0])
+        st.write(think(seed))
+    else:
+        st.warning("Phrase invalide.")
+
+# =====================================================
+# S+16 — STREAMLIT_UI_RENDER
+# =====================================================
+
+st.caption(
+    f"Temps cognitif : {round(st.session_state.cognitive_time,2)} s"
 )
-st.write("### Résultat")
-st.write(result)
-final_L = OperatorL.compute(LinguisticProcessor.tokenize(result))
-st.metric("L final", f"{final_L['L']:.3f}")
-stability_class = f"stability-{final_L['stability']}"
-st.markdown(f"<p class='{stability_class}'>{final_L['stability']}</p>",
-unsafe_allow_html=True)
-with tab3:
-st.header("🔬 Spectral")
-if not SpectralAnalysis.is_available():
-st.error("❌ Scipy/matplotlib requis")
-else:
-fragments = st.session_state.shadow_fragments
-if not fragments.empty:
-word_list = fragments.nlargest(100, 'count')['fragment'].tolist()
-selected = st.selectbox("Mot", word_list)
-nperseg = st.slider("Fenêtre", 32, 512, 128, 32)
-if st.button("📡 Analyser"):
-with st.spinner("..."):
-result = SpectralAnalysis.analyze_word(selected, nperseg)
-if "error" in result:
-st.error(result["error"])
-else:
-res = result["results"]
-fig1, fig2 = result["figures"]
-col1, col2, col3 = st.columns(3)
-col1.metric("Freq", f"{res['freq_dominant']:.4f}")
-col2.metric("ω", f"{res['omega']:.4f}")
-col3.metric("α", f"{res['alpha']:.4f}")
-st.pyplot(fig1)
-st.pyplot(fig2)
-with tab4:
-st.header("📈 λ Evolution")
-lambda_timeline = st.session_state.shadow_cortex.get("lambda_timeline", [])
-if lambda_timeline and MATPLOTLIB_AVAILABLE:
-recent = lambda_timeline[-1000:]
-lambdas = [x['lambda'] for x in recent]
-times = list(range(len(lambdas)))
-fig, ax = plt.subplots(figsize=(12, 5))
-ax.plot(times, lambdas, 'b-', alpha=0.7, linewidth=1)
-ax.axhline(0, color='red', linestyle='--', label='λ = 0')
-ax.axhline(OracleConfig.LEARNING["lambda_target"],
-color='green', linestyle='--', label='cible')
-ax.fill_between(times, -0.05, 0.05, alpha=0.2, color='green')
-ax.set_xlabel("Itérations")
-ax.set_ylabel("λ")
-ax.set_title("Évolution stabilité")
-ax.legend()
-ax.grid(True, alpha=0.3)
-st.pyplot(fig)
-col1, col2, col3 = st.columns(3)
-col1.metric("Moyen", f"{np.mean(lambdas):.4f}")
-col2.metric("Min", f"{np.min(lambdas):.4f}")
-col3.metric("Max", f"{np.max(lambdas):.4f}")
-else:
-st.info("Données insuffisantes")
-with tab5:
-st.header("🎯 Auto-Stabilisation")
-st.markdown("""
-""")
-st.divider()
-col1, col2 = st.columns(2)
-with col1:
-target = st.number_input("λ cible", value=-0.1, step=0.01, format="%.4f")
-OracleConfig.LEARNING["lambda_target"] = target
-with col2:
-lr = st.number_input("Learning rate", value=0.01, step=0.001, format="%.4f")
-OracleConfig.LEARNING["L_learning_rate"] = lr
-test_text = st.text_input("Test")
-if st.button("🧪 Tester"):
-if test_text.strip():
-tokens = LinguisticProcessor.tokenize(test_text)
-result = OperatorL.compute(tokens)
-col_a, col_b, col_c, col_d = st.columns(4)
-col_a.metric("L", f"{result['L']:.4f}")
-col_b.metric("λ", f"{result['lambda']:.4f}")
-col_c.metric("Gradient", f"{result['gradient']:.4f}")
-col_d.metric("Divergence", f"{result['divergence']:.4f}")
-st.write(f"**État**: {result['stability']}")
-if st.button("🔧 Ajuster"):
-adj = OperatorL.auto_adjust_weights(tokens, target)
-st.success(f"✅ Δ={adj['adjustment']:.4f}")
-st.write(f"Nouveau λ: {adj['new_lambda']:.4f}")
-with tab6:
-st.header("⚡ Export/Import")
-col1, col2 = st.columns(2)
-with col1:
-st.subheader("📤 Export")
-if st.button("Générer"):
-data = DataExporter.export_all()
-timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-st.download_button(
-"📥 Télécharger",
-data,
-file_name=f"oracle_v18_{timestamp}.json",
-mime="application/json"
-)
-with col2:
-st.subheader("📥 Import")
-import_file = st.file_uploader("Charger", type=["json"])
-if import_file and st.button("Importer"):
-json_data = import_file.read().decode('utf-8')
-if DataExporter.import_all(json_data):
-st.success("✅ OK")
-st.rerun()
-if __name__ == "__main__":
-main()
