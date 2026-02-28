@@ -327,34 +327,36 @@ def linguistic_context(seed):
 # S+12 — THINK_GENERATION_ENGINE
 # =====================================================
 
-def think(seed,steps=30):
+def think(seed, steps=30):
+    assoc = st.session_state.shadow_rel
 
-    assoc=st.session_state.shadow_rel
-
+    # Si la graine n'existe pas dans les relations, on ne peut pas lier
     if seed not in assoc:
-        return "Je dois encore apprendre."
+        return f"Le concept '{seed}' est isolé dans ma structure."
 
+    # Identification du contexte linguistique dominant
     ctx = linguistic_context(seed)
 
-    sent=[seed]
-    cur=seed
+    sent = [seed]
+    cur = seed
 
+    # Boucle de génération stochastique (Chaîne de Markov)
     for _ in range(steps):
-
-        nxt=assoc.get(cur)
+        nxt = assoc.get(cur)
         if not nxt:
             break
+        
+        # Sélection pondérée par les scores de fréquences apprises
+        w = list(nxt.keys())
+        p = np.array(list(nxt.values()), dtype=float)
+        p = p / p.sum()
 
-        w=list(nxt.keys())
-        p=np.array(list(nxt.values()),dtype=float)
-        p=p/p.sum()
-
-        cur=np.random.choice(w,p=p)
+        cur = np.random.choice(w, p=p)
         sent.append(cur)
 
-    sentence = " ".join(sent).capitalize()+"."
-
-    return f"[Contexte:{ctx['context']}] {sentence}"
+    # Mise en forme de la pensée
+    sentence = " ".join(sent).capitalize() + "."
+    return f"**[Contexte : {ctx['context']}]** {sentence}"
 
 # =====================================================
 # S+13 — COGNITIVE_METRICS
@@ -388,14 +390,14 @@ def diagnose():
     return "🧠 Absorption de bibliothèques en cours."
 
 # =====================================================
-# S+15 — USER_DIALOG_INTERFACE (Espace d'Échange)
+# S+15 — USER_DIALOG_INTERFACE
 # =====================================================
 
 st.title("🧠 ORACLE S+")
 
 ctx = st.session_state.shadow_cortex
 
-# --- Tableau de bord des métriques ---
+# --- Dashboard ---
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Vitalité", round(ctx["VS"], 2))
 c2.metric("Age", round(ctx["age"], 6)) 
@@ -404,72 +406,57 @@ c4.metric("Cohérence", semantic_coherence())
 
 st.info(diagnose())
 
-# --- Zone d'Apprentissage (Upload) ---
-with st.expander("📥 Nourrir l'IA (Documents)"):
-    uploaded = st.file_uploader(
-        "Déposer des fichiers pour apprentissage",
-        type=["txt","csv","docx","pdf"]
-    )
-
-    def read_docx(file):
-        doc_bin = io.BytesIO(file.read())
-        with zipfile.ZipFile(doc_bin) as z:
-            xml = z.read("word/document.xml")
-            tree = ET.fromstring(xml)
-            texts = [
-                node.text for node in tree.iter()
-                if node.tag.endswith("t") and node.text
-            ]
-        return " ".join(texts)
-        
+# --- Module d'Apprentissage ---
+with st.expander("📥 Ingestion de Données"):
+    uploaded = st.file_uploader("Fichier cible", type=["txt","csv","docx","pdf"])
     if uploaded:
         if uploaded.name.endswith(".docx"):
             text = read_docx(uploaded)
         else:
             text = uploaded.getvalue().decode("utf-8","ignore")
-
         n = learn(text)
-        st.success(f"{n} unités assimilées. L'IA a évolué.")
+        st.success(f"{n} unités intégrées au Cortex.")
 
-# --- Espace d'Échange Interactif ---
-st.subheader("💬 Dialogue avec l'Oracle")
+# --- Espace de Dialogue ---
+st.subheader("💬 Interface de Résonance")
 
-# Initialisation de l'historique de chat si inexistant
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Affichage de l'historique des messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Zone de saisie de l'Intention
-if prompt := st.chat_input("Exprimez votre intention ou testez un concept..."):
+if prompt := st.chat_input("Entrez votre phrase ou concept..."):
     
-    # 1. Afficher le message de l'utilisateur
     with st.chat_message("user"):
         st.markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # 2. Logique de pensée de l'IA
+    # ANALYSE DE LA PHRASE (Coordination avec S+12)
     tokens = tokenize(prompt)
     
     if tokens:
-        # L'IA prend le premier mot significatif comme graine (seed)
-        seed = prethink(tokens[0])
-        response = think(seed)
+        # On cherche le mot de la phrase le plus "connu" (score le plus haut)
+        df_frag = st.session_state.shadow_frag
+        known_tokens = df_frag[df_frag["fragment"].isin(tokens)]
         
-        # 3. Afficher la réponse de l'IA
+        if not known_tokens.empty:
+            # On prend le mot avec le plus grand 'count' comme point de départ
+            best_seed = known_tokens.loc[known_tokens["count"].idxmax(), "fragment"]
+            
+            # L'IA pré-calcule le lien le plus fort
+            seed = prethink(best_seed)
+            response = think(seed)
+        else:
+            # Si aucun mot n'est connu, l'IA tente une exploration sauvage
+            response = "Mes fragments actuels ne me permettent pas de lier ces concepts."
+        
         with st.chat_message("assistant", avatar="🧠"):
             st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
     else:
-        st.warning("L'intention est trop courte ou contient des caractères non reconnus.")
-
-# Bouton pour réinitialiser la discussion
-if st.button("Effacer la mémoire immédiate"):
-    st.session_state.messages = []
-    st.rerun()
+        st.warning("Système : Flux de caractères insuffisant.")
 
 # =====================================================
 # S+16 — STREAMLIT_UI_RENDER
