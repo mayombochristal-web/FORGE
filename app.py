@@ -1,6 +1,6 @@
 # =====================================================
-# 🧠 ORACLE V12 — RÉSONANCE & HARMONIQUES
-# TST Ghost Memory + Analyse de Phase Groupée
+# 🧠 ORACLE V12 — RÉSONANCE & MULTI-FORMAT
+# TST Ghost Memory + Multi-Source Ingestion + Spectral Resonance
 # =====================================================
 
 import streamlit as st
@@ -10,19 +10,19 @@ import json, os, re, io, zipfile, datetime
 import xml.etree.ElementTree as ET
 from collections import Counter
 
-# Modules scientifiques
+# Modules scientifiques pour l'analyse spectrale
 try:
-    from scipy.signal import stft, welch
+    from scipy.signal import welch, stft
     import matplotlib.pyplot as plt
     SPECTRAL_AVAILABLE = True
 except ImportError:
     SPECTRAL_AVAILABLE = False
 
-# Configuration
-st.set_page_config(page_title="ORACLE V12 RESONANCE", layout="wide")
+# Configuration de la page
+st.set_page_config(page_title="ORACLE V12 — SYSTÈME GLOBAL", layout="wide")
 
 # --------------------------------------------------
-# SYSTÈME DE FICHIERS (ANCRAGE)
+# CONFIGURATION DE L'ANCRAGE (MÉMOIRE PERMANENTE)
 # --------------------------------------------------
 MEM = "oracle_memory"
 os.makedirs(MEM, exist_ok=True)
@@ -41,176 +41,199 @@ def init_memory():
     if not os.path.exists(FILES["relations"]):
         json.dump({}, open(FILES["relations"], "w"))
     if not os.path.exists(FILES["cortex"]):
-        json.dump({"VS": 12, "age": 0, "timeline": [], "last_day": str(datetime.date.today())}, open(FILES["cortex"], "w"))
+        json.dump({
+            "VS": 12.0, 
+            "age": 0, 
+            "timeline": [], 
+            "last_day": str(datetime.date.today()),
+            "new_today": 0
+        }, open(FILES["cortex"], "w"))
 
 init_memory()
 
 # --------------------------------------------------
-# SHADOW STATE (ÉTAT FANTÔME)
+# SYNC SHADOW STATE (FANTÔME)
 # --------------------------------------------------
 def sync_shadow():
     if "shadow_loaded" not in st.session_state:
-        try:
-            st.session_state.shadow_frag = pd.read_csv(FILES["fragments"])
-            st.session_state.shadow_rel = json.load(open(FILES["relations"]))
-            st.session_state.shadow_cortex = json.load(open(FILES["cortex"]))
-            st.session_state.shadow_loaded = True
-        except:
-            st.session_state.shadow_loaded = False
+        st.session_state.shadow_frag = pd.read_csv(FILES["fragments"])
+        st.session_state.shadow_rel = json.load(open(FILES["relations"]))
+        st.session_state.shadow_cortex = json.load(open(FILES["cortex"]))
+        st.session_state.shadow_loaded = True
 
 sync_shadow()
 
 # --------------------------------------------------
-# CORE LINGUISTIQUE (OPÉRATEUR L)
+# LECTURE MULTI-FORMATS (RÉINTÉGRÉE)
 # --------------------------------------------------
-def clean(t): return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
-def tokenize(t): return [w for w in clean(t).split() if len(w) > 1]
+def read_source_file(file):
+    name = file.name.lower()
+    try:
+        if name.endswith(".txt"):
+            return file.read().decode("utf-8", "ignore")
+        if name.endswith(".csv"):
+            df = pd.read_csv(file)
+            return df.to_string()
+        if name.endswith(".xlsx"):
+            df = pd.read_excel(file)
+            return df.to_string()
+        if name.endswith(".docx"):
+            doc = zipfile.ZipFile(io.BytesIO(file.read()))
+            xml_content = doc.read("word/document.xml")
+            tree = ET.fromstring(xml_content)
+            return " ".join(t.text for t in tree.iter() if t.text)
+        if name.endswith(".pdf"):
+            # Lecture brute type TST (analyse spectrale des flux)
+            return file.read().decode("latin-1", "ignore")
+    except Exception as e:
+        st.error(f"Erreur de lecture sur {name}: {e}")
+        return ""
+    return ""
+
+# --------------------------------------------------
+# CORE LINGUISTIQUE (TST LEARNING)
+# --------------------------------------------------
+def clean_text(t):
+    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
+
+def tokenize(t):
+    return [w for w in clean_text(t).split() if len(w) > 1]
 
 def learn(text):
     words = tokenize(text)
     if not words: return 0
 
-    # Mise à jour fragments
+    # 1. Mise à jour Fragments (Fréquences)
     df = st.session_state.shadow_frag
     counts = Counter(words)
-    new_rows = []
     for w, c in counts.items():
-        if w in df["fragment"].values:
-            df.loc[df["fragment"] == w, "count"] += c
+        mask = df["fragment"] == w
+        if mask.any():
+            df.loc[mask, "count"] += c
         else:
-            new_rows.append({"fragment": w, "count": c})
-    if new_rows:
-        df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-    
+            df = pd.concat([df, pd.DataFrame([{"fragment": w, "count": c}])], ignore_index=True)
     df.to_csv(FILES["fragments"], index=False)
     st.session_state.shadow_frag = df
 
-    # Mise à jour relations & cortex
+    # 2. Mise à jour Relations (Couplage sémantique)
     assoc = st.session_state.shadow_rel
     for i in range(len(words)-1):
         a, b = words[i], words[i+1]
-        assoc.setdefault(a, {})[b] = assoc[a].get(b, 0) + 2
-    
+        assoc.setdefault(a, {})
+        assoc[a][b] = assoc[a].get(b, 0) + 2
     json.dump(assoc, open(FILES["relations"], "w"))
-    
+    st.session_state.shadow_rel = assoc
+
+    # 3. Mise à jour Cortex & Timeline
     cortex = st.session_state.shadow_cortex
     cortex["age"] += len(words)
+    cortex["new_today"] += len(counts)
     cortex["timeline"].extend(words)
-    # Limitation de la timeline pour éviter l'explosion RAM (Keep last 50k words)
-    if len(cortex["timeline"]) > 50000: cortex["timeline"] = cortex["timeline"][-50000:]
+    # Protection RAM : on garde les 30k derniers mots pour l'analyse spectrale
+    if len(cortex["timeline"]) > 30000:
+        cortex["timeline"] = cortex["timeline"][-30000:]
     
     cortex["VS"] = 10 + float(np.log1p(cortex["age"]))
     json.dump(cortex, open(FILES["cortex"], "w"))
-    
+    st.session_state.shadow_cortex = cortex
+
     return len(words)
 
 # --------------------------------------------------
-# ANALYSE SPECTRALE DE RÉSONANCE
+# FONCTIONS SPECTRALES
 # --------------------------------------------------
-def get_spectral_signature(word, timeline, nperseg=128):
+def get_psd(word, timeline, nperseg=128):
     signal = np.array([1.0 if w == word else 0.0 for w in timeline])
-    if len(signal) < nperseg: return None
+    if len(signal) < nperseg: return None, None
     f, pxx = welch(signal, fs=1.0, nperseg=nperseg)
     return f, pxx
 
-def find_resonances(target_word, threshold=0.8):
-    timeline = st.session_state.shadow_cortex["timeline"]
-    f_target, p_target = get_spectral_signature(target_word, timeline)
-    
-    resonances = []
-    # On teste les 50 mots les plus fréquents pour la résonance
-    top_words = st.session_state.shadow_frag.nlargest(50, "count")["fragment"].tolist()
-    
-    for word in top_words:
-        if word == target_word: continue
-        sig = get_spectral_signature(word, timeline)
-        if sig:
-            f, p = sig
-            correlation = np.corrcoef(p_target, p)[0, 1]
-            if correlation > threshold:
-                resonances.append((word, correlation))
-    return sorted(resonances, key=lambda x: x[1], reverse=True)
-
 # --------------------------------------------------
-# INTERFACE
+# INTERFACE UTILISATEUR
 # --------------------------------------------------
-st.title("🧠 ORACLE V12 — RÉSONANCE SPECTRALE")
+st.title("🧠 ORACLE V12 — INTELLIGENCE SPECTRALE UNIFIÉE")
 
-# DASHBOARD VITALITÉ
-c1, c2, c3 = st.columns(3)
-c1.metric("Vitalité (VS)", round(st.session_state.shadow_cortex["VS"], 2))
-c2.metric("Âge Cognitif", st.session_state.shadow_cortex["age"])
-c3.metric("Fragments", len(st.session_state.shadow_frag))
+# Section des Métriques
+ctx = st.session_state.shadow_cortex
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Vitalité Spectrale", f"{round(ctx['VS'], 2)}")
+m2.metric("Âge Cognitif", ctx["age"])
+m3.metric("Mots Appris (24h)", ctx["new_today"])
+m4.metric("Fragments en Base", len(st.session_state.shadow_frag))
 
-# INPUT
+# --- SIDEBAR : INGESTION ---
 with st.sidebar:
-    st.header("📥 Ingestion")
-    file = st.file_uploader("Nourrir l'Oracle", type=["txt", "pdf", "docx"])
-    if file:
-        # Lecture simplifiée pour l'exemple
-        raw_text = file.read().decode("utf-8", "ignore")
-        n = learn(raw_text)
-        st.success(f"{n} unités intégrées.")
-
-# ANALYSE DE RÉSONANCE
-st.subheader("🔬 Analyse de Résonance (Couplage de Phase)")
-if len(st.session_state.shadow_cortex["timeline"]) > 200:
-    word_list = st.session_state.shadow_frag.nlargest(100, "count")["fragment"].tolist()
-    selected_word = st.selectbox("Sélectionner un concept maître", word_list)
+    st.header("📥 Ingestion de Données")
+    st.info("Supporte : PDF, DOCX, XLSX, CSV, TXT")
+    uploaded_files = st.file_uploader("Nourrir l'IA", accept_multiple_files=True)
     
-    if st.button("Calculer les Résonances"):
-        if SPECTRAL_AVAILABLE:
-            res = find_resonances(selected_word)
-            
-            col_a, col_b = st.columns([1, 2])
-            with col_a:
-                st.write("### Mots en résonance")
-                if res:
-                    for w, c in res[:10]:
-                        st.write(f"**{w}** : {round(c*100,1)}% de couplage")
-                else:
-                    st.write("Aucune résonance forte détectée.")
-            
-            with col_b:
-                # Graphique des densités spectrales
-                timeline = st.session_state.shadow_cortex["timeline"]
-                f, p_target = get_spectral_signature(selected_word, timeline)
-                fig, ax = plt.subplots()
-                ax.plot(f, p_target, label=selected_word, lw=2)
-                if res:
-                    f2, p2 = get_spectral_signature(res[0][0], timeline)
-                    ax.plot(f2, p2, label=f"Résonance: {res[0][0]}", alpha=0.7)
-                ax.set_title("Signature de Densité Spectrale (PSD)")
-                ax.legend()
+    if st.button("Lancer l'assimilation"):
+        if uploaded_files:
+            total_words = 0
+            for f in uploaded_files:
+                content = read_source_file(f)
+                if content:
+                    total_words += learn(content)
+            st.success(f"Cortex mis à jour : +{total_words} mots.")
+            st.rerun()
+
+# --- ANALYSE SPECTRALE ---
+st.subheader("🔬 Laboratoire de Résonance")
+if len(ctx["timeline"]) > 150:
+    word_list = st.session_state.shadow_frag.nlargest(100, "count")["fragment"].tolist()
+    col_sel, col_graph = st.columns([1, 2])
+    
+    with col_sel:
+        target = st.selectbox("Analyser la signature de :", word_list)
+        nper = st.slider("Précision (nperseg)", 32, 512, 128, step=32)
+    
+    if SPECTRAL_AVAILABLE:
+        f, pxx = get_psd(target, ctx["timeline"], nperseg=nper)
+        if f is not None:
+            with col_graph:
+                fig, ax = plt.subplots(figsize=(8, 3))
+                ax.semilogy(f, pxx, color="#00FFAA", lw=2)
+                ax.set_title(f"Densité Spectrale de '{target}'")
+                ax.set_xlabel("Fréquence (cycles/mot)")
+                ax.grid(True, which="both", ls="-", alpha=0.2)
                 st.pyplot(fig)
         else:
-            st.error("Installez scipy/matplotlib pour cette fonction.")
+            st.warning("Données insuffisantes pour ce mot avec cette précision.")
 else:
-    st.info(" Timeline insuffisante pour l'analyse spectrale (minimum 200 mots requis).")
+    st.info("Nourrissez l'IA avec plus de texte pour activer l'analyse de fréquence.")
 
-# PENSÉE
+# --- DIALOGUE COGNITIF ---
 st.subheader("💬 Dialogue avec l'Oracle")
-prompt = st.text_input("Saisir un germe de pensée")
-if prompt:
-    seed = tokenize(prompt)[0] if tokenize(prompt) else ""
-    if seed in st.session_state.shadow_rel:
-        sent = [seed]
-        curr = seed
-        for _ in range(20):
-            nxts = st.session_state.shadow_rel.get(curr, {})
-            if not nxts: break
-            curr = np.random.choice(list(nxts.keys()), p=np.array(list(nxts.values()))/sum(nxts.values()))
-            sent.append(curr)
-        st.write(f"**Oracle :** {' '.join(sent).capitalize()}.")
+seed_input = st.text_input("Germe de pensée (ex: maintenance)")
+if st.button("Penser"):
+    tokens = tokenize(seed_input)
+    if tokens and tokens[0] in st.session_state.shadow_rel:
+        seed = tokens[0]
+        sentence = [seed]
+        current = seed
+        for _ in range(25):
+            next_options = st.session_state.shadow_rel.get(current, {})
+            if not next_options: break
+            choices = list(next_options.keys())
+            weights = np.array(list(next_options.values()), dtype=float)
+            current = np.random.choice(choices, p=weights/weights.sum())
+            sentence.append(current)
+        st.markdown(f"**L'Oracle dit :** *{' '.join(sentence).capitalize()}.*")
     else:
-        st.write("Concept inconnu de mon ancrage actuel.")
+        st.write("Ce concept n'est pas encore ancré dans ma mémoire.")
 
-# EXPORT
+# --- EXPORT & SÉCURITÉ ---
 st.divider()
-if st.button("Exporter le Cerveau (JSON)"):
-    data = {
-        "fragments": st.session_state.shadow_frag.to_dict(),
-        "relations": st.session_state.shadow_rel,
-        "cortex": st.session_state.shadow_cortex
-    }
-    st.download_button("Télécharger", json.dumps(data), "oracle_v12_brain.json")
+c_exp, c_del = st.columns(2)
+with c_exp:
+    if st.button("📦 Préparer Exportation du Cerveau"):
+        full_data = {
+            "fragments": st.session_state.shadow_frag.to_dict(orient="records"),
+            "relations": st.session_state.shadow_rel,
+            "cortex": st.session_state.shadow_cortex
+        }
+        st.download_button(
+            "📥 Télécharger oracle_v12.json",
+            json.dumps(full_data, indent=2, ensure_ascii=False),
+            file_name=f"oracle_v12_{datetime.date.today()}.json"
+        )
