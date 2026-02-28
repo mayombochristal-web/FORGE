@@ -372,20 +372,20 @@ def semantic_coherence():
 # =====================================================
 
 def diagnose():
+    cortex = st.session_state.shadow_cortex
+    density = association_density()
 
-    cortex=st.session_state.shadow_cortex
-    density=association_density()
+    # Diagnostic basé sur l'activité récente et la densité du réseau
+    if cortex["new_today"] < 10:
+        return "🧠 Oracle en attente d'assimilation massive."
 
-    if cortex["new_today"]<20:
-        return "🧠 J'ai besoin d'apprendre."
+    if density < 2:
+        return "🧠 Réseau en cours de structuration initiale."
 
-    if density<1.5:
-        return "🧠 Donne-moi plus de textes."
+    if density > 5:
+        return "🧠 Sagesse Titan active : Résonance émergente détectée."
 
-    if density>4:
-        return "🧠 Raisonnement émergent."
-
-    return "🧠 Apprentissage actif."
+    return "🧠 Absorption de bibliothèques en cours."
 
 # =====================================================
 # S+15 — USER_DIALOG_INTERFACE
