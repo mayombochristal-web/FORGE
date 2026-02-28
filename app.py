@@ -203,7 +203,6 @@ def tokenize(t):
 # =====================================================
 
 def learn(text):
-
     # --- Niveau caractère ---
     chars = char_tokens(text)
 
@@ -215,7 +214,7 @@ def learn(text):
 
     df = st.session_state.shadow_frag.copy()
 
-    # apprentissage fragments
+    # Apprentissage fragments
     counts = Counter(words)
 
     for w,c in counts.items():
@@ -234,13 +233,13 @@ def learn(text):
     # --- Relations TST ---
     assoc = st.session_state.shadow_rel
 
-    # relations caractères → mots
+    # Relations caractères → caractères
     for i in range(len(chars)-1):
         a,b = chars[i],chars[i+1]
         assoc.setdefault(a,{})
         assoc[a][b] = assoc[a].get(b,0)+1
 
-    # relations mots → mots
+    # Relations mots → mots
     for i in range(len(words)-1):
         a,b = words[i],words[i+1]
         assoc.setdefault(a,{})
@@ -248,17 +247,24 @@ def learn(text):
 
     save_json(FILES["relations"],assoc)
 
-    # --- Cortex ---
+    # --- Cortex (Physique "Titan") ---
     cortex = st.session_state.shadow_cortex
 
-    today=str(datetime.date.today())
-    if cortex["last_day"]!=today:
-        cortex["new_today"]=0
-        cortex["last_day"]=today
+    today = str(datetime.date.today())
+    if cortex["last_day"] != today:
+        cortex["new_today"] = 0
+        cortex["last_day"] = today
 
-    cortex["age"] += len(chars)
+    # CALCUL DE L'ÂGE TITAN
+    # 1 unité = 100 livres * 1000 pages * 2500 caractères
+    UNITE_MASSIVE = 250_000_000 
+    gain_age = len(chars) / UNITE_MASSIVE
+    
+    cortex["age"] += gain_age 
     cortex["new_today"] += len(counts)
-    cortex["VS"] = 10 + float(np.log1p(cortex["age"]))
+    
+    # VS ajusté pour rester sensible à l'échelle décimale
+    cortex["VS"] = 10 + float(np.log1p(cortex["age"] * 1000))
 
     cortex["timeline"].extend(words[-50:])
 
