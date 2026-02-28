@@ -44,9 +44,11 @@ FILES = {
 # =====================================================
 
 def load_json(p):
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
-
+    try:
+        with open(p,"r",encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {}
 def save_json(p, d):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=2)
