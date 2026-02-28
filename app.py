@@ -199,77 +199,50 @@ def tokenize(t):
     return [w for w in clean(t).split() if len(w) > 1]
 
 # =====================================================
-# S+09 — LEARNING_ENGINE_CORE
+# S+09 — LEARNING_ENGINE_CORE (OPTIMISÉ)
 # =====================================================
 
 def learn(text):
-    # --- Niveau caractère ---
     chars = char_tokens(text)
-
-    # --- Niveau mot ---
     words = tokenize(text)
+    if not words: return 0
 
-    if not words:
-        return 0
-
-    df = st.session_state.shadow_frag.copy()
-
-    # Apprentissage fragments
+    # 1. Mise à jour fragments (Méthode Dict pour la vitesse)
+    df = st.session_state.shadow_frag
     counts = Counter(words)
+    
+    # Conversion en dictionnaire pour fusion rapide
+    current_memory = dict(zip(df.fragment, df['count']))
+    for w, c in counts.items():
+        current_memory[w] = current_memory.get(w, 0) + c
+    
+    # Reconstruction du DataFrame
+    new_df = pd.DataFrame(list(current_memory.items()), columns=["fragment", "count"])
+    st.session_state.shadow_frag = new_df
+    save_frag(new_df)
 
-    for w,c in counts.items():
-        mask = df["fragment"] == w
-        if mask.any():
-            df.loc[mask,"count"] += c
-        else:
-            df = pd.concat(
-                [df, pd.DataFrame([[w,c]],columns=df.columns)],
-                ignore_index=True
-            )
-
-    save_frag(df)
-    st.session_state.shadow_frag = df
-
-    # --- Relations TST ---
+    # 2. Mise à jour Relations (TST)
     assoc = st.session_state.shadow_rel
-
-    # Relations caractères → caractères
-    for i in range(len(chars)-1):
-        a,b = chars[i],chars[i+1]
-        assoc.setdefault(a,{})
-        assoc[a][b] = assoc[a].get(b,0)+1
-
-    # Relations mots → mots
     for i in range(len(words)-1):
-        a,b = words[i],words[i+1]
-        assoc.setdefault(a,{})
-        assoc[a][b] = assoc[a].get(b,0)+2
+        a, b = words[i], words[i+1]
+        assoc.setdefault(a, {})
+        assoc[a][b] = assoc[a].get(b, 0) + 2
+    save_json(FILES["relations"], assoc)
 
-    save_json(FILES["relations"],assoc)
-
-    # --- Cortex (Physique "Titan") ---
+    # 3. Cortex (Physique Titan)
     cortex = st.session_state.shadow_cortex
-
     today = str(datetime.date.today())
     if cortex["last_day"] != today:
         cortex["new_today"] = 0
         cortex["last_day"] = today
 
-    # CALCUL DE L'ÂGE TITAN
-    # 1 unité = 100 livres * 1000 pages * 2500 caractères
+    # Facteur de compression massive
     UNITE_MASSIVE = 250_000_000 
-    gain_age = len(chars) / UNITE_MASSIVE
-    
-    cortex["age"] += gain_age 
+    cortex["age"] += len(chars) / UNITE_MASSIVE
     cortex["new_today"] += len(counts)
-    
-    # VS ajusté pour rester sensible à l'échelle décimale
     cortex["VS"] = 10 + float(np.log1p(cortex["age"] * 1000))
 
-    cortex["timeline"].extend(words[-50:])
-
-    save_json(FILES["cortex"],cortex)
-
+    save_json(FILES["cortex"], cortex)
     return len(words)
 
 # =====================================================
