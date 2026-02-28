@@ -110,6 +110,9 @@ cognitive_tick()
 # S+08 — TEXT_NORMALIZER_TOKENIZER
 # =====================================================
 
+def char_tokens(text):
+    return [c for c in text.lower() if c.strip()]
+    
 def clean(t):
     return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
 
@@ -122,11 +125,18 @@ def tokenize(t):
 
 def learn(text):
 
+    # --- Niveau caractère ---
+    chars = char_tokens(text)
+
+    # --- Niveau mot ---
     words = tokenize(text)
+
     if not words:
         return 0
 
     df = st.session_state.shadow_frag.copy()
+
+    # apprentissage fragments
     counts = Counter(words)
 
     for w,c in counts.items():
@@ -142,8 +152,16 @@ def learn(text):
     save_frag(df)
     st.session_state.shadow_frag = df
 
+    # --- Relations TST ---
     assoc = st.session_state.shadow_rel
 
+    # relations caractères → mots
+    for i in range(len(chars)-1):
+        a,b = chars[i],chars[i+1]
+        assoc.setdefault(a,{})
+        assoc[a][b] = assoc[a].get(b,0)+1
+
+    # relations mots → mots
     for i in range(len(words)-1):
         a,b = words[i],words[i+1]
         assoc.setdefault(a,{})
@@ -151,6 +169,7 @@ def learn(text):
 
     save_json(FILES["relations"],assoc)
 
+    # --- Cortex ---
     cortex = st.session_state.shadow_cortex
 
     today=str(datetime.date.today())
@@ -158,11 +177,11 @@ def learn(text):
         cortex["new_today"]=0
         cortex["last_day"]=today
 
-    cortex["age"]+=len(words)
-    cortex["new_today"]+=len(counts)
-    cortex["VS"]=10+float(np.log1p(cortex["age"]))
+    cortex["age"] += len(chars)
+    cortex["new_today"] += len(counts)
+    cortex["VS"] = 10 + float(np.log1p(cortex["age"]))
 
-    cortex["timeline"].extend(words)
+    cortex["timeline"].extend(words[-50:])
 
     save_json(FILES["cortex"],cortex)
 
@@ -190,6 +209,34 @@ def prethink(seed):
         return max(assoc[seed], key=assoc[seed].get)
 
     return seed
+    
+# =====================================================
+# S+11B — LINGUISTIC OPERATOR L (TST)
+# =====================================================
+
+def linguistic_context(seed):
+
+    assoc = st.session_state.shadow_rel
+
+    if seed not in assoc:
+        return {"context":"exploration"}
+
+    neighbors = assoc[seed]
+
+    themes = {}
+    for w,score in neighbors.items():
+        root = w[:4]
+        themes[root] = themes.get(root,0)+score
+
+    if not themes:
+        return {"context":"vide"}
+
+    context = max(themes, key=themes.get)
+
+    return {
+        "context":context,
+        "strength":themes[context]
+    }
 
 # =====================================================
 # S+12 — THINK_GENERATION_ENGINE
@@ -201,6 +248,8 @@ def think(seed,steps=30):
 
     if seed not in assoc:
         return "Je dois encore apprendre."
+
+    ctx = linguistic_context(seed)
 
     sent=[seed]
     cur=seed
@@ -218,7 +267,9 @@ def think(seed,steps=30):
         cur=np.random.choice(w,p=p)
         sent.append(cur)
 
-    return " ".join(sent).capitalize()+"."
+    sentence = " ".join(sent).capitalize()+"."
+
+    return f"[Contexte:{ctx['context']}] {sentence}"
 
 # =====================================================
 # S+13 — COGNITIVE_METRICS
@@ -267,10 +318,35 @@ c4.metric("Cohérence",semantic_coherence())
 
 st.info(diagnose())
 
-uploaded=st.file_uploader(
+uploaded = st.file_uploader(
     "Nourrir l'IA",
-    type=["txt","csv"]
+    type=["txt","csv","docx","pdf"]
 )
+
+def read_docx(file):
+
+    doc_bin = io.BytesIO(file.read())
+
+    with zipfile.ZipFile(doc_bin) as z:
+        xml = z.read("word/document.xml")
+        tree = ET.fromstring(xml)
+
+        texts = [
+            node.text for node in tree.iter()
+            if node.tag.endswith("t") and node.text
+        ]
+
+    return " ".join(texts)
+    
+if uploaded:
+
+    if uploaded.name.endswith(".docx"):
+        text = read_docx(uploaded)
+    else:
+        text = uploaded.read().decode("utf-8","ignore")
+
+    n=learn(text)
+    st.success(f"{n} unités assimilées")
 
 if uploaded:
     text=uploaded.read().decode("utf-8","ignore")
