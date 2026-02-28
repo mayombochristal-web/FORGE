@@ -450,3 +450,13 @@ spectral_ui(
     st.session_state.shadow_cortex,
     st.session_state.shadow_frag["fragment"].tolist()
 )
+
+# CODE DE CONVERSION UNIQUE
+if st.button("Convertir l'âge en échelle Titan"):
+    cortex = load_json(FILES["cortex"])
+    # Si l'âge est encore en millions (ancienne version)
+    if cortex["age"] > 1000:
+        cortex["age"] = cortex["age"] / 250_000_000
+        save_json(FILES["cortex"], cortex)
+        st.success(f"Conversion réussie ! Nouvel âge : {cortex['age']}")
+        st.rerun()
