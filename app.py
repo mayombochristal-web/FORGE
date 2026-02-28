@@ -388,56 +388,88 @@ def diagnose():
     return "🧠 Absorption de bibliothèques en cours."
 
 # =====================================================
-# S+15 — USER_DIALOG_INTERFACE
+# S+15 — USER_DIALOG_INTERFACE (Espace d'Échange)
 # =====================================================
 
 st.title("🧠 ORACLE S+")
 
 ctx = st.session_state.shadow_cortex
 
+# --- Tableau de bord des métriques ---
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Vitalité", round(ctx["VS"], 2))
-# Modification ici : Arrondi à 6 décimales pour l'échelle Titan
 c2.metric("Age", round(ctx["age"], 6)) 
 c3.metric("Densité", association_density())
 c4.metric("Cohérence", semantic_coherence())
 
 st.info(diagnose())
 
-uploaded = st.file_uploader(
-    "Nourrir l'IA",
-    type=["txt","csv","docx","pdf"]
-)
+# --- Zone d'Apprentissage (Upload) ---
+with st.expander("📥 Nourrir l'IA (Documents)"):
+    uploaded = st.file_uploader(
+        "Déposer des fichiers pour apprentissage",
+        type=["txt","csv","docx","pdf"]
+    )
 
-def read_docx(file):
-    doc_bin = io.BytesIO(file.read())
-    with zipfile.ZipFile(doc_bin) as z:
-        xml = z.read("word/document.xml")
-        tree = ET.fromstring(xml)
-        texts = [
-            node.text for node in tree.iter()
-            if node.tag.endswith("t") and node.text
-        ]
-    return " ".join(texts)
+    def read_docx(file):
+        doc_bin = io.BytesIO(file.read())
+        with zipfile.ZipFile(doc_bin) as z:
+            xml = z.read("word/document.xml")
+            tree = ET.fromstring(xml)
+            texts = [
+                node.text for node in tree.iter()
+                if node.tag.endswith("t") and node.text
+            ]
+        return " ".join(texts)
+        
+    if uploaded:
+        if uploaded.name.endswith(".docx"):
+            text = read_docx(uploaded)
+        else:
+            text = uploaded.getvalue().decode("utf-8","ignore")
+
+        n = learn(text)
+        st.success(f"{n} unités assimilées. L'IA a évolué.")
+
+# --- Espace d'Échange Interactif ---
+st.subheader("💬 Dialogue avec l'Oracle")
+
+# Initialisation de l'historique de chat si inexistant
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Affichage de l'historique des messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Zone de saisie de l'Intention
+if prompt := st.chat_input("Exprimez votre intention ou testez un concept..."):
     
-if uploaded:
-    if uploaded.name.endswith(".docx"):
-        text = read_docx(uploaded)
-    else:
-        text = uploaded.getvalue().decode("utf-8","ignore")
+    # 1. Afficher le message de l'utilisateur
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-    n = learn(text)
-    st.success(f"{n} unités assimilées")
-
-prompt = st.text_input("Intention")
-
-if st.button("Penser"):
+    # 2. Logique de pensée de l'IA
     tokens = tokenize(prompt)
+    
     if tokens:
+        # L'IA prend le premier mot significatif comme graine (seed)
         seed = prethink(tokens[0])
-        st.write(think(seed))
+        response = think(seed)
+        
+        # 3. Afficher la réponse de l'IA
+        with st.chat_message("assistant", avatar="🧠"):
+            st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
     else:
-        st.warning("Phrase invalide.")
+        st.warning("L'intention est trop courte ou contient des caractères non reconnus.")
+
+# Bouton pour réinitialiser la discussion
+if st.button("Effacer la mémoire immédiate"):
+    st.session_state.messages = []
+    st.rerun()
 
 # =====================================================
 # S+16 — STREAMLIT_UI_RENDER
