@@ -373,3 +373,7 @@ if st.button("Penser"):
 st.caption(
     f"Temps cognitif : {round(st.session_state.cognitive_time,2)} s"
 )
+spectral_ui(
+    st.session_state.shadow_cortex,
+    st.session_state.shadow_frag["fragment"].tolist()
+)
