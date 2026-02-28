@@ -78,6 +78,84 @@ def init_memory():
 
 init_memory()
 
+# ==========================================================
+# B2.5 — Cognitive Runtime Guard
+# Stabilisation session + cohérence TTU runtime
+# ==========================================================
+
+import time
+import uuid
+import streamlit as st
+
+
+# ----------------------------------------------------------
+# Runtime ID unique (évite duplication session)
+# ----------------------------------------------------------
+def runtime_id():
+    if "runtime_id" not in st.session_state:
+        st.session_state.runtime_id = str(uuid.uuid4())
+    return st.session_state.runtime_id
+
+
+# ----------------------------------------------------------
+# Horloge cognitive (∆t interne)
+# ----------------------------------------------------------
+def cognitive_clock():
+    now = time.time()
+
+    if "cognitive_time" not in st.session_state:
+        st.session_state.cognitive_time = now
+        st.session_state.delta_t = 0.0
+    else:
+        st.session_state.delta_t = now - st.session_state.cognitive_time
+        st.session_state.cognitive_time = now
+
+    return st.session_state.delta_t
+
+
+# ----------------------------------------------------------
+# Guard anti double-exécution Streamlit
+# ----------------------------------------------------------
+def runtime_guard():
+
+    if "initialized" not in st.session_state:
+        st.session_state.initialized = True
+        st.session_state.boot_time = time.time()
+        st.session_state.rerun_count = 0
+    else:
+        st.session_state.rerun_count += 1
+
+
+# ----------------------------------------------------------
+# Synchronisation mémoire dialogue
+# (corrige message invisible)
+# ----------------------------------------------------------
+def sync_dialog_memory():
+
+    if "dialog" not in st.session_state:
+        st.session_state.dialog = []
+
+    if "pending_output" in st.session_state:
+        st.session_state.dialog.append(
+            st.session_state.pending_output
+        )
+        del st.session_state.pending_output
+
+
+# ----------------------------------------------------------
+# Bootstrap global
+# ----------------------------------------------------------
+def cognitive_bootstrap():
+
+    runtime_guard()
+    runtime_id()
+    cognitive_clock()
+    sync_dialog_memory()
+
+
+# lancement automatique
+cognitive_bootstrap()
+
 # =====================================================
 # S+06 — SHADOW_STATE_LOADER
 # =====================================================
