@@ -1,0 +1,37 @@
+name: Oracle Auto-Feed
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # S'exécute automatiquement toutes les heures
+  workflow_dispatch:      # Permet de lancer le nourrissage manuellement depuis l'onglet "Actions"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # Crucial : autorise GitHub Actions à modifier tes fichiers CSV/JSON
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy feedparser
+
+      - name: Run Oracle Worker
+        run: |
+          python auto_worker.py
+
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "oracle-worker@github.com"
+          git config --local user.name "Oracle-Bot"
+          git add oracle_memory/fragments.csv oracle_memory/relations.json oracle_memory/cortex.json
+          # On ne commit que s'il y a des changements pour éviter les erreurs
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 Auto-Learning : $(date +'%Y-%m-%d %H:%M')" && git push)
