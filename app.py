@@ -393,13 +393,14 @@ def diagnose():
 
 st.title("🧠 ORACLE S+")
 
-ctx=st.session_state.shadow_cortex
+ctx = st.session_state.shadow_cortex
 
-c1,c2,c3,c4=st.columns(4)
-c1.metric("Vitalité",round(ctx["VS"],2))
-c2.metric("Age",ctx["age"])
-c3.metric("Densité",association_density())
-c4.metric("Cohérence",semantic_coherence())
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Vitalité", round(ctx["VS"], 2))
+# Modification ici : Arrondi à 6 décimales pour l'échelle Titan
+c2.metric("Age", round(ctx["age"], 6)) 
+c3.metric("Densité", association_density())
+c4.metric("Cohérence", semantic_coherence())
 
 st.info(diagnose())
 
@@ -420,7 +421,6 @@ def read_docx(file):
     return " ".join(texts)
     
 if uploaded:
-    # Lecture unique du fichier selon son extension
     if uploaded.name.endswith(".docx"):
         text = read_docx(uploaded)
     else:
