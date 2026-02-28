@@ -403,43 +403,32 @@ uploaded = st.file_uploader(
 )
 
 def read_docx(file):
-
     doc_bin = io.BytesIO(file.read())
-
     with zipfile.ZipFile(doc_bin) as z:
         xml = z.read("word/document.xml")
         tree = ET.fromstring(xml)
-
         texts = [
             node.text for node in tree.iter()
             if node.tag.endswith("t") and node.text
         ]
-
     return " ".join(texts)
     
 if uploaded:
-
+    # Lecture unique du fichier selon son extension
     if uploaded.name.endswith(".docx"):
         text = read_docx(uploaded)
     else:
-        text = uploaded.read().decode("utf-8","ignore")
+        text = uploaded.getvalue().decode("utf-8","ignore")
 
-    n=learn(text)
+    n = learn(text)
     st.success(f"{n} unités assimilées")
 
-if uploaded:
-    text=uploaded.read().decode("utf-8","ignore")
-    n=learn(text)
-    st.success(f"{n} unités assimilées")
-
-prompt=st.text_input("Intention")
+prompt = st.text_input("Intention")
 
 if st.button("Penser"):
-
-    tokens=tokenize(prompt)
-
+    tokens = tokenize(prompt)
     if tokens:
-        seed=prethink(tokens[0])
+        seed = prethink(tokens[0])
         st.write(think(seed))
     else:
         st.warning("Phrase invalide.")
