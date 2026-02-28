@@ -83,11 +83,6 @@ init_memory()
 # Stabilisation session + cohérence TTU runtime
 # ==========================================================
 
-import time
-import uuid
-import streamlit as st
-
-
 # ----------------------------------------------------------
 # Runtime ID unique (évite duplication session)
 # ----------------------------------------------------------
