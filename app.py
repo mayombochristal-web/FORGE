@@ -15,6 +15,9 @@ LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
 
 if not os.path.exists(MEM_DIR):
     os.makedirs(MEM_DIR)
+if not os.path.exists(LEXICON_PATH):
+    with open(LEXICON_PATH, "w", encoding="utf-8") as f:
+        json.dump({}, f) # Crée un cerveau vide
 
 # ==========================================
 # 2. MOTEUR TTU (Dynamique Interne)
