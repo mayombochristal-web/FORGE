@@ -1,7 +1,6 @@
 streamlit
 PyPDF2
-SpeechRecognition
 python-docx
 pandas
 openpyxl
-
+SpeechRecognition
