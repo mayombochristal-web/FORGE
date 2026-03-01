@@ -68,6 +68,66 @@ def save_frag(df):
     df.to_csv(FILES["fragments"], index=False)
 
 # =====================================================
+# FUSION ENGINE — Cognitive Merge Core
+# =====================================================
+
+def merge_fragments(local_df, incoming_df):
+
+    # si mémoire vide
+    if local_df.empty:
+        return incoming_df
+
+    merged = dict(zip(local_df["fragment"], local_df["count"]))
+
+    # addition des occurrences
+    for _, row in incoming_df.iterrows():
+        merged[row["fragment"]] = (
+            merged.get(row["fragment"], 0) + row["count"]
+        )
+
+    return pd.DataFrame(
+        list(merged.items()),
+        columns=["fragment", "count"]
+    )
+
+
+def merge_relations(local_rel, incoming_rel):
+
+    for a, links in incoming_rel.items():
+
+        local_rel.setdefault(a, {})
+
+        for b, w in links.items():
+            local_rel[a][b] = local_rel[a].get(b, 0) + w
+
+    return local_rel
+
+
+def merge_cortex(local_ctx, incoming_ctx):
+
+    # âge cognitif cumulé
+    local_ctx["age"] += incoming_ctx.get("age", 0)
+
+    # apprentissage du jour
+    local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
+
+    # fusion timeline
+    local_ctx.setdefault("timeline", [])
+    local_ctx["timeline"].extend(
+        incoming_ctx.get("timeline", [])
+    )
+
+    # limite mémoire
+    local_ctx["timeline"] = local_ctx["timeline"][-5000:]
+
+    # recalcul vitalité
+    local_ctx["VS"] = 10 + float(
+        np.log1p(local_ctx["age"] * 1000)
+    )
+
+    return local_ctx
+
+# =====================================================
 # S+05 — MEMORY_INITIALIZER
 # =====================================================
 
@@ -383,7 +443,61 @@ with col3:
             )
 
 # =====================================================
-# S+16.6 — MEMORY IMPORT PANEL
+# S+16.7 — COGNITIVE MERGE ENGINE
+# =====================================================
+
+def merge_fragments(local_df, incoming_df):
+
+    if local_df.empty:
+        return incoming_df
+
+    merged = dict(zip(local_df["fragment"], local_df["count"]))
+
+    for _, row in incoming_df.iterrows():
+        merged[row["fragment"]] = (
+            merged.get(row["fragment"], 0) + row["count"]
+        )
+
+    return pd.DataFrame(
+        list(merged.items()),
+        columns=["fragment", "count"]
+    )
+
+
+def merge_relations(local_rel, incoming_rel):
+
+    for a, links in incoming_rel.items():
+
+        local_rel.setdefault(a, {})
+
+        for b, w in links.items():
+            local_rel[a][b] = local_rel[a].get(b, 0) + w
+
+    return local_rel
+
+
+def merge_cortex(local_ctx, incoming_ctx):
+
+    local_ctx["age"] += incoming_ctx.get("age", 0)
+    local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
+
+    # fusion timeline
+    local_ctx["timeline"].extend(
+        incoming_ctx.get("timeline", [])
+    )
+
+    # limite mémoire
+    local_ctx["timeline"] = local_ctx["timeline"][-5000:]
+
+    # recalcul VS (stabilité cognitive)
+    local_ctx["VS"] = 10 + float(
+        np.log1p(local_ctx["age"] * 1000)
+    )
+
+    return local_ctx
+
+# =====================================================
+# S+16.6 — MEMORY IMPORT PANEL (FUSION ACTIVE)
 # =====================================================
 
 st.subheader("📥 Importer une mémoire Oracle")
@@ -397,7 +511,6 @@ import zipfile
 import io
 
 def safe_reload():
-    # recharge le shadow state après import
     st.session_state.shadow_loaded = False
     sync_shadow()
 
@@ -406,7 +519,7 @@ if uploaded is not None:
     try:
 
         # ==============================
-        # CAS 1 — ZIP COMPLET
+        # CAS 1 — ZIP COMPLET (FUSION)
         # ==============================
         if uploaded.name.endswith(".zip"):
 
@@ -414,46 +527,71 @@ if uploaded is not None:
 
             for name in z.namelist():
 
+                # ---- fragments ----
                 if "fragments" in name:
-                    with open(FILES["fragments"], "wb") as f:
-                        f.write(z.read(name))
+                    incoming_df = pd.read_csv(z.open(name))
+                    local_df = load_frag()
 
+                    merged_df = merge_fragments(local_df, incoming_df)
+                    save_frag(merged_df)
+
+                # ---- relations ----
                 elif "relations" in name:
-                    with open(FILES["relations"], "wb") as f:
-                        f.write(z.read(name))
+                    incoming_rel = json.load(z.open(name))
+                    local_rel = load_json(FILES["relations"])
 
+                    merged_rel = merge_relations(local_rel, incoming_rel)
+                    save_json(FILES["relations"], merged_rel)
+
+                # ---- cortex ----
                 elif "cortex" in name:
-                    with open(FILES["cortex"], "wb") as f:
-                        f.write(z.read(name))
+                    incoming_ctx = json.load(z.open(name))
+                    local_ctx = load_json(FILES["cortex"])
+
+                    merged_ctx = merge_cortex(local_ctx, incoming_ctx)
+                    save_json(FILES["cortex"], merged_ctx)
 
             safe_reload()
-            st.success("✅ Mémoire complète importée.")
+            st.success("✅ Mémoire fusionnée (ZIP).")
 
         # ==============================
-        # CAS 2 — CSV (fragments)
+        # CAS 2 — CSV fragments (FUSION)
         # ==============================
         elif uploaded.name.endswith(".csv"):
 
-            df = pd.read_csv(uploaded)
-            save_frag(df)
+            incoming_df = pd.read_csv(uploaded)
+            local_df = load_frag()
+
+            merged_df = merge_fragments(local_df, incoming_df)
+            save_frag(merged_df)
 
             safe_reload()
-            st.success("✅ fragments.csv importé.")
+            st.success("✅ fragments fusionnés.")
 
         # ==============================
-        # CAS 3 — JSON
+        # CAS 3 — JSON (FUSION AUTO)
         # ==============================
         elif uploaded.name.endswith(".json"):
 
             data = json.load(uploaded)
 
-            # détection automatique
+            # cortex détecté
             if "timeline" in data:
-                save_json(FILES["cortex"], data)
-                st.success("✅ cortex.json importé.")
+
+                local_ctx = load_json(FILES["cortex"])
+                merged_ctx = merge_cortex(local_ctx, data)
+
+                save_json(FILES["cortex"], merged_ctx)
+                st.success("✅ cortex fusionné.")
+
+            # relations détectées
             else:
-                save_json(FILES["relations"], data)
-                st.success("✅ relations.json importé.")
+
+                local_rel = load_json(FILES["relations"])
+                merged_rel = merge_relations(local_rel, data)
+
+                save_json(FILES["relations"], merged_rel)
+                st.success("✅ relations fusionnées.")
 
             safe_reload()
 
