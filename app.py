@@ -338,6 +338,129 @@ if prompt := st.chat_input("Entrez un concept..."):
     st.rerun()
 
 # =====================================================
+# S+16.5 — MEMORY EXPORT PANEL
+# =====================================================
+
+st.divider()
+st.subheader("💾 Exporter la mémoire Oracle")
+
+col1, col2, col3 = st.columns(3)
+
+# --- fragments.csv ---
+with col1:
+    if os.path.exists(FILES["fragments"]):
+        with open(FILES["fragments"], "rb") as f:
+            st.download_button(
+                label="⬇️ fragments.csv",
+                data=f,
+                file_name="oracle_fragments.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+# --- relations.json ---
+with col2:
+    if os.path.exists(FILES["relations"]):
+        with open(FILES["relations"], "rb") as f:
+            st.download_button(
+                label="⬇️ relations.json",
+                data=f,
+                file_name="oracle_relations.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+# --- cortex.json ---
+with col3:
+    if os.path.exists(FILES["cortex"]):
+        with open(FILES["cortex"], "rb") as f:
+            st.download_button(
+                label="⬇️ cortex.json",
+                data=f,
+                file_name="oracle_cortex.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+# =====================================================
+# S+16.6 — MEMORY IMPORT PANEL
+# =====================================================
+
+st.subheader("📥 Importer une mémoire Oracle")
+
+uploaded = st.file_uploader(
+    "Importer fragments / relations / cortex ou un ZIP complet",
+    type=["csv", "json", "zip"],
+)
+
+import zipfile
+import io
+
+def safe_reload():
+    # recharge le shadow state après import
+    st.session_state.shadow_loaded = False
+    sync_shadow()
+
+if uploaded is not None:
+
+    try:
+
+        # ==============================
+        # CAS 1 — ZIP COMPLET
+        # ==============================
+        if uploaded.name.endswith(".zip"):
+
+            z = zipfile.ZipFile(io.BytesIO(uploaded.read()))
+
+            for name in z.namelist():
+
+                if "fragments" in name:
+                    with open(FILES["fragments"], "wb") as f:
+                        f.write(z.read(name))
+
+                elif "relations" in name:
+                    with open(FILES["relations"], "wb") as f:
+                        f.write(z.read(name))
+
+                elif "cortex" in name:
+                    with open(FILES["cortex"], "wb") as f:
+                        f.write(z.read(name))
+
+            safe_reload()
+            st.success("✅ Mémoire complète importée.")
+
+        # ==============================
+        # CAS 2 — CSV (fragments)
+        # ==============================
+        elif uploaded.name.endswith(".csv"):
+
+            df = pd.read_csv(uploaded)
+            save_frag(df)
+
+            safe_reload()
+            st.success("✅ fragments.csv importé.")
+
+        # ==============================
+        # CAS 3 — JSON
+        # ==============================
+        elif uploaded.name.endswith(".json"):
+
+            data = json.load(uploaded)
+
+            # détection automatique
+            if "timeline" in data:
+                save_json(FILES["cortex"], data)
+                st.success("✅ cortex.json importé.")
+            else:
+                save_json(FILES["relations"], data)
+                st.success("✅ relations.json importé.")
+
+            safe_reload()
+
+    except Exception as e:
+        st.error(f"❌ Import impossible : {e}")
+
+# =====================================================
 # S+16 — UI RENDER
 # =====================================================
 
