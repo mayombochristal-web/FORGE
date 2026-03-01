@@ -1,5 +1,4 @@
 streamlit
-numpy
-matplotlib
 PyPDF2
-python-docx
+SpeechRecognition
+numpy
