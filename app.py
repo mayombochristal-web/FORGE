@@ -1,9 +1,5 @@
 # =====================================================
-# 🧠 ORACLE S+ — ARCHITECTURE COGNITIVE STABLE
-# =====================================================
-
-# =====================================================
-# S+01 — IMPORT_SYSTEM_CORE
+# 🧠 ORACLE S+ — ARCHITECTURE COGNITIVE STABLE (v2)
 # =====================================================
 
 import streamlit as st
@@ -11,6 +7,19 @@ import pandas as pd
 import numpy as np
 import json, os, re, datetime, time, uuid, glob
 from collections import Counter
+
+# <<< ajout pour le module mémoire >>>
+from oracle_memory.oracle_memory import (
+    init_memory,
+    load_frag,
+    save_frag,
+    load_json,
+    save_json,
+    merge_fragments,
+    merge_relations,
+    merge_cortex,
+    FILES,   # si tu exposes ce dict dans oracle_memory.py
+)
 
 # Spectral UI (safe import)
 try:
@@ -32,372 +41,217 @@ except ImportError:
     PdfReader = None
 
 # =====================================================
-# S+02 — STREAMLIT_PAGE_CONFIG
+# CONFIGURATION
 # =====================================================
 
 st.set_page_config(page_title="ORACLE S+", layout="wide")
 
-# =====================================================
-# S+03 — MEMORY_PATH_MANAGER
-# =====================================================
-
 BASE_DIR = os.path.dirname(__file__) if "__file__" in globals() else "."
-MEM = os.path.join(BASE_DIR, "oracle_memory")
-os.makedirs(MEM, exist_ok=True)
+MEM_DIR = os.path.join(BASE_DIR, "oracle_memory")
+os.makedirs(MEM_DIR, exist_ok=True)
 
 FILES = {
-    "fragments": os.path.join(MEM, "fragments.csv"),
-    "relations": os.path.join(MEM, "relations.json"),
-    "cortex": os.path.join(MEM, "cortex.json"),
+    "fragments": os.path.join(MEM_DIR, "fragments.csv"),
+    "relations": os.path.join(MEM_DIR, "relations.json"),
+    "cortex":    os.path.join(MEM_DIR, "cortex.json"),
 }
 
 # =====================================================
-# S+04 — SAFE_IO_LAYER
+# UTILITAIRES I/O
 # =====================================================
 
-def load_json(p):
+def load_json(path):
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return {}
 
-def save_json(p, d):
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_frag():
-    return pd.read_csv(FILES["fragments"])
+    return pd.read_csv(FILES["fragments"]) if os.path.exists(FILES["fragments"]) else pd.DataFrame(columns=["fragment", "count"])
 
 def save_frag(df):
     df.to_csv(FILES["fragments"], index=False)
 
 # =====================================================
-# FUSION ENGINE — Cognitive Merge Core
-# =====================================================
-
-def merge_fragments(local_df, incoming_df):
-
-    # si mémoire vide
-    if local_df.empty:
-        return incoming_df
-
-    merged = dict(zip(local_df["fragment"], local_df["count"]))
-
-    # addition des occurrences
-    for _, row in incoming_df.iterrows():
-        merged[row["fragment"]] = (
-            merged.get(row["fragment"], 0) + row["count"]
-        )
-
-    return pd.DataFrame(
-        list(merged.items()),
-        columns=["fragment", "count"]
-    )
-
-
-def merge_relations(local_rel, incoming_rel):
-
-    for a, links in incoming_rel.items():
-
-        local_rel.setdefault(a, {})
-
-        for b, w in links.items():
-            local_rel[a][b] = local_rel[a].get(b, 0) + w
-
-    return local_rel
-
-
-def merge_cortex(local_ctx, incoming_ctx):
-
-    # âge cognitif cumulé
-    local_ctx["age"] += incoming_ctx.get("age", 0)
-
-    # apprentissage du jour
-    local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
-
-    # fusion timeline
-    local_ctx.setdefault("timeline", [])
-    local_ctx["timeline"].extend(
-        incoming_ctx.get("timeline", [])
-    )
-
-    # limite mémoire
-    local_ctx["timeline"] = local_ctx["timeline"][-5000:]
-
-    # recalcul vitalité
-    local_ctx["VS"] = 10 + float(
-        np.log1p(local_ctx["age"] * 1000)
-    )
-
-    return local_ctx
-
-# =====================================================
-# S+05 — MEMORY_INITIALIZER
+# INITIALISATION DE LA MÉMOIRE
 # =====================================================
 
 def init_memory():
-
     if not os.path.exists(FILES["fragments"]):
-        pd.DataFrame(columns=["fragment", "count"]).to_csv(
-            FILES["fragments"], index=False
-        )
-
+        save_frag(pd.DataFrame(columns=["fragment", "count"]))
     if not os.path.exists(FILES["relations"]):
         save_json(FILES["relations"], {})
-
     if not os.path.exists(FILES["cortex"]):
         save_json(FILES["cortex"], {
-            "VS": 12,
-            "age": 0,
-            "new_today": 0,
-            "last_day": str(datetime.date.today()),
-            "timeline": [],
+            "VS": 12, "age": 0, "new_today": 0,
+            "last_day": str(datetime.date.today()), "timeline": []
         })
 
 init_memory()
 
 # =====================================================
-# B2.5 — COGNITIVE RUNTIME GUARD
+# SHADOW STATE MANAGER
 # =====================================================
 
-def runtime_id():
-    if "runtime_id" not in st.session_state:
-        st.session_state.runtime_id = str(uuid.uuid4())
-
-def cognitive_clock():
-    now = time.time()
-    if "cognitive_time" not in st.session_state:
-        st.session_state.cognitive_time = now
-        st.session_state.delta_t = 0.0
-    else:
-        st.session_state.delta_t = now - st.session_state.cognitive_time
-        st.session_state.cognitive_time = now
-
-def runtime_guard():
-    if "initialized" not in st.session_state:
-        st.session_state.initialized = True
-        st.session_state.boot_time = time.time()
-        st.session_state.rerun_count = 0
-    else:
-        st.session_state.rerun_count += 1
-
-def cognitive_bootstrap():
-    runtime_guard()
-    runtime_id()
-    cognitive_clock()
-
-cognitive_bootstrap()
-
-# =====================================================
-# S+06 — SHADOW_STATE_LOADER
-# =====================================================
-
-def sync_shadow():
-
-    if "shadow_loaded" not in st.session_state:
-
-        st.session_state.shadow_frag = load_frag().copy()
+def sync_shadow(force=False):
+    """Recharge la mémoire complète dans la session Streamlit."""
+    if force or "shadow_loaded" not in st.session_state:
+        st.session_state.shadow_frag = load_frag()
         st.session_state.shadow_rel = load_json(FILES["relations"])
         st.session_state.shadow_cortex = load_json(FILES["cortex"])
-
         st.session_state.shadow_loaded = True
 
+def safe_reload(): sync_shadow(force=True)
 sync_shadow()
 
 # =====================================================
-# S+17 — DELTA_K REGULATOR
+# FONCTIONS TEXTE
 # =====================================================
 
-def delta_k_runtime():
+def clean(text):
+    return re.sub(r"[^wàâéèêëîïôùûüœs]", " ", text.lower())
 
-    cortex = st.session_state.shadow_cortex
-
-    new = cortex.get("new_today",0)
-    age = max(cortex.get("age",1),1)
-
-    ratio = new / age
-
-    cortex["delta_ratio"] = ratio
-
-    if ratio > 0.30:
-        st.warning("⚠️ Surcharge cognitive détectée (∆k/k élevé)")
-
-delta_k_runtime()
+def tokenize(text):
+    return [w for w in clean(text).split() if len(w) > 2 and not w.isnumeric()]
 
 # =====================================================
-# S+08 — TEXT_NORMALIZER
-# =====================================================
-
-def char_tokens(text):
-    return [c for c in text.lower() if c.strip()]
-
-def clean(t):
-    return re.sub(r"[^\wàâéèêëîïôùûüœ\s]", " ", t.lower())
-
-def tokenize(t):
-    return [w for w in clean(t).split() if len(w) > 1]
-
-# =====================================================
-# DOCX READER
+# LECTEURS DE FICHIER
 # =====================================================
 
 def read_docx(file):
-    if Document is None:
-        return ""
-    doc = Document(file)
-    return "\n".join(p.text for p in doc.paragraphs)
-
-# =====================================================
-# PDF READER
-# =====================================================
+    if Document is None: return ""
+    return "
+".join(p.text for p in Document(file).paragraphs)
 
 def read_pdf(file):
-
-    if PdfReader is None:
-        return ""
-
+    if PdfReader is None: return ""
     try:
         reader = PdfReader(file)
-        text = []
-
-        for page in reader.pages:
-            content = page.extract_text()
-            if content:
-                text.append(content)
-
-        return "\n".join(text)
-
+        text_pages = [p.extract_text() or "" for p in reader.pages]
+        text = "
+".join(text_pages)
+        # filtre PDF corrompu
+        if re.search(r"obj|stream|flatedecode", text, re.IGNORECASE):
+            st.warning("⚠️ Contenu PDF non textuel détecté — filtrage effectué.")
+            text = re.sub(r"\b(obj|endobj|stream|flatedecode)\b", "", text)
+        return text
     except Exception:
         return ""
 
 # =====================================================
-# S+09 — LEARNING_ENGINE_CORE
+# APPRENTISSAGE
 # =====================================================
 
 def learn(text):
+    if not text.strip():
+        return 0
 
-    chars = char_tokens(text)
     words = tokenize(text)
+    chars = [c for c in text if c.strip()]
     if not words:
         return 0
 
     df = st.session_state.shadow_frag
-
-    if df.empty:
-        current_memory = {}
-    else:
-        current_memory = dict(zip(df["fragment"], df["count"]))
-
+    fragments = dict(zip(df["fragment"], df["count"]))
     counts = Counter(words)
 
     for w, c in counts.items():
-        current_memory[w] = current_memory.get(w, 0) + c
+        fragments[w] = fragments.get(w, 0) + c
 
-    new_df = pd.DataFrame(
-        list(current_memory.items()),
-        columns=["fragment", "count"],
-    )
-
+    new_df = pd.DataFrame(list(fragments.items()), columns=["fragment", "count"])
     st.session_state.shadow_frag = new_df
     save_frag(new_df)
 
     assoc = st.session_state.shadow_rel
-
-    for i in range(len(words) - 1):
-        a, b = words[i], words[i + 1]
+    window = 3  # fenêtre de lien élargie
+    for i in range(len(words)):
+        a = words[i]
         assoc.setdefault(a, {})
-        assoc[a][b] = assoc[a].get(b, 0) + 2
-
+        for j in range(1, window + 1):
+            if i + j < len(words):
+                b = words[i + j]
+                assoc[a][b] = assoc[a].get(b, 0) + (window - j + 1)
     save_json(FILES["relations"], assoc)
 
     cortex = st.session_state.shadow_cortex
     today = str(datetime.date.today())
-
     if cortex["last_day"] != today:
         cortex["new_today"] = 0
         cortex["last_day"] = today
 
     UNITE_MASSIVE = 250_000_000
-
     cortex["age"] += len(chars) / UNITE_MASSIVE
     cortex["new_today"] += len(counts)
     cortex["VS"] = 10 + float(np.log1p(cortex["age"] * 1000))
-
     save_json(FILES["cortex"], cortex)
 
+    safe_reload()
     return len(words)
 
 # =====================================================
-# S+10 — SEMANTIC METRICS
+# MOTEUR COGNITIF
+# =====================================================
+
+def prethink(seed):
+    assoc = st.session_state.shadow_rel
+    if seed in assoc and assoc[seed]:
+        return max(assoc[seed], key=assoc[seed].get)
+    return seed
+
+def think(seed, steps=30, temp=1.0):
+    assoc = st.session_state.shadow_rel
+    if seed not in assoc or not assoc[seed]:
+        return f"Le concept '{seed}' est isolé dans ma structure."
+
+    sent, cur = [seed], seed
+    for _ in range(steps):
+        nxt = assoc.get(cur)
+        if not nxt: break
+        words = list(nxt.keys())
+        probs = np.array(list(nxt.values()), dtype=float)
+        probs **= 1 / temp
+        probs /= probs.sum()
+        cur = np.random.choice(words, p=probs)
+        sent.append(cur)
+    return " ".join(sent).capitalize() + "."
+
+# =====================================================
+# MÉTRIQUES SÉMANTIQUES
 # =====================================================
 
 def association_density():
     assoc = st.session_state.shadow_rel
-    links = sum(len(v) for v in assoc.values())
     vocab = len(assoc)
+    links = sum(len(v) for v in assoc.values())
     return round(links / max(vocab, 1), 2)
 
-# =====================================================
-# S+11 — PRETHINK
-# =====================================================
-
-def prethink(seed):
-
-    assoc = st.session_state.shadow_rel
-
-    if seed in assoc and assoc[seed]:
-        return max(assoc[seed], key=assoc[seed].get)
-
-    return seed
+def delta_k_runtime():
+    ctx = st.session_state.shadow_cortex
+    ratio = ctx.get("new_today", 0) / max(ctx.get("age", 1), 1)
+    ctx["delta_ratio"] = ratio
+    if ratio > 0.30:
+        st.warning("⚠️ Surcharge cognitive détectée (∆k/k élevé)")
 
 # =====================================================
-# S+12 — THINK ENGINE
+# INTERFACE PRINCIPALE
 # =====================================================
 
-def think(seed, steps=30, temp=1.0):
-
-    assoc = st.session_state.shadow_rel
-
-    if seed not in assoc:
-        return f"Le concept '{seed}' est isolé dans ma structure."
-
-    sent = [seed]
-    cur = seed
-
-    for _ in range(steps):
-
-        nxt = assoc.get(cur)
-        if not nxt:
-            break
-
-        w = list(nxt.keys())
-        p = np.array(list(nxt.values()), dtype=float)
-
-        p = p ** (1 / temp)
-        p = p / p.sum()
-
-        cur = np.random.choice(w, p=p)
-        sent.append(cur)
-
-    return " ".join(sent).capitalize() + "."
-
-# =====================================================
-# S+15 — USER INTERFACE
-# =====================================================
-
-st.title("🧠 ORACLE S+")
+st.title("🧠 ORACLE S+")
 
 ctx = st.session_state.shadow_cortex
-
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Vitalité", round(ctx["VS"], 2))
-c2.metric("Age", round(ctx["age"], 6))
+c2.metric("Âge", round(ctx["age"], 6))
 c3.metric("Densité", association_density())
 c4.metric("Concepts", len(st.session_state.shadow_frag))
+delta_k_runtime()
 
-# CHAT
-
+# Chat interactif
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -406,263 +260,113 @@ for m in st.session_state.messages:
         st.markdown(m["content"])
 
 if prompt := st.chat_input("Entrez un concept..."):
-
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
-    )
-
+    st.session_state.messages.append({"role": "user", "content": prompt})
     tokens = tokenize(prompt)
-
+    response = "Flux insuffisant."
     if tokens:
         seed = prethink(tokens[0])
         response = think(seed)
-    else:
-        response = "Flux insuffisant."
-
-    st.session_state.messages.append(
-        {"role": "assistant", "content": response}
-    )
-
+    st.session_state.messages.append({"role": "assistant", "content": response})
     st.rerun()
 
 # =====================================================
-# S+16.5 — MEMORY EXPORT PANEL
+# PANNEAU D'IMPORT / EXPORT
 # =====================================================
 
 st.divider()
-st.subheader("💾 Exporter la mémoire Oracle")
+st.subheader("💾 Mémoire Oracle — Import / Export")
 
 col1, col2, col3 = st.columns(3)
-
-# --- fragments.csv ---
 with col1:
     if os.path.exists(FILES["fragments"]):
         with open(FILES["fragments"], "rb") as f:
-            st.download_button(
-                label="⬇️ fragments.csv",
-                data=f,
-                file_name="oracle_fragments.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
-# --- relations.json ---
+            st.download_button("⬇️ fragments.csv", f, "oracle_fragments.csv", "text/csv", use_container_width=True)
 with col2:
     if os.path.exists(FILES["relations"]):
         with open(FILES["relations"], "rb") as f:
-            st.download_button(
-                label="⬇️ relations.json",
-                data=f,
-                file_name="oracle_relations.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-
-# --- cortex.json ---
+            st.download_button("⬇️ relations.json", f, "oracle_relations.json", "application/json", use_container_width=True)
 with col3:
     if os.path.exists(FILES["cortex"]):
         with open(FILES["cortex"], "rb") as f:
-            st.download_button(
-                label="⬇️ cortex.json",
-                data=f,
-                file_name="oracle_cortex.json",
-                mime="application/json",
-                use_container_width=True,
-            )
+            st.download_button("⬇️ cortex.json", f, "oracle_cortex.json", "application/json", use_container_width=True)
 
-# =====================================================
-# S+16.7 — COGNITIVE MERGE ENGINE
-# =====================================================
+uploaded = st.file_uploader("Importer une mémoire ou un texte (.csv, .json, .zip, .pdf, .docx, .txt)")
 
-def merge_fragments(local_df, incoming_df):
-
-    if local_df.empty:
-        return incoming_df
-
-    merged = dict(zip(local_df["fragment"], local_df["count"]))
-
-    for _, row in incoming_df.iterrows():
-        merged[row["fragment"]] = (
-            merged.get(row["fragment"], 0) + row["count"]
-        )
-
-    return pd.DataFrame(
-        list(merged.items()),
-        columns=["fragment", "count"]
-    )
-
-
-def merge_relations(local_rel, incoming_rel):
-
-    for a, links in incoming_rel.items():
-
-        local_rel.setdefault(a, {})
-
-        for b, w in links.items():
-            local_rel[a][b] = local_rel[a].get(b, 0) + w
-
-    return local_rel
-
-
-def merge_cortex(local_ctx, incoming_ctx):
-
-    local_ctx["age"] += incoming_ctx.get("age", 0)
-    local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
-
-    # fusion timeline
-    local_ctx["timeline"].extend(
-        incoming_ctx.get("timeline", [])
-    )
-
-    # limite mémoire
-    local_ctx["timeline"] = local_ctx["timeline"][-5000:]
-
-    # recalcul VS (stabilité cognitive)
-    local_ctx["VS"] = 10 + float(
-        np.log1p(local_ctx["age"] * 1000)
-    )
-
-    return local_ctx
-
-# =====================================================
-# S+16.6 — MEMORY IMPORT PANEL (FUSION ACTIVE)
-# =====================================================
-
-st.subheader("📥 Importer une mémoire Oracle")
-
-uploaded = st.file_uploader(
-    "Importer fragments / relations / cortex ou un ZIP complet",
-    type=["csv", "json", "zip"],
-)
-
-uploaded = st.file_uploader(
-    "Fichier cible",
-    type=["txt","csv","docx","pdf"]
-)
-
-
-import zipfile
-import io
-
-def safe_reload():
-    st.session_state.shadow_loaded = False
-    sync_shadow()
-
-if uploaded is not None:
-
+if uploaded:
     try:
-
-        # ==========================
-        # DOCX
-        # ==========================
+        # Texte bruts
         if uploaded.name.endswith(".docx"):
-
-            if Document is None:
-                st.error("Support DOCX non installé.")
-                st.stop()
-
             text = read_docx(uploaded)
-
-        # ==========================
-        # PDF
-        # ==========================
+            n = learn(text)
+            st.success(f"✅ {n} mots appris.")
         elif uploaded.name.endswith(".pdf"):
-
-            if PdfReader is None:
-                st.error("Support PDF non installé (pypdf).")
-                st.stop()
-
             text = read_pdf(uploaded)
-
-        # ==============================
-        # CAS 1 — ZIP COMPLET (FUSION)
-        # ==============================
-        if uploaded.name.endswith(".zip"):
-
-            z = zipfile.ZipFile(io.BytesIO(uploaded.read()))
-
-            for name in z.namelist():
-
-                # ---- fragments ----
-                if "fragments" in name:
-                    incoming_df = pd.read_csv(z.open(name))
-                    local_df = load_frag()
-
-                    merged_df = merge_fragments(local_df, incoming_df)
-                    save_frag(merged_df)
-
-                # ---- relations ----
-                elif "relations" in name:
-                    incoming_rel = json.load(z.open(name))
-                    local_rel = load_json(FILES["relations"])
-
-                    merged_rel = merge_relations(local_rel, incoming_rel)
-                    save_json(FILES["relations"], merged_rel)
-
-                # ---- cortex ----
-                elif "cortex" in name:
-                    incoming_ctx = json.load(z.open(name))
-                    local_ctx = load_json(FILES["cortex"])
-
-                    merged_ctx = merge_cortex(local_ctx, incoming_ctx)
-                    save_json(FILES["cortex"], merged_ctx)
-
-            safe_reload()
-            st.success("✅ Mémoire fusionnée (ZIP).")
-
-        # ==============================
-        # CAS 2 — CSV fragments (FUSION)
-        # ==============================
+            n = learn(text)
+            st.success(f"✅ {n} mots appris.")
+        elif uploaded.name.endswith(".txt"):
+            text = uploaded.read().decode("utf-8", errors="ignore")
+            n = learn(text)
+            st.success(f"✅ {n} mots appris.")
+        # Mémoire
         elif uploaded.name.endswith(".csv"):
-
             incoming_df = pd.read_csv(uploaded)
-            local_df = load_frag()
-
-            merged_df = merge_fragments(local_df, incoming_df)
-            save_frag(merged_df)
-
-            safe_reload()
+            merged_df = pd.concat([load_frag(), incoming_df]).groupby("fragment", as_index=False).sum()
+            save_frag(merged_df); safe_reload()
             st.success("✅ fragments fusionnés.")
-
-        # ==============================
-        # CAS 3 — JSON (FUSION AUTO)
-        # ==============================
         elif uploaded.name.endswith(".json"):
-
             data = json.load(uploaded)
-
-            # cortex détecté
             if "timeline" in data:
-
-                local_ctx = load_json(FILES["cortex"])
-                merged_ctx = merge_cortex(local_ctx, data)
-
-                save_json(FILES["cortex"], merged_ctx)
+                ctx = merge_cortex(load_json(FILES["cortex"]), data)
+                save_json(FILES["cortex"], ctx)
                 st.success("✅ cortex fusionné.")
-
-            # relations détectées
             else:
-
-                local_rel = load_json(FILES["relations"])
-                merged_rel = merge_relations(local_rel, data)
-
-                save_json(FILES["relations"], merged_rel)
+                rel = merge_relations(load_json(FILES["relations"]), data)
+                save_json(FILES["relations"], rel)
                 st.success("✅ relations fusionnées.")
-
             safe_reload()
-
+        elif uploaded.name.endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(uploaded.read())) as z:
+                for name in z.namelist():
+                    if name.endswith("fragments.csv"):
+                        df = pd.read_csv(z.open(name))
+                        merged_df = pd.concat([load_frag(), df]).groupby("fragment", as_index=False).sum()
+                        save_frag(merged_df)
+                    elif name.endswith("relations.json"):
+                        rel = merge_relations(load_json(FILES["relations"]), json.load(z.open(name)))
+                        save_json(FILES["relations"], rel)
+                    elif name.endswith("cortex.json"):
+                        ctx = merge_cortex(load_json(FILES["cortex"]), json.load(z.open(name)))
+                        save_json(FILES["cortex"], ctx)
+            safe_reload()
+            st.success("✅ Mémoire ZIP fusionnée.")
     except Exception as e:
         st.error(f"❌ Import impossible : {e}")
 
 # =====================================================
-# S+16 — UI RENDER
+# VISUALISATION SPECTRALE
 # =====================================================
 
-st.caption(
-    f"Temps cognitif : {round(st.session_state.delta_t,2)} s"
-)
+st.caption(f"Temps cognitif : {round(time.time(),2)} s")
+spectral_ui(st.session_state.shadow_cortex, st.session_state.shadow_frag["fragment"].tolist())
 
-spectral_ui(
-    st.session_state.shadow_cortex,
-    st.session_state.shadow_frag["fragment"].tolist()
-)
+# =====================================================
+# OUTILS DE FUSION (RÉUTILISÉS POUR ZIP/JSON)
+# =====================================================
+
+def merge_fragments(local_df, incoming_df):
+    return pd.concat([local_df, incoming_df]).groupby("fragment", as_index=False).sum()
+
+def merge_relations(local_rel, incoming_rel):
+    for a, links in incoming_rel.items():
+        local_rel.setdefault(a, {})
+        for b, w in links.items():
+            local_rel[a][b] = local_rel[a].get(b, 0) + w
+    return local_rel
+
+def merge_cortex(local_ctx, incoming_ctx):
+    local_ctx["age"] += incoming_ctx.get("age", 0)
+    local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
+    local_ctx["timeline"].extend(incoming_ctx.get("timeline", []))
+    local_ctx["timeline"] = local_ctx["timeline"][-5000:]
+    local_ctx["VS"] = 10 + float(np.log1p(local_ctx["age"] * 1000))
+    return local_ctx
