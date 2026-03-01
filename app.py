@@ -161,6 +161,7 @@ cognitive_bootstrap()
 # S+06 — SHADOW_STATE_LOADER
 # =====================================================
 
+hash check
 def sync_shadow():
 
     if "shadow_loaded" not in st.session_state:
@@ -174,19 +175,6 @@ def sync_shadow():
 sync_shadow()
 
 # =====================================================
-# S+07 — COGNITIVE_TIME_TRACKER
-# =====================================================
-
-def cognitive_tick():
-
-    if "t0" not in st.session_state:
-        st.session_state.t0 = time.time()
-
-    st.session_state.cognitive_time = time.time() - st.session_state.t0
-
-cognitive_tick()
-
-# =====================================================
 # S+08 — TEXT_NORMALIZER_TOKENIZER
 # =====================================================
 
@@ -194,7 +182,7 @@ def char_tokens(text):
     return [c for c in text.lower() if c.strip()]
     
 def clean(t):
-    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
+    return re.sub(r"[^\wàâéèêëîïôùûüœ\s]", " ", t.lower())
 
 def tokenize(t):
     return [w for w in clean(t).split() if len(w) > 1]
@@ -245,6 +233,10 @@ def learn(text):
 
     save_json(FILES["cortex"], cortex)
     return len(words)
+if df.empty:
+    current_memory = {}
+else:
+    current_memory = dict(zip(df["fragment"], df["count"]))
 
 # =====================================================
 # S+10 — SEMANTIC_SEARCH_ENGINE
@@ -323,6 +315,7 @@ def think(seed, steps=30):
         # Sélection pondérée par les scores de fréquences apprises
         w = list(nxt.keys())
         p = np.array(list(nxt.values()), dtype=float)
+        p = p ** (1/temp)
         p = p / p.sum()
 
         cur = np.random.choice(w, p=p)
@@ -389,8 +382,13 @@ if st.button("Scanner le dossier source_data"):
                 if file_name.endswith(".docx"):
                     # On ouvre le fichier en mode binaire local
                     with open(file_path, "rb") as f:
-                        text = read_docx(f)
-                else:
+                        text = from docx import Document
+
+def read_docx(file):
+    doc = Document(file)
+    return "\n".join(p.text for p in doc.paragraphs)
+
+      else:
                     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                         text = f.read()
                 
