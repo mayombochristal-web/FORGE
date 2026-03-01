@@ -28,6 +28,15 @@ def evolve_phi(phi, excitation=0.1):
     phi["phi_c"] = max(0.1, min(1.0, phi["phi_c"] + (excitation * 0.5) - 0.05))
     phi["phi_d"] = max(0.1, min(1.0, phi["phi_d"] + (excitation * 0.1) - 0.02))
     return phi
+with st.sidebar:
+    st.header("🛠 Diagnostic Mémoire")
+    if os.path.exists(LEXICON_PATH):
+        st.success(f"✅ Mémoire détectée : {LEXICON_PATH}")
+        # Optionnel : afficher la taille du fichier pour voir s'il grossit
+        taille = os.path.getsize(LEXICON_PATH) / 1024
+        st.caption(f"Taille du cerveau : {taille:.2f} KB")
+    else:
+        st.error("❌ Aucune mémoire physique (lexicon.json) trouvée sur le serveur.")
 
 # ==========================================
 # 3. MÉMOIRE & APPRENTISSAGE (Auto-Worker)
