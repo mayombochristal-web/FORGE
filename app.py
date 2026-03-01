@@ -135,24 +135,33 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("📥 Ingestion de Signal")
-    mode = st.radio("Source :", ["Texte", "PDF", "Audio (WAV)"])
+        mode = st.radio("Source :", ["Texte", "Document (PDF/Word/TXT)", "Excel", "Audio (WAV)"])
     raw_content = ""
 
     if mode == "Texte":
         raw_content = st.text_area("Entrée :", height=150)
-    elif mode == "PDF":
-        file = st.file_uploader("Fichier PDF", type="pdf")
+    
+    elif mode == "Document (PDF/Word/TXT)":
+        file = st.file_uploader("Charger un document", type=["pdf", "docx", "txt"])
         if file:
-            reader = PyPDF2.PdfReader(file)
-            raw_content = " ".join([p.extract_text() for p in reader.pages])
+            if file.name.endswith(".pdf"):
+                reader = PyPDF2.PdfReader(file)
+                raw_content = " ".join([p.extract_text() for p in reader.pages])
+            elif file.name.endswith(".docx"):
+                doc = docx.Document(file)
+                raw_content = " ".join([para.text for para in doc.paragraphs])
+            elif file.name.endswith(".txt"):
+                raw_content = file.read().decode("utf-8")
+
+    elif mode == "Excel":
+        file = st.file_uploader("Charger un tableur", type=["xlsx", "xls"])
+        if file:
+            df = pd.read_excel(file)
+            # On transforme tout le tableau en une grande chaîne de caractères
+            raw_content = df.to_string()
+
     elif mode == "Audio (WAV)":
-        audio_file = st.file_uploader("Fichier WAV", type="wav")
-        if audio_file:
-            r = sr.Recognizer()
-            with sr.AudioFile(audio_file) as source:
-                audio_data = r.record(source)
-                try: raw_content = r.recognize_google(audio_data, language="fr-FR")
-                except: st.error("Transcription impossible.")
+        # ... (Gardez votre code audio actuel ici)
 
     if st.button("⚡ Exciter l'Oracle") and raw_content:
         st.session_state.phi = evolve_phi(st.session_state.phi, 0.4)
