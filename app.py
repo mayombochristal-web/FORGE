@@ -5,8 +5,8 @@ import os
 import math
 import time
 import PyPDF2
-import docx # Pour Word
-import pandas as pd # Pour Excel
+import docx  # Pour Word
+import pandas as pd  # Pour Excel
 import speech_recognition as sr
 
 # ==========================================
@@ -56,46 +56,35 @@ def learn_with_identity(text, phi):
     save_lex(L)
 
 def deep_clean_lexicon(threshold=1.5):
-    """Purifie le lexique et applique le seuil de survie synaptique."""
     L = load_lex()
     if not L: return "Mémoire vide."
     clean_L = {}
     ban_list = ["uni00a0", "http", "www", "....", "____", "........"]
-
     for word, connections in L.items():
-        # Filtre les mots parasites ou trop longs
         if any(b in word for b in ban_list) or len(word) > 30:
             continue
-        
-        new_connections = {}
-        for target, weight in connections.items():
-            # Application du THRESHOLD (Seuil de survie)
-            if weight >= threshold and not any(b in target for b in ban_list):
-                new_connections[target] = weight
-        
+        new_connections = {t: w for t, w in connections.items() if w >= threshold and not any(b in t for b in ban_list)}
         if new_connections:
             clean_L[word] = new_connections
-            
     save_lex(clean_L)
-    return f"Sommeil terminé. {len(L) - len(clean_L)} connexions faibles supprimées."
+    return f"Sommeil terminé. {len(L) - len(clean_L)} nœuds nettoyés."
 
 def oracle_reply(phi, seed=None):
     L = load_lex()
     if not L: return "Mémoire vide. Injectez des données."
     if not seed or seed not in L:
         seed = random.choice(list(L.keys()))
-    M, C, D = phi["phi_m"], phi["phi_c"], phi["phi_d"]
     words = [seed]
-    for _ in range(int(5 + M * 25)):
+    for _ in range(int(5 + phi["phi_m"] * 25)):
         current = words[-1]
         if current not in L: break
         options = L[current]
-        if random.random() > C: 
+        if random.random() > phi["phi_c"]: 
             nxt = max(options, key=options.get)
         else:
             nxt = random.choices(list(options.keys()), weights=list(options.values()))[0]
         words.append(nxt)
-        if random.random() < D * 0.1: break
+        if random.random() < phi["phi_d"] * 0.1: break
     return " ".join(words).capitalize() + "."
 
 # ==========================================
@@ -106,9 +95,8 @@ st.set_page_config(page_title="ORACLE Autonome", page_icon="🧠", layout="wide"
 if 'phi' not in st.session_state:
     st.session_state.phi = {"phi_m": 0.5, "phi_c": 0.5, "phi_d": 0.5}
 
-st.title("🧠 ORACLE : IA Autonome")
+st.title("🧠 ORACLE : IA Autonome Multi-Source")
 
-# --- SIDEBAR DIAGNOSTIC ET MAINTENANCE ---
 with st.sidebar:
     st.header("🛠 État du Système")
     if os.path.exists(LEXICON_PATH):
@@ -123,45 +111,48 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🌙 Sommeil Profond")
-    seuil_nettoyage = st.slider("Seuil de survie (Threshold)", 1.0, 5.0, 1.5, help="Élimine les liens n'ayant pas atteint ce score d'importance.")
+    seuil = st.slider("Seuil de survie (Threshold)", 1.0, 5.0, 1.5)
     if st.button("Lancer le Nettoyage"):
-        msg = deep_clean_lexicon(threshold=seuil_nettoyage)
+        msg = deep_clean_lexicon(threshold=seuil)
         st.warning(msg)
-        time.sleep(2)
+        time.sleep(1)
         st.rerun()
 
-# --- ZONE PRINCIPALE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("📥 Ingestion de Signal")
-        mode = st.radio("Source :", ["Texte", "Document (PDF/Word/TXT)", "Excel", "Audio (WAV)"])
+    mode = st.radio("Source :", ["Texte", "Document (PDF/Word/TXT)", "Excel", "Audio (WAV)"])
     raw_content = ""
 
     if mode == "Texte":
         raw_content = st.text_area("Entrée :", height=150)
     
     elif mode == "Document (PDF/Word/TXT)":
-        file = st.file_uploader("Charger un document", type=["pdf", "docx", "txt"])
+        file = st.file_uploader("Fichier", type=["pdf", "docx", "txt"])
         if file:
             if file.name.endswith(".pdf"):
                 reader = PyPDF2.PdfReader(file)
                 raw_content = " ".join([p.extract_text() for p in reader.pages])
             elif file.name.endswith(".docx"):
                 doc = docx.Document(file)
-                raw_content = " ".join([para.text for para in doc.paragraphs])
-            elif file.name.endswith(".txt"):
+                raw_content = " ".join([p.text for p in doc.paragraphs])
+            else:
                 raw_content = file.read().decode("utf-8")
 
     elif mode == "Excel":
-        file = st.file_uploader("Charger un tableur", type=["xlsx", "xls"])
+        file = st.file_uploader("Tableur", type=["xlsx", "xls"])
         if file:
             df = pd.read_excel(file)
-            # On transforme tout le tableau en une grande chaîne de caractères
             raw_content = df.to_string()
 
     elif mode == "Audio (WAV)":
-        # ... (Gardez votre code audio actuel ici)
+        audio_file = st.file_uploader("Audio", type="wav")
+        if audio_file:
+            r = sr.Recognizer()
+            with sr.AudioFile(audio_file) as src:
+                try: raw_content = r.recognize_google(r.record(src), language="fr-FR")
+                except: st.error("Échec transcription.")
 
     if st.button("⚡ Exciter l'Oracle") and raw_content:
         st.session_state.phi = evolve_phi(st.session_state.phi, 0.4)
@@ -175,18 +166,16 @@ with col2:
         st.info(res)
         if random.random() < 0.3:
             learn_with_identity(res, {"phi_m":0.1, "phi_c":0.1, "phi_d":0.1})
-            st.caption("L'Oracle a auto-renforcé cette pensée.")
+            st.caption("Auto-renforcement activé.")
 
-# --- GESTION DE LA SAUVEGARDE ---
 st.divider()
 L_actuel = load_lex()
 if L_actuel:
-    col_a, col_b = st.columns(2)
-    with col_a:
-        json_brain = json.dumps(L_actuel, indent=2, ensure_ascii=False)
-        st.download_button("📥 Exporter le Cerveau (.json)", data=json_brain, file_name="lexicon.json")
-    with col_b:
-        up = st.file_uploader("📂 Importer un Cerveau", type="json")
+    c_a, c_b = st.columns(2)
+    with c_a:
+        st.download_button("📥 Exporter Lexicon", data=json.dumps(L_actuel, indent=2, ensure_ascii=False), file_name="lexicon.json")
+    with c_b:
+        up = st.file_uploader("📂 Importer Lexicon", type="json")
         if up:
             save_lex(json.load(up))
-            st.success("Mémoire mise à jour.")
+            st.rerun()
