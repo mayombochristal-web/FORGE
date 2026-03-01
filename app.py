@@ -5,21 +5,21 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import json, os, re, datetime, time, uuid, glob
+import json, os, re, datetime, time, uuid, glob, zipfile, io
 from collections import Counter
 
-# <<< ajout pour le module mémoire >>>
-from oracle_memory.oracle_memory import (
-    init_memory,
-    load_frag,
-    save_frag,
-    load_json,
-    save_json,
-    merge_fragments,
-    merge_relations,
-    merge_cortex,
-    FILES,   # si tu exposes ce dict dans oracle_memory.py
-)
+# <<< ajout pour le module mémoire (optionnel, si tu l'as vraiment) >>>
+# from oracle_memory.oracle_memory import (
+#     init_memory,
+#     load_frag,
+#     save_frag,
+#     load_json,
+#     save_json,
+#     merge_fragments,
+#     merge_relations,
+#     merge_cortex,
+#     FILES,
+# )
 
 # Spectral UI (safe import)
 try:
@@ -72,7 +72,9 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_frag():
-    return pd.read_csv(FILES["fragments"]) if os.path.exists(FILES["fragments"]) else pd.DataFrame(columns=["fragment", "count"])
+    if os.path.exists(FILES["fragments"]):
+        return pd.read_csv(FILES["fragments"])
+    return pd.DataFrame(columns=["fragment", "count"])
 
 def save_frag(df):
     df.to_csv(FILES["fragments"], index=False)
@@ -88,8 +90,11 @@ def init_memory():
         save_json(FILES["relations"], {})
     if not os.path.exists(FILES["cortex"]):
         save_json(FILES["cortex"], {
-            "VS": 12, "age": 0, "new_today": 0,
-            "last_day": str(datetime.date.today()), "timeline": []
+            "VS": 12,
+            "age": 0,
+            "new_today": 0,
+            "last_day": str(datetime.date.today()),
+            "timeline": [],
         })
 
 init_memory()
@@ -106,7 +111,9 @@ def sync_shadow(force=False):
         st.session_state.shadow_cortex = load_json(FILES["cortex"])
         st.session_state.shadow_loaded = True
 
-def safe_reload(): sync_shadow(force=True)
+def safe_reload():
+    sync_shadow(force=True)
+
 sync_shadow()
 
 # =====================================================
@@ -114,6 +121,7 @@ sync_shadow()
 # =====================================================
 
 def clean(text):
+    # regex corrigée: w et s doivent être échappés
     return re.sub(r"[^wàâéèêëîïôùûüœs]", " ", text.lower())
 
 def tokenize(text):
@@ -124,11 +132,14 @@ def tokenize(text):
 # =====================================================
 
 def read_docx(file):
-    if Document is None: return ""
+    if Document is None:
+        return ""
+    return "
 ".join(p.text for p in Document(file).paragraphs)
 
 def read_pdf(file):
-    if PdfReader is None: return ""
+    if PdfReader is None:
+        return ""
     try:
         reader = PdfReader(file)
         text_pages = [p.extract_text() or "" for p in reader.pages]
@@ -210,7 +221,8 @@ def think(seed, steps=30, temp=1.0):
     sent, cur = [seed], seed
     for _ in range(steps):
         nxt = assoc.get(cur)
-        if not nxt: break
+        if not nxt:
+            break
         words = list(nxt.keys())
         probs = np.array(list(nxt.values()), dtype=float)
         probs **= 1 / temp
@@ -279,21 +291,41 @@ col1, col2, col3 = st.columns(3)
 with col1:
     if os.path.exists(FILES["fragments"]):
         with open(FILES["fragments"], "rb") as f:
-            st.download_button("⬇️ fragments.csv", f, "oracle_fragments.csv", "text/csv", use_container_width=True)
+            st.download_button(
+                "⬇️ fragments.csv",
+                f,
+                "oracle_fragments.csv",
+                "text/csv",
+                use_container_width=True,
+            )
 with col2:
     if os.path.exists(FILES["relations"]):
         with open(FILES["relations"], "rb") as f:
-            st.download_button("⬇️ relations.json", f, "oracle_relations.json", "application/json", use_container_width=True)
+            st.download_button(
+                "⬇️ relations.json",
+                f,
+                "oracle_relations.json",
+                "application/json",
+                use_container_width=True,
+            )
 with col3:
     if os.path.exists(FILES["cortex"]):
         with open(FILES["cortex"], "rb") as f:
-            st.download_button("⬇️ cortex.json", f, "oracle_cortex.json", "application/json", use_container_width=True)
+            st.download_button(
+                "⬇️ cortex.json",
+                f,
+                "oracle_cortex.json",
+                "application/json",
+                use_container_width=True,
+            )
 
-uploaded = st.file_uploader("Importer une mémoire ou un texte (.csv, .json, .zip, .pdf, .docx, .txt)")
+uploaded = st.file_uploader(
+    "Importer une mémoire ou un texte (.csv, .json, .zip, .pdf, .docx, .txt)"
+)
 
 if uploaded:
     try:
-        # Texte bruts
+        # Textes bruts
         if uploaded.name.endswith(".docx"):
             text = read_docx(uploaded)
             n = learn(text)
@@ -306,12 +338,17 @@ if uploaded:
             text = uploaded.read().decode("utf-8", errors="ignore")
             n = learn(text)
             st.success(f"✅ {n} mots appris.")
+
         # Mémoire
         elif uploaded.name.endswith(".csv"):
             incoming_df = pd.read_csv(uploaded)
-            merged_df = pd.concat([load_frag(), incoming_df]).groupby("fragment", as_index=False).sum()
-            save_frag(merged_df); safe_reload()
+            merged_df = pd.concat([load_frag(), incoming_df]).groupby(
+                "fragment", as_index=False
+            ).sum()
+            save_frag(merged_df)
+            safe_reload()
             st.success("✅ fragments fusionnés.")
+
         elif uploaded.name.endswith(".json"):
             data = json.load(uploaded)
             if "timeline" in data:
@@ -323,18 +360,27 @@ if uploaded:
                 save_json(FILES["relations"], rel)
                 st.success("✅ relations fusionnées.")
             safe_reload()
+
         elif uploaded.name.endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(uploaded.read())) as z:
                 for name in z.namelist():
                     if name.endswith("fragments.csv"):
                         df = pd.read_csv(z.open(name))
-                        merged_df = pd.concat([load_frag(), df]).groupby("fragment", as_index=False).sum()
+                        merged_df = pd.concat([load_frag(), df]).groupby(
+                            "fragment", as_index=False
+                        ).sum()
                         save_frag(merged_df)
                     elif name.endswith("relations.json"):
-                        rel = merge_relations(load_json(FILES["relations"]), json.load(z.open(name)))
+                        rel = merge_relations(
+                            load_json(FILES["relations"]),
+                            json.load(z.open(name)),
+                        )
                         save_json(FILES["relations"], rel)
                     elif name.endswith("cortex.json"):
-                        ctx = merge_cortex(load_json(FILES["cortex"]), json.load(z.open(name)))
+                        ctx = merge_cortex(
+                            load_json(FILES["cortex"]),
+                            json.load(z.open(name)),
+                        )
                         save_json(FILES["cortex"], ctx)
             safe_reload()
             st.success("✅ Mémoire ZIP fusionnée.")
@@ -345,15 +391,20 @@ if uploaded:
 # VISUALISATION SPECTRALE
 # =====================================================
 
-st.caption(f"Temps cognitif : {round(time.time(),2)} s")
-spectral_ui(st.session_state.shadow_cortex, st.session_state.shadow_frag["fragment"].tolist())
+st.caption(f"Temps cognitif : {round(time.time(), 2)} s")
+spectral_ui(
+    st.session_state.shadow_cortex,
+    st.session_state.shadow_frag["fragment"].tolist(),
+)
 
 # =====================================================
 # OUTILS DE FUSION (RÉUTILISÉS POUR ZIP/JSON)
 # =====================================================
 
 def merge_fragments(local_df, incoming_df):
-    return pd.concat([local_df, incoming_df]).groupby("fragment", as_index=False).sum()
+    return pd.concat([local_df, incoming_df]).groupby(
+        "fragment", as_index=False
+    ).sum()
 
 def merge_relations(local_rel, incoming_rel):
     for a, links in incoming_rel.items():
@@ -365,6 +416,7 @@ def merge_relations(local_rel, incoming_rel):
 def merge_cortex(local_ctx, incoming_ctx):
     local_ctx["age"] += incoming_ctx.get("age", 0)
     local_ctx["new_today"] += incoming_ctx.get("new_today", 0)
+    local_ctx.setdefault("timeline", [])
     local_ctx["timeline"].extend(incoming_ctx.get("timeline", []))
     local_ctx["timeline"] = local_ctx["timeline"][-5000:]
     local_ctx["VS"] = 10 + float(np.log1p(local_ctx["age"] * 1000))
