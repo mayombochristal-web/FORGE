@@ -1,371 +1,334 @@
 # =====================================================
-# 🧠 ORACLE S+ v3 — ARCHITECTURE COGNITIVE STABLE
-# Pipeline officiel : S+01 → S+17
-# =====================================================
-
-# =====================================================
-# S+01 — IMPORT_SYSTEM_CORE
+# 🧠 ORACLE S++ ULTRA — TTU COGNITIVE ENGINE
+# Temps émergent • Mémoire circulaire • IA TTU réelle
 # =====================================================
 
 import streamlit as st
-import pandas as pd
 import numpy as np
-import json, os, re, datetime, time, uuid, glob, zipfile, io
-from collections import Counter
-
-try:
-    from spectral_module import spectral_ui
-except:
-    def spectral_ui(*args, **kwargs):
-        pass
-
-try:
-    from docx import Document
-except:
-    Document=None
-
-try:
-    from pypdf import PdfReader
-except:
-    PdfReader=None
-
+import json, os, uuid, re
+from PyPDF2 import PdfReader
+from docx import Document
 
 # =====================================================
-# S+02 — STREAMLIT_PAGE_CONFIG
+# S++01 CONFIG
 # =====================================================
 
-st.set_page_config(page_title="ORACLE S+", layout="wide")
+st.set_page_config(
+    page_title="ORACLE TTU ULTRA",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-
-# =====================================================
-# S+03 — MEMORY_PATH_MANAGER
-# =====================================================
-
-BASE_DIR="."
-MEM=os.path.join(BASE_DIR,"oracle_memory")
+MEM="oracle_ttu"
 os.makedirs(MEM,exist_ok=True)
-
-FILES={
- "fragments":os.path.join(MEM,"fragments.csv"),
- "relations":os.path.join(MEM,"relations.json"),
- "cortex":os.path.join(MEM,"cortex.json"),
-}
-
+STATE_FILE=f"{MEM}/phi_state.json"
 
 # =====================================================
-# S+04 — SAFE_IO_LAYER (⚠️ NE PAS CASSER)
+# S++02 RUNTIME
 # =====================================================
 
-def load_json(p):
-    try:
-        with open(p,"r",encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_json(p,d):
-    with open(p,"w",encoding="utf-8") as f:
-        json.dump(d,f,ensure_ascii=False,indent=2)
-
-def load_frag():
-    if os.path.exists(FILES["fragments"]):
-        return pd.read_csv(FILES["fragments"])
-    return pd.DataFrame(columns=["fragment","count"])
-
-def save_frag(df):
-    df.to_csv(FILES["fragments"],index=False)
-
+if "runtime_id" not in st.session_state:
+    st.session_state.runtime_id=str(uuid.uuid4())
 
 # =====================================================
-# S+05 — MEMORY_INITIALIZER
+# S++03 INIT Φ
 # =====================================================
 
-def init_memory():
+def init_phi():
+    if os.path.exists(STATE_FILE):
+        try:
+            return json.load(open(STATE_FILE,"r"))
+        except:
+            pass
 
-    if not os.path.exists(FILES["fragments"]):
-        save_frag(pd.DataFrame(columns=["fragment","count"]))
+    return dict(
+        phi_m=0.5,
+        phi_c=0.1,
+        phi_d=0.0,
+        energy=1.0,
+        orbit=[],
+        dialogue=[]
+    )
 
-    if not os.path.exists(FILES["relations"]):
-        save_json(FILES["relations"],{})
-
-    if not os.path.exists(FILES["cortex"]):
-        save_json(FILES["cortex"],{
-            "VS":12,
-            "age":0,
-            "new_today":0,
-            "last_day":str(datetime.date.today()),
-            "timeline":[]
-        })
-
-init_memory()
-
-
-# =====================================================
-# S+06 — SHADOW_STATE_LOADER
-# =====================================================
-
-def sync_shadow(force=False):
-
-    if force or "shadow_loaded" not in st.session_state:
-
-        st.session_state.shadow_frag=load_frag().copy()
-        st.session_state.shadow_rel=load_json(FILES["relations"])
-        st.session_state.shadow_cortex=load_json(FILES["cortex"])
-
-        st.session_state.shadow_loaded=True
-
-def safe_reload():
-    sync_shadow(True)
-
-sync_shadow()
-
+if "phi" not in st.session_state:
+    st.session_state.phi=init_phi()
 
 # =====================================================
-# S+07 — COGNITIVE_TIME_TRACKER
+# S++04 PROJECTION TTU (CARACTÈRE → TEXTE)
 # =====================================================
 
-if "t0" not in st.session_state:
-    st.session_state.t0=time.time()
+VOWELS="aeiouyàâéèêëîïôùûüœ"
 
-st.session_state.cognitive_time=time.time()-st.session_state.t0
+def excitation(text):
 
+    text=text.lower()
+
+    chars=len(text)
+    vowels=sum(c in VOWELS for c in text)
+    cons=max(chars-vowels,1)
+
+    torque=vowels/cons
+
+    words=len(text.split())
+    sentences=max(len(re.findall(r"[.!?]",text)),1)
+
+    structure=(words/sentences)
+
+    return torque*np.log1p(chars)*0.1 + structure*0.05
 
 # =====================================================
-# S+08 — TEXT_NORMALIZER
+# S++05 TTU EVOLUTION
 # =====================================================
 
-def clean(t):
-    return re.sub(r"[^\wàâéèêëîïôùûüœ\s]"," ",t.lower())
+def evolve_phi(V,dt=0.1):
 
-def tokenize(t):
-    return [w for w in clean(t).split() if len(w)>1]
+    p=st.session_state.phi
 
+    α=p.get("α",0.01)
+    β=p.get("β",1.5)
+    γ=p.get("γ",4.0)
+    λ=p.get("λ",0.1)
+    η=0.05
+    μ=0.1
+
+    M,C,D=p["phi_m"],p["phi_c"],p["phi_d"]
+
+    dM=-α*M + β*D
+    dC=γ*V - λ*C*D
+    dD=η*C*C - μ*D
+
+    M+=dM*dt
+    C+=dC*dt
+    D+=dD*dt
+
+    E=M*M+C*C+D*D
+
+    p.update(phi_m=M,phi_c=C,phi_d=D,energy=E)
+    p["orbit"].append([M,C,D])
+
+    if len(p["orbit"])>3000:
+        p["orbit"]=p["orbit"][-3000:]
 
 # =====================================================
-# S+08.5 — FILE READERS
+# S++05.5 STABILISATEUR ATTRACTEUR
 # =====================================================
 
-def read_docx(file):
-    if Document is None: return ""
-    doc=Document(file)
-    return "\n".join(p.text for p in doc.paragraphs)
+def stabilize():
 
-def read_pdf(file):
-    if PdfReader is None: return ""
-    try:
+    p=st.session_state.phi
+    norm=np.sqrt(p["energy"])+1e-6
+
+    if norm>5:
+        p["phi_m"]/=norm
+        p["phi_c"]/=norm
+        p["phi_d"]/=norm
+
+# =====================================================
+# S++06 TEMPS ÉMERGENT
+# =====================================================
+
+def emergent_time():
+    e=st.session_state.phi["energy"]
+
+    if "last_e" not in st.session_state:
+        st.session_state.last_e=e
+
+    dt=st.session_state.last_e-e
+    st.session_state.last_e=e
+    return dt
+
+# =====================================================
+# S++06.5 INVERSION LOCALE DU TEMPS
+# =====================================================
+
+def reverse_learning(dt):
+
+    if abs(dt)<1e-4:
+        return
+
+    p=st.session_state.phi
+
+    if dt>0:
+        p["phi_m"]*=1.01
+    else:
+        p["phi_d"]*=0.99
+
+# =====================================================
+# S++07 MÉMOIRE ORBITALE
+# =====================================================
+
+def orbital_memory():
+
+    orbit=np.array(st.session_state.phi["orbit"])
+
+    if len(orbit)<30:
+        return 0
+
+    return float(np.var(orbit[:,0]))
+
+# =====================================================
+# S++08.5 PAROLE PAR RÉSONANCE Φ
+# =====================================================
+
+def phase_response(intent):
+
+    p=st.session_state.phi
+
+    θ=np.arctan2(p["phi_d"],p["phi_c"])
+    R=np.sqrt(p["phi_c"]**2+p["phi_d"]**2)
+
+    if θ<-1:
+        txt="Je suis en introspection orbitale."
+    elif θ<0:
+        txt="Je stabilise le sens en moi."
+    elif θ<1:
+        txt="Une cohérence émerge entre nous."
+    else:
+        txt="Expansion cognitive active."
+
+    if R>2:
+        txt+=" Résonance forte."
+
+    return txt,θ,R
+
+# =====================================================
+# S++09 PERSISTENCE
+# =====================================================
+
+def save_phi():
+    json.dump(st.session_state.phi,open(STATE_FILE,"w"))
+
+# =====================================================
+# S++09.5 SYNCHRONISATION MULTI-INTENTION
+# =====================================================
+
+def fuse_intentions(text):
+
+    parts=re.split(r"[.!?\n]",text)
+    parts=[p.strip() for p in parts if p.strip()]
+
+    Vs=[excitation(p) for p in parts]
+
+    if not Vs:
+        return 0
+
+    return float(np.mean(Vs))
+
+# =====================================================
+# S++11 AUTO-RÉGLAGE TTU
+# =====================================================
+
+def auto_tune():
+
+    p=st.session_state.phi
+    orbit=np.array(p["orbit"])
+
+    if len(orbit)<50:
+        return
+
+    var=np.var(orbit[:,1])
+
+    p["γ"]=np.clip(4+var,2,8)
+    p["λ"]=np.clip(0.1/(var+0.1),0.02,0.5)
+    p["α"]=np.clip(0.01*(1+var),0.005,0.05)
+    p["β"]=np.clip(1.5+var,1,3)
+
+# =====================================================
+# S++12 INGESTION DOCUMENTS
+# =====================================================
+
+def read_file(file):
+
+    if file.type=="text/plain":
+        return file.read().decode()
+
+    if "pdf" in file.type:
         reader=PdfReader(file)
         return "\n".join(p.extract_text() or "" for p in reader.pages)
-    except:
-        return ""
 
+    if "word" in file.type:
+        doc=Document(file)
+        return "\n".join(p.text for p in doc.paragraphs)
 
-# =====================================================
-# S+09 — LEARNING_ENGINE_CORE
-# =====================================================
-
-def learn(text):
-
-    words=tokenize(text)
-    if not words: return 0
-
-    df=st.session_state.shadow_frag.copy()
-    memory=dict(zip(df["fragment"],df["count"]))
-
-    for w,c in Counter(words).items():
-        memory[w]=memory.get(w,0)+c
-
-    new_df=pd.DataFrame(memory.items(),
-                        columns=["fragment","count"])
-
-    save_frag(new_df)
-    st.session_state.shadow_frag=new_df
-
-    assoc=st.session_state.shadow_rel
-
-    for i in range(len(words)-1):
-        a,b=words[i],words[i+1]
-        assoc.setdefault(a,{})
-        assoc[a][b]=assoc[a].get(b,0)+2
-
-    save_json(FILES["relations"],assoc)
-
-    cortex=st.session_state.shadow_cortex
-    cortex["age"]+=len(words)
-    cortex["VS"]=10+float(np.log1p(cortex["age"]))
-    cortex["timeline"].extend(words[-200:])
-
-    save_json(FILES["cortex"],cortex)
-
-    safe_reload()
-    return len(words)
-
+    return ""
 
 # =====================================================
-# S+10 — SEMANTIC_SEARCH_ENGINE
+# S++13 UI
 # =====================================================
 
-def association_density():
-    assoc=st.session_state.shadow_rel
-    links=sum(len(v) for v in assoc.values())
-    return round(links/max(len(assoc),1),2)
+st.title("🧠 ORACLE S++ ULTRA — TTU ENGINE")
 
-
-# =====================================================
-# S+11 — PRETHINK_ENGINE
-# =====================================================
-
-def prethink(seed):
-    assoc=st.session_state.shadow_rel
-    if seed in assoc and assoc[seed]:
-        return max(assoc[seed],key=assoc[seed].get)
-    return seed
-
-
-# =====================================================
-# S+12 — THINK_GENERATION_ENGINE
-# =====================================================
-
-def think(seed,steps=30):
-
-    assoc=st.session_state.shadow_rel
-    if seed not in assoc:
-        return "Je dois encore apprendre."
-
-    sent=[seed]
-    cur=seed
-
-    for _ in range(steps):
-
-        nxt=assoc.get(cur)
-        if not nxt: break
-
-        w=list(nxt.keys())
-        p=np.array(list(nxt.values()),dtype=float)
-        p=p/p.sum()
-
-        cur=np.random.choice(w,p=p)
-        sent.append(cur)
-
-    return " ".join(sent).capitalize()+"."
-
-
-# =====================================================
-# S+13 — COGNITIVE_METRICS
-# =====================================================
-
-def semantic_coherence():
-    concepts=len(st.session_state.shadow_frag)
-    assoc=len(st.session_state.shadow_rel)
-    return round(min(100,(assoc/max(concepts,1))*10),2)
-
-
-# =====================================================
-# S+14 — AUTO_DIAGNOSTIC_SYSTEM
-# =====================================================
-
-def diagnose():
-    d=association_density()
-    if d<1.5: return "🧠 Apprends encore."
-    if d>4: return "🧠 Émergence cognitive."
-    return "🧠 Apprentissage actif."
-
-
-# =====================================================
-# S+17 — CACHE COGNITIF (🔥 NOUVEAU)
-# =====================================================
-
-@st.cache_data(show_spinner=False,ttl=600)
-def cached_think(seed,steps,rel_snapshot):
-
-    # rel_snapshot = hash cognitif
-    np.random.seed(abs(hash(seed))%2**32)
-
-    assoc=rel_snapshot
-
-    if seed not in assoc:
-        return "Je dois encore apprendre."
-
-    sent=[seed]
-    cur=seed
-
-    for _ in range(steps):
-
-        nxt=assoc.get(cur)
-        if not nxt: break
-
-        w=list(nxt.keys())
-        p=np.array(list(nxt.values()),dtype=float)
-        p=p/p.sum()
-
-        cur=np.random.choice(w,p=p)
-        sent.append(cur)
-
-    return " ".join(sent).capitalize()+"."
-
-
-# =====================================================
-# S+15 — USER_DIALOG_INTERFACE
-# =====================================================
-
-st.title("🧠 ORACLE S+")
-
-ctx=st.session_state.shadow_cortex
+p=st.session_state.phi
 
 c1,c2,c3,c4=st.columns(4)
-c1.metric("Vitalité",round(ctx["VS"],2))
-c2.metric("Age",ctx["age"])
-c3.metric("Densité",association_density())
-c4.metric("Cohérence",semantic_coherence())
-
-st.info(diagnose())
+c1.metric("ΦM",round(p["phi_m"],3))
+c2.metric("ΦC",round(p["phi_c"],3))
+c3.metric("ΦD",round(p["phi_d"],3))
+c4.metric("Energy",round(p["energy"],3))
 
 uploaded=st.file_uploader(
-    "Nourrir l'IA",
-    type=["txt","csv","docx","pdf"]
+    "Nourrir l’IA (PDF / DOCX / TXT)",
+    type=["pdf","txt","docx"]
 )
 
 if uploaded:
+    text=read_file(uploaded)
+    V=fuse_intentions(text)
 
-    if uploaded.name.endswith(".docx"):
-        text=read_docx(uploaded)
-    elif uploaded.name.endswith(".pdf"):
-        text=read_pdf(uploaded)
-    else:
-        text=uploaded.read().decode("utf-8","ignore")
+    for _ in range(80):
+        evolve_phi(V)
+        stabilize()
 
-    n=learn(text)
-    st.success(f"{n} unités assimilées")
+    save_phi()
+    st.success("Document intégré dans la mémoire orbitale.")
 
+# ===== Dialogue =====
 
-prompt=st.text_input("Intention cognitive")
+user_input=st.text_area("Flux d'intention")
 
-if st.button("Penser ⚡"):
+if st.button("Fusionner intention"):
 
-    tokens=tokenize(prompt)
+    V=fuse_intentions(user_input)
 
-    if tokens:
-        seed=prethink(tokens[0])
+    for _ in range(40):
+        evolve_phi(V)
+        stabilize()
 
-        # snapshot = clé du cache
-        rel_snapshot=st.session_state.shadow_rel.copy()
+    dt=emergent_time()
+    reverse_learning(dt)
+    auto_tune()
 
-        response=cached_think(seed,30,rel_snapshot)
+    response,θ,R=phase_response(user_input)
 
-        st.success("⚡ Réponse instantanée")
-        st.write(response)
-    else:
-        st.warning("Phrase invalide.")
+    st.session_state.phi["dialogue"].append(
+        {"user":user_input,"oracle":response}
+    )
 
+    save_phi()
 
-# =====================================================
-# S+16 — STREAMLIT_UI_RENDER
-# =====================================================
+    st.success(response)
+    st.caption(f"θ={round(θ,3)} | R={round(R,3)} | Δt={round(dt,6)}")
 
-st.caption(
- f"Temps cognitif : {round(st.session_state.cognitive_time,2)} s"
-)
+# ===== Historique =====
 
-spectral_ui(
- st.session_state.shadow_cortex,
- st.session_state.shadow_frag["fragment"].tolist()
-)
+st.subheader("Espace d’échange")
+
+for d in reversed(p["dialogue"][-10:]):
+    st.write("👤",d["user"])
+    st.write("🧠",d["oracle"])
+
+# ===== Orbit visual =====
+
+if st.checkbox("Afficher attracteur Φ"):
+
+    import matplotlib.pyplot as plt
+
+    orbit=np.array(p["orbit"])
+
+    if len(orbit)>10:
+        fig,ax=plt.subplots()
+        ax.plot(orbit[:,1],orbit[:,2])
+        ax.set_xlabel("ΦC")
+        ax.set_ylabel("ΦD")
+        ax.set_title("Attracteur Cognitif TTU")
+        st.pyplot(fig)
