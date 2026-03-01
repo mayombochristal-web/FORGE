@@ -141,6 +141,26 @@ def sync_shadow():
 sync_shadow()
 
 # =====================================================
+# S+17 — DELTA_K REGULATOR
+# =====================================================
+
+def delta_k_runtime():
+
+    cortex = st.session_state.shadow_cortex
+
+    new = cortex.get("new_today",0)
+    age = max(cortex.get("age",1),1)
+
+    ratio = new / age
+
+    cortex["delta_ratio"] = ratio
+
+    if ratio > 0.30:
+        st.warning("⚠️ Surcharge cognitive détectée (∆k/k élevé)")
+
+delta_k_runtime()
+
+# =====================================================
 # S+08 — TEXT_NORMALIZER
 # =====================================================
 
