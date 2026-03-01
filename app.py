@@ -25,6 +25,11 @@ try:
 except ImportError:
     Document = None
 
+# PDF support
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 # =====================================================
 # S+02 — STREAMLIT_PAGE_CONFIG
@@ -242,6 +247,29 @@ def read_docx(file):
         return ""
     doc = Document(file)
     return "\n".join(p.text for p in doc.paragraphs)
+
+# =====================================================
+# PDF READER
+# =====================================================
+
+def read_pdf(file):
+
+    if PdfReader is None:
+        return ""
+
+    try:
+        reader = PdfReader(file)
+        text = []
+
+        for page in reader.pages:
+            content = page.extract_text()
+            if content:
+                text.append(content)
+
+        return "\n".join(text)
+
+    except Exception:
+        return ""
 
 # =====================================================
 # S+09 — LEARNING_ENGINE_CORE
@@ -507,6 +535,12 @@ uploaded = st.file_uploader(
     type=["csv", "json", "zip"],
 )
 
+uploaded = st.file_uploader(
+    "Fichier cible",
+    type=["txt","csv","docx","pdf"]
+)
+
+
 import zipfile
 import io
 
@@ -517,6 +551,28 @@ def safe_reload():
 if uploaded is not None:
 
     try:
+
+        # ==========================
+        # DOCX
+        # ==========================
+        if uploaded.name.endswith(".docx"):
+
+            if Document is None:
+                st.error("Support DOCX non installé.")
+                st.stop()
+
+            text = read_docx(uploaded)
+
+        # ==========================
+        # PDF
+        # ==========================
+        elif uploaded.name.endswith(".pdf"):
+
+            if PdfReader is None:
+                st.error("Support PDF non installé (pypdf).")
+                st.stop()
+
+            text = read_pdf(uploaded)
 
         # ==============================
         # CAS 1 — ZIP COMPLET (FUSION)
