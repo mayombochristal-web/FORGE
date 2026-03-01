@@ -5,6 +5,8 @@ import os
 import math
 import time
 import PyPDF2
+import docx # Pour Word
+import pandas as pd # Pour Excel
 import speech_recognition as sr
 
 # ==========================================
