@@ -121,10 +121,11 @@ sync_shadow()
 # =====================================================
 
 def clean(text):
-    # regex corrigée: w et s doivent être échappés
+    """Normalisation simple : minuscules + suppression de la ponctuation."""
     return re.sub(r"[^wàâéèêëîïôùûüœs]", " ", text.lower())
 
 def tokenize(text):
+    """Découpe en mots, longueur > 2, pas entièrement numériques."""
     return [w for w in clean(text).split() if len(w) > 2 and not w.isnumeric()]
 
 # =====================================================
@@ -132,23 +133,33 @@ def tokenize(text):
 # =====================================================
 
 def read_docx(file):
+    """Extraction de texte brut depuis un DOCX."""
     if Document is None:
         return ""
-    return "
-".join(p.text for p in Document(file).paragraphs)
+    try:
+        doc = Document(file)
+        return "
+".join(p.text for p in doc.paragraphs)
+    except Exception:
+        # En cas d'erreur (fichier corrompu, mauvais format...)
+        return ""
+
 
 def read_pdf(file):
+    """Extraction de texte brut depuis un PDF (PyPDF)."""
     if PdfReader is None:
         return ""
     try:
         reader = PdfReader(file)
-        text_pages = [p.extract_text() or "" for p in reader.pages]
+        text_pages = [page.extract_text() or "" for page in reader.pages]
         text = "
 ".join(text_pages)
-        # filtre PDF corrompu
+
+        # Filtrage basique de bruit PDF (obj, stream, flatedecode)
         if re.search(r"obj|stream|flatedecode", text, re.IGNORECASE):
             st.warning("⚠️ Contenu PDF non textuel détecté — filtrage effectué.")
             text = re.sub(r"\b(obj|endobj|stream|flatedecode)\b", "", text)
+
         return text
     except Exception:
         return ""
