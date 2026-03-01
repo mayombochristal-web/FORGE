@@ -133,27 +133,20 @@ def tokenize(text):
 # =====================================================
 
 def read_docx(file):
-    """Extraction de texte brut depuis un DOCX."""
     if Document is None:
         return ""
-    try:
-        doc = Document(file)
-        return "
-".join(p.text for p in doc.paragraphs)
-    except Exception:
-        # En cas d'erreur (fichier corrompu, mauvais format...)
-        return ""
-
+    doc = Document(file)
+    return "
+".join([p.text for p in doc.paragraphs])
 
 def read_pdf(file):
-    """Extraction de texte brut depuis un PDF (PyPDF)."""
     if PdfReader is None:
         return ""
-    try:
-        reader = PdfReader(file)
-        text_pages = [page.extract_text() or "" for page in reader.pages]
-        text = "
+    reader = PdfReader(file)
+    text_pages = [p.extract_text() or "" for p in reader.pages]
+    text = "
 ".join(text_pages)
+    return text
 
         # Filtrage basique de bruit PDF (obj, stream, flatedecode)
         if re.search(r"obj|stream|flatedecode", text, re.IGNORECASE):
