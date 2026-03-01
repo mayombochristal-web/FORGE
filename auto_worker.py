@@ -1,125 +1,139 @@
+# =====================================================
+# 🧠 ORACLE S+17 — SLEEP WORKER (∆k/k ENGINE)
+# =====================================================
+
 import pandas as pd
 import numpy as np
 import json, os, re, datetime, feedparser
 from collections import Counter
 
-# --- CONFIGURATION DES CHEMINS (Doit pointer vers votre dossier V12) ---
 MEM = "oracle_memory"
+
 FILES = {
     "fragments": f"{MEM}/fragments.csv",
     "relations": f"{MEM}/relations.json",
     "cortex": f"{MEM}/cortex.json"
 }
 
-# --- SOURCES D'APPRENTISSAGE (Flux RSS Scientifiques/Techniques) ---
 SOURCES = [
-    "https://arxiv.org/rss/math.DS",      # Systèmes Dynamiques
-    "https://arxiv.org/rss/cs.AI",       # Intelligence Artificielle
+    "https://arxiv.org/rss/math.DS",
+    "https://arxiv.org/rss/cs.AI",
     "https://feeds.feedburner.com/sciencedaily/computers_math/mathematics"
 ]
 
-# --- CHARGEMENT DES DONNÉES ---
+# -----------------------------------------------------
+# LOAD MEMORY
+# -----------------------------------------------------
 def load_memory():
     if not os.path.exists(FILES["cortex"]):
         return None, None, None
+
     frag = pd.read_csv(FILES["fragments"])
-    with open(FILES["relations"], "r") as f:
-        rel = json.load(f)
-    with open(FILES["cortex"], "r") as f:
-        ctx = json.load(f)
+    rel = json.load(open(FILES["relations"], encoding="utf-8"))
+    ctx = json.load(open(FILES["cortex"], encoding="utf-8"))
     return frag, rel, ctx
 
-# --- LOGIQUE DE NETTOYAGE ---
+# -----------------------------------------------------
+# TOKENIZER
+# -----------------------------------------------------
 def clean_text(t):
-    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
+    return re.sub(r"[^\wàâéèêëîïôùûüœ\s]", " ", t.lower())
 
 def tokenize(t):
     return [w for w in clean_text(t).split() if len(w) > 1]
 
-# --- FILTRE DE STABILITÉ (LYAPUNOV) ---
-def check_stability(new_text, current_is):
-    """
-    Vérifie si le texte entrant ne va pas faire chuter l'Indice de Sincérité (IS).
-    """
-    words = tokenize(new_text)
-    if not words: return False
-    
-    # Calcul de l'énergie prédictive
-    # Plus les mots sont nouveaux ou rares, plus l'énergie est élevée (proche de 1)
-    # Si le texte est répétitif ou vide de sens, l'énergie chute.
-    simulated_energy = 1 / (1 + (len(words) / 100)) # Approximation rapide
-    
-    # Seuil de Lyapunov : on rejette si l'énergie est trop faible (bruit blanc)
-    if simulated_energy < 0.10: 
-        return False
+# -----------------------------------------------------
+# ∆k/k REGULATOR
+# -----------------------------------------------------
+def delta_k_control(new_words, ctx):
+
+    total_knowledge = max(ctx.get("age", 1), 1)
+    delta_k = len(new_words)
+
+    ratio = delta_k / total_knowledge
+
+    ctx["delta_k"] = delta_k
+    ctx["delta_ratio"] = ratio
+
+    # seuil adaptatif TTU
+    if ratio > 0.25:
+        return False   # surcharge cognitive
+
     return True
 
-# --- FONCTION D'APPRENTISSAGE AUTONOME ---
+# -----------------------------------------------------
+# LEARNING
+# -----------------------------------------------------
 def worker_learn(text, frag, rel, ctx):
+
     words = tokenize(text)
-    if not words: return
-    
-    # Mise à jour fragments
+    if not words:
+        return frag, rel, ctx
+
+    if not delta_k_control(words, ctx):
+        print("⚠️ Apprentissage refusé (∆k/k trop élevé)")
+        return frag, rel, ctx
+
     counts = Counter(words)
+
+    memory = dict(zip(frag["fragment"], frag["count"]))
+
     for w, c in counts.items():
-        mask = frag["fragment"] == w
-        if mask.any():
-            frag.loc[mask, "count"] += c
-        else:
-            new_row = pd.DataFrame([{"fragment": w, "count": c}])
-            frag = pd.concat([frag, new_row], ignore_index=True)
-            
-    # Mise à jour relations (N-Grams n=2 pour le worker)
+        memory[w] = memory.get(w, 0) + c
+
+    frag = pd.DataFrame(memory.items(), columns=["fragment","count"])
+
+    # relations
     for i in range(len(words)-1):
         a, b = words[i], words[i+1]
-        rel.setdefault(a, {})
-        rel[a][b] = rel[a].get(b, 0) + 1
-        
-    # Mise à jour Cortex et Timeline
+        rel.setdefault(a,{})
+        rel[a][b] = rel[a].get(b,0)+1
+
+    # cortex update
     ctx["age"] += len(words)
     ctx["VS"] = 10 + np.log1p(ctx["age"])
-    
-    for w in words:
-        ctx["timeline"].append({"w": w, "e": 1/(1 + len(words))})
-    
-    # Limitation de la taille de la timeline pour éviter la saturation mémoire
-    if len(ctx["timeline"]) > 5000:
-        ctx["timeline"] = ctx["timeline"][-5000:]
-        
+
+    ctx.setdefault("timeline", []).append({
+        "t": str(datetime.datetime.now()),
+        "dk": ctx["delta_ratio"]
+    })
+
+    ctx["timeline"] = ctx["timeline"][-5000:]
+
     return frag, rel, ctx
 
-# --- CYCLE PRINCIPAL DU WORKER ---
+# -----------------------------------------------------
+# MAIN LOOP
+# -----------------------------------------------------
 def run_worker():
-    print(f"[{datetime.datetime.now()}] 🧠 Oracle Worker : Début du cycle...")
+
+    print("🧠 Sleep Cycle Started")
+
     frag, rel, ctx = load_memory()
-    
+
     if frag is None:
-        print("❌ Erreur : Mémoire introuvable. Lancez l'application Streamlit d'abord.")
+        print("Mémoire absente.")
         return
 
-    total_new_words = 0
-    
-    for url in SOURCES:
-        print(f"🌐 Scraping : {url}")
-        feed = feedparser.parse(url)
-        
-        for entry in feed.entries[:3]: # 3 articles par source pour éviter la surcharge
-            raw_content = f"{entry.title} {entry.description}"
-            
-            # Application du filtre de stabilité
-            if check_stability(raw_content, ctx.get("IS", 1.0)):
-                frag, rel, ctx = worker_learn(raw_content, frag, rel, ctx)
-                total_new_words += len(tokenize(raw_content))
-                print(f" ✅ Assimilé : {entry.title[:40]}...")
-            else:
-                print(f" ⚠️ Rejeté (Chaos détecté) : {entry.title[:40]}...")
+    total = 0
 
-    # Sauvegarde des résultats
+    for url in SOURCES:
+
+        feed = feedparser.parse(url)
+
+        for entry in feed.entries[:3]:
+
+            text = f"{entry.title} {entry.description}"
+
+            frag, rel, ctx = worker_learn(text, frag, rel, ctx)
+
+            total += len(tokenize(text))
+
     frag.to_csv(FILES["fragments"], index=False)
-    with open(FILES["relations"], "w") as f: json.dump(rel, f)
-    with open(FILES["cortex"], "w") as f: json.dump(ctx, f)
-    
-    print(f"🏁 Cycle terminé. {total_new_words} mots ajoutés à l'Ancrage.")
+    json.dump(rel, open(FILES["relations"],"w",encoding="utf-8"))
+    json.dump(ctx, open(FILES["cortex"],"w",encoding="utf-8"))
+
+    print(f"✅ Sleep complete : {total} mots assimilés")
 
 if __name__ == "__main__":
     run_worker()
