@@ -125,7 +125,6 @@ def tokenize(text):
 
 def read_docx(file):
     if Document is None: return ""
-    return "
 ".join(p.text for p in Document(file).paragraphs)
 
 def read_pdf(file):
