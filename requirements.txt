@@ -1,6 +1,5 @@
 streamlit
-pandas
 numpy
-scipy
 matplotlib
-pypdf
+PyPDF2
+python-docx
