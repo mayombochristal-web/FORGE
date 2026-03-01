@@ -156,3 +156,27 @@ with col2:
 
 st.divider()
 st.caption("Système autonome basé sur des chaînes de Markov pondérées par des systèmes dynamiques Φ.")
+
+st.divider()
+st.subheader("💾 Gestion de la Connaissance")
+
+# On recharge le lexique pour être sûr d'avoir la version à jour
+L_actuel = load_lex()
+
+if L_actuel:
+    # Bouton pour télécharger le cerveau actuel
+    json_brain = json.dumps(L_actuel, indent=2, ensure_ascii=False)
+    st.download_button(
+        label="📥 Télécharger le Lexicon.json (Sauvegarde)",
+        data=json_brain,
+        file_name="lexicon.json",
+        mime="application/json"
+    )
+
+    # Option pour charger un cerveau existant
+    uploaded_brain = st.file_uploader("📂 Restaurer un cerveau (Lexicon.json)", type="json")
+    if uploaded_brain:
+        new_brain = json.load(uploaded_brain)
+        save_lex(new_brain)
+        st.success("Mémoire restaurée avec succès !")
+
