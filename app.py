@@ -142,21 +142,19 @@ def read_docx(file):
 def read_pdf(file):
     if PdfReader is None:
         return ""
-    reader = PdfReader(file)
-    text_pages = [p.extract_text() or "" for p in reader.pages]
-    text = "
+    try:
+        reader = PdfReader(file)
+        text_pages = [p.extract_text() or "" for p in reader.pages]
+        text = "
 ".join(text_pages)
-    return text
-
+        
         # Filtrage basique de bruit PDF (obj, stream, flatedecode)
         if re.search(r"obj|stream|flatedecode", text, re.IGNORECASE):
             st.warning("⚠️ Contenu PDF non textuel détecté — filtrage effectué.")
             text = re.sub(r"\b(obj|endobj|stream|flatedecode)\b", "", text)
-
         return text
     except Exception:
         return ""
-
 # =====================================================
 # APPRENTISSAGE
 # =====================================================
