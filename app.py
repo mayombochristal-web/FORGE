@@ -99,16 +99,26 @@ st.title("🧠 ORACLE V6 — Cognition Connectée")
 tab1, tab2, tab3 = st.tabs(["💬 Conversation", "📚 Nourrir", "🌐 GitHub Cloud"])
 
 with tab1:
-    for msg in brain.dialog_memory:
-        st.write(msg)
-    
-    user_msg = st.chat_input("Échanger avec l'Oracle...")
     if user_msg:
-        with st.spinner("L'Oracle réfléchit..."):
-            response = brain.process_input(user_msg, is_user=True)
-            # SAUVEGARDE AUTOMATIQUE VERS GITHUB APRÈS CHAQUE RÉPONSE
-            sauvegarder_memoire_github(nom_memoire, f"Conversation : {user_msg[:20]}...")
-        st.rerun()
+    with st.spinner("L'Oracle choisit la meilleure banque de données..."):
+        # ÉTAPE A : Choisir le fichier selon le sujet
+        nouveau_fichier = choisir_banque_de_donnees(user_msg)
+        
+        # ÉTAPE B : Si le fichier change, on synchronise avec GitHub
+        if nouveau_fichier != st.session_state.current_mem:
+            st.info(f"🔄 Connexion à la banque de données : {nouveau_fichier}")
+            charger_memoire_github(nouveau_fichier)
+            st.session_state.brain = OracleBrain(nouveau_fichier)
+            st.session_state.current_mem = nouveau_fichier
+
+        # ÉTAPE C : L'Oracle traite l'information
+        response = st.session_state.brain.process_input(user_msg, is_user=True)
+        
+        # ÉTAPE D : Sauvegarde sur GitHub
+        sauvegarder_memoire_github(nouveau_fichier, f"Update via sujet: {nouveau_fichier}")
+        
+    st.rerun()
+
 
 with tab2:
     mode = st.radio("Source", ["Texte", "Document"])
