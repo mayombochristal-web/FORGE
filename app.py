@@ -1,5 +1,5 @@
 # =====================================================
-# 🧠 ORACLE V6 Ω — Biological Persistent Cortex UI
+# 🧠 ORACLE V6 Ω — Biological Persistent Cortex
 # =====================================================
 
 import streamlit as st
@@ -11,18 +11,12 @@ st.title("🧠 ORACLE V6 Ω — Biological Persistent Cortex")
 
 memory = load_memory()
 
-# =====================================================
-# CHAT DISPLAY
-# =====================================================
-
+# DISPLAY CHAT
 for msg in memory["messages"]:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# =====================================================
 # INPUT
-# =====================================================
-
 uploaded = st.file_uploader(
     "Insert file / audio",
     type=["pdf","docx","txt","csv","wav"]
@@ -44,10 +38,7 @@ if prompt or uploaded:
         process_input(text)
         st.rerun()
 
-# =====================================================
-# STATUS BAR
-# =====================================================
-
+# SIDEBAR
 with st.sidebar:
 
     st.header("🧠 Cognitive State")
