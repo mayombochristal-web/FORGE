@@ -1,132 +1,59 @@
 # =====================================================
-# 🧠 ORACLE V6 — CORTEX STREAMLIT
+# 🧠 ORACLE V6.1 — AUTONOMOUS CORTEX APP
 # =====================================================
 
 import streamlit as st
-from collections import deque
-from io import BytesIO
+from oracle_core import *
 
-import pandas as pd
-import PyPDF2
-import docx
-import speech_recognition as sr
+st.set_page_config(page_title="ORACLE V6.1", layout="wide")
 
-import oracle_core as core
+# INIT SESSION
+if "memory_dirty" not in st.session_state:
+    st.session_state.memory_dirty = False
 
 # =====================================================
-# SESSION UI
+# LOAD MEMORY
 # =====================================================
 
-if "dialog" not in st.session_state:
-    st.session_state.dialog=deque(maxlen=60)
+memory = load_memory()
+
+st.title("🧠 ORACLE V6.1 — Auto Persistent Cortex")
 
 # =====================================================
-# FILE READER SAFE
+# DISPLAY CHAT
 # =====================================================
 
-def read_file(upload):
-
-    raw=upload.read()
-
-    try:
-        if upload.type=="application/pdf":
-            reader=PyPDF2.PdfReader(BytesIO(raw))
-            return " ".join(
-                p.extract_text() or ""
-                for p in reader.pages[:40]
-            )
-
-        if upload.type.endswith("document"):
-            doc=docx.Document(BytesIO(raw))
-            return " ".join(p.text for p in doc.paragraphs[:400])
-
-        if upload.type=="text/plain":
-            return raw.decode("utf-8","ignore")
-
-        if upload.type=="text/csv":
-            df=pd.read_csv(BytesIO(raw))
-            return df.head(400).to_string()
-
-    except:
-        return ""
-
-    return ""
+for msg in memory["messages"]:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
 # =====================================================
-# AUDIO
+# USER INPUT
 # =====================================================
 
-def speech_to_text(file):
-    try:
-        r=sr.Recognizer()
-        with sr.AudioFile(file) as src:
-            audio=r.record(src)
-        return r.recognize_google(audio)
-    except:
-        return ""
+prompt = st.chat_input("Message...")
+
+if prompt:
+
+    add_message("user", prompt)
+
+    response = f"Oracle processed: {prompt}"
+
+    add_message("assistant", response)
+
+    st.rerun()
 
 # =====================================================
-# UI
+# AUTO SYNC (NO BUTTON)
 # =====================================================
 
-st.set_page_config(page_title="ORACLE V6",page_icon="🧠")
-
-st.title("🧠 ORACLE V6 — Cortex Interface")
-
-msg_input=st.text_input("Parlez à l'Oracle")
-
-file=st.file_uploader(
-    "Insérer fichier / audio",
-    type=["pdf","docx","txt","csv","wav"]
-)
-
-if st.button("Envoyer"):
-
-    msg=""
-
-    if file:
-        if file.type=="audio/wav":
-            msg=speech_to_text(file)
-        else:
-            msg=read_file(file)
-    else:
-        msg=msg_input
-
-    if msg:
-
-        core.ghost_preload(msg)
-
-        st.session_state.dialog.append(msg)
-
-        exc=min(1,len(msg)/200)
-        core.evolve_phi(exc)
-
-        core.learn(msg)
-
-        reply=core.generate(st.session_state.dialog)
-
-        st.session_state.dialog.append(reply)
-
-        core.learn(reply,0.3)
+auto_sync_loop()
 
 # =====================================================
-# DISPLAY
+# STATUS
 # =====================================================
 
-for m in st.session_state.dialog:
-    st.write(m)
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-
-with st.sidebar:
-
-    st.header("🧠 État Cognitif")
-
-    for k,v in core.brain_state["phi"].items():
-        st.progress(v,text=f"{k}: {v:.2f}")
-
-    if st.button("🌙 Sommeil forcé"):
-        core.sleep_cycle()
-        st.success("Consolidation terminée")
+if st.session_state.memory_dirty:
+    st.caption("🟡 Memory pending sync...")
+else:
+    st.caption("🟢 Memory synced")
