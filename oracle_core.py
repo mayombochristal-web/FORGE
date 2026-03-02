@@ -1,300 +1,143 @@
 # =====================================================
-# 🧠 ORACLE CORE V3.2 CANONICAL
-# Fusion V3.1 + V4.5 Ω + V6 Ω
+# 🧠 ORACLE CORE — V3.2 Ω STABLE BRAIN
 # =====================================================
 
-import random, json, os, math, time
-from collections import deque, Counter
-from io import BytesIO
+import json
+import os
+import random
+import math
+from collections import deque
+from datetime import datetime
 
-import pandas as pd
-import PyPDF2
-import docx
-import speech_recognition as sr
+# =====================================================
+# MEMORY PATHS
+# =====================================================
 
-# ================= CONFIG =================
+MEMORY_FILE = "memory.json"
 
-MEM_DIR="oracle_memory"
-LEXICON_PATH=os.path.join(MEM_DIR,"lexicon.json")
+# =====================================================
+# UTILITIES
+# =====================================================
 
-os.makedirs(MEM_DIR,exist_ok=True)
+def load_memory():
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
-if not os.path.exists(LEXICON_PATH):
-    json.dump({},open(LEXICON_PATH,"w",encoding="utf-8"))
+def save_memory(mem):
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(mem[-500:], f, indent=2, ensure_ascii=False)
 
-MAX_FILE_MB=8
-MAX_PAGES=40
-MAX_ROWS=400
+# =====================================================
+# ORACLE BRAIN
+# =====================================================
 
-# ================= BRAIN STATE =================
+class OracleBrain:
 
-brain={
-    "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
-    "dialog_memory":deque(maxlen=60),
-    "green_state":0.0,
-    "last_sleep":time.time(),
-    "ghost_cache":{},
-    "hippocampus":[],
-    "identity_entropy":0.5
-}
+    def __init__(self):
+        self.long_memory = load_memory()
+        self.dialog_memory = deque(maxlen=40)
+        self.phi = 0.5
+        self.energy = 0.5
 
-# ================= MEMORY =================
+    # ----------------------------
+    # THALAMUS (V4.5 Ω)
+    # ----------------------------
+    def contextual_seed(self):
 
-def load_lex():
-    try:
-        return json.load(open(LEXICON_PATH,"r",encoding="utf-8"))
-    except:
-        return {}
+        text = " ".join(self.dialog_memory[-6:])
 
-def save_lex(L):
+        words = text.split()
+        if not words:
+            return ""
 
-    if len(L)>15000:
-        L=dict(list(L.items())[-12000:])
+        freq = {}
+        for w in words:
+            freq[w] = freq.get(w, 0) + 1
 
-    json.dump(
-        L,
-        open(LEXICON_PATH,"w",encoding="utf-8"),
-        indent=2,
-        ensure_ascii=False
-    )
+        return max(freq, key=freq.get)
 
-# ================= GREEN NOISE =================
+    # ----------------------------
+    # GREEN NOISE (V3.1)
+    # ----------------------------
+    def green_noise(self):
+        return random.uniform(-0.05, 0.05)
 
-def green_noise(prev):
-    return 0.92*prev+0.08*random.uniform(-1,1)
+    # ----------------------------
+    # HOMEOSTASIS (V6 Ω)
+    # ----------------------------
+    def regulate(self):
+        self.phi += self.green_noise()
+        self.phi = max(0.1, min(1.0, self.phi))
 
-def consolidation_gate():
-    brain["green_state"]=green_noise(brain["green_state"])
-    return abs(brain["green_state"])<0.25
+    # ----------------------------
+    # LEARNING SYSTEM
+    # ----------------------------
+    def learn(self, text, weight=1.0):
 
-# ================= Φ ENGINE =================
+        self.long_memory.append({
+            "text": text,
+            "weight": weight,
+            "time": str(datetime.now())
+        })
 
-def evolve_phi(exc):
+        save_memory(self.long_memory)
 
-    phi=brain["phi"]
+    # ----------------------------
+    # GENERATION ENGINE
+    # ----------------------------
+    def generate(self, user_input):
 
-    phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))
-    phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))
-    phi["phi_d"]=min(1,max(0.1,phi["phi_d"]+0.02-exc*0.05))
+        seed = self.contextual_seed()
 
-    # influence biologique green noise
-    phi["phi_c"]+=brain["green_state"]*0.05
+        base = f"Seed:{seed} | Φ={round(self.phi,2)}"
 
-    s=sum(phi.values())
-    for k in phi:
-        phi[k]/=s
+        thought_length = int(8 + self.phi * 35)
 
-# ================= GHOST CORTEX =================
+        words = user_input.split()
 
-def ghost_preload(text):
+        generated = []
 
-    L=load_lex()
-    cache={}
+        for i in range(thought_length):
+            if words:
+                generated.append(random.choice(words))
+            else:
+                generated.append(seed)
 
-    for w in text.lower().split():
-        if w in L:
-            cache[w]=sorted(
-                L[w].items(),
-                key=lambda x:-x[1]
-            )[:5]
+        reply = base + "\n" + " ".join(generated)
 
-    brain["ghost_cache"]=cache
+        return reply
 
-# ================= HIPPOCAMPUS =================
+    # ----------------------------
+    # MAIN PIPELINE
+    # ----------------------------
+    def process(self, user_input):
 
-def learn(text,importance=1.0):
+        self.dialog_memory.append(user_input)
 
-    words=text.lower().split()
-    if len(words)<2:
-        return
+        self.regulate()
 
-    energy=math.sqrt(sum(v*v for v in brain["phi"].values()))*importance
-    brain["hippocampus"].append((words,energy))
+        reply = self.generate(user_input)
 
-    if len(brain["hippocampus"])>5 and consolidation_gate():
-        consolidate()
+        self.dialog_memory.append(reply)
 
-def consolidate():
+        # dual learning V4.5 Ω
+        self.learn(user_input, 1.0)
+        self.learn(reply, 0.3)
 
-    L=load_lex()
+        return reply
 
-    for words,energy in brain["hippocampus"]:
-        for a,b in zip(words,words[1:]):
-            L.setdefault(a,{})
-            L[a][b]=L[a].get(b,0)+energy
 
-    if len(L)>12000:
-        L=dict(list(L.items())[-10000:])
+# =====================================================
+# GLOBAL BRAIN INSTANCE (CRITICAL)
+# =====================================================
 
-    save_lex(L)
-    brain["hippocampus"].clear()
+brain = OracleBrain()
 
-# ================= SLEEP =================
+# =====================================================
+# EXPORTED API (DO NOT RENAME)
+# =====================================================
 
-def sleep_cycle():
-
-    L=load_lex()
-    new={}
-
-    for w,con in L.items():
-        filt={t:v*0.997 for t,v in con.items() if v>1.2}
-        if filt:
-            new[w]=filt
-
-    save_lex(new)
-    brain["last_sleep"]=time.time()
-
-def auto_sleep():
-    if time.time()-brain["last_sleep"]>180:
-        if consolidation_gate():
-            sleep_cycle()
-
-# ================= SENSORIUM =================
-
-def extract_text_from_file(upload):
-
-    raw=upload.read()
-
-    if len(raw)>MAX_FILE_MB*1024*1024:
-        return ""
-
-    try:
-
-        if upload.type=="application/pdf":
-            reader=PyPDF2.PdfReader(BytesIO(raw))
-            text=[]
-            for p in reader.pages[:MAX_PAGES]:
-                t=p.extract_text()
-                if t:
-                    text.append(t)
-            return " ".join(text)
-
-        if upload.type.endswith("document"):
-            doc=docx.Document(BytesIO(raw))
-            return " ".join(p.text for p in doc.paragraphs[:400])
-
-        if upload.type=="text/plain":
-            return raw.decode("utf-8","ignore")
-
-        if upload.type=="text/csv":
-            df=pd.read_csv(BytesIO(raw))
-            return df.head(MAX_ROWS).to_string()
-
-    except:
-        pass
-
-    return ""
-
-def speech_to_text(file):
-    try:
-        r=sr.Recognizer()
-        with sr.AudioFile(file) as src:
-            audio=r.record(src)
-        return r.recognize_google(audio)
-    except:
-        return ""
-
-# ================= THALAMUS =================
-
-def contextual_seed(L):
-
-    ctx=" ".join(brain["dialog_memory"]).split()
-    valid=[w for w in ctx if w in L]
-
-    if valid:
-        return Counter(valid).most_common(1)[0][0]
-
-    return random.choice(list(L.keys()))
-
-# ================= CORTEX =================
-
-def associative_layer(word,L):
-
-    ghost=brain["ghost_cache"].get(word)
-    if ghost:
-        return random.choice(ghost)[0]
-
-    if word not in L:
-        return word
-
-    opts=L[word]
-
-    if random.random()<brain["phi"]["phi_c"]:
-        return random.choices(
-            list(opts.keys()),
-            weights=list(opts.values())
-        )[0]
-
-    return max(opts,key=opts.get)
-
-# ================= GENERATION =================
-
-def generate():
-
-    auto_sleep()
-
-    L=load_lex()
-    if not L:
-        return "Mémoire vide."
-
-    seed=contextual_seed(L)
-
-    words=[seed]
-    used=set(words)
-
-    length=int(10+brain["phi"]["phi_m"]*30)
-
-    for _ in range(length):
-
-        nxt=associative_layer(words[-1],L)
-
-        if nxt in used and random.random()<brain["phi"]["phi_d"]:
-            break
-
-        words.append(nxt)
-        used.add(nxt)
-
-    if brain["phi"]["phi_c"]>0.65:
-        words.append("évolution")
-
-    return " ".join(words).capitalize()+"."
-
-# ================= IDENTITY =================
-
-def evolve_identity():
-    brain["identity_entropy"]+=random.uniform(-0.01,0.01)
-
-# ================= MASTER PIPELINE =================
-
-def process_input(text=None,file=None):
-
-    # perception
-    if file:
-        if file.type=="audio/wav":
-            text=speech_to_text(file)
-        else:
-            text=extract_text_from_file(file)
-
-    if not text:
-        return "Aucune information perçue."
-
-    evolve_identity()
-
-    ghost_preload(text)
-
-    brain["dialog_memory"].append(text)
-
-    ghost_factor=len(brain["ghost_cache"])/5
-    exc=min(1,(len(text)/200)+ghost_factor*0.2)
-
-    evolve_phi(exc)
-
-    learn(text,1.2)
-
-    reply=generate()
-
-    brain["dialog_memory"].append(reply)
-
-    learn(reply,0.3)
-
-    return reply
+def process_input(text: str):
+    return brain.process(text)
