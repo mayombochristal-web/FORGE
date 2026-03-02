@@ -1,47 +1,57 @@
 # =====================================================
-# 🧠 ORACLE V6 CORE — CORTEX AUTONOME
-# Compatible V3.1 Biology
+# 🧠 ORACLE CORE V6 — CERVEAU AUTONOME
+# Architecture TTU-MC³ Stable
 # =====================================================
 
-import sqlite3, random, math, time
+import os, json, random, math, time, threading
 from collections import Counter
 
-DB="memory.db"
+# =====================================================
+# CONFIG
+# =====================================================
 
-# ================= MEMORY INIT =================
+MEM_DIR = "oracle_memory"
+LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
 
-def init_db():
-    conn=sqlite3.connect(DB)
-    c=conn.cursor()
+os.makedirs(MEM_DIR, exist_ok=True)
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS synapses(
-        w1 TEXT,
-        w2 TEXT,
-        weight REAL
-    )
-    """)
+if not os.path.exists(LEXICON_PATH):
+    json.dump({}, open(LEXICON_PATH,"w",encoding="utf-8"))
 
-    conn.commit()
-    conn.close()
+# =====================================================
+# ÉTAT GLOBAL DU CERVEAU
+# =====================================================
 
-init_db()
+brain_state = {
+    "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
+    "green_state":0.0,
+    "hippocampus":[],
+    "ghost_cache":{},
+    "last_sleep":time.time()
+}
 
-# ================= GREEN NOISE =================
+lock = threading.Lock()
 
-green_state=0.0
+# =====================================================
+# GREEN NOISE
+# =====================================================
 
 def green_noise(prev):
     return 0.92*prev + 0.08*random.uniform(-1,1)
 
 def consolidation_gate():
-    global green_state
-    green_state=green_noise(green_state)
-    return abs(green_state)<0.25
+    brain_state["green_state"]=green_noise(
+        brain_state["green_state"]
+    )
+    return abs(brain_state["green_state"])<0.25
 
-# ================= Φ ENGINE =================
+# =====================================================
+# Φ ENGINE
+# =====================================================
 
-def evolve_phi(phi,exc):
+def evolve_phi(exc):
+
+    phi=brain_state["phi"]
 
     phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))
     phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))
@@ -51,90 +61,169 @@ def evolve_phi(phi,exc):
     for k in phi:
         phi[k]/=s
 
-    return phi
+# =====================================================
+# MÉMOIRE INCRÉMENTALE
+# =====================================================
 
-# ================= LEARNING =================
+def load_lex():
+    with lock:
+        try:
+            return json.load(open(LEXICON_PATH,"r",encoding="utf-8"))
+        except:
+            return {}
 
-def learn(text,phi):
+def save_lex(L):
+
+    if len(L)>15000:
+        L=dict(list(L.items())[-12000:])
+
+    with lock:
+        json.dump(
+            L,
+            open(LEXICON_PATH,"w",encoding="utf-8"),
+            indent=2,
+            ensure_ascii=False
+        )
+
+# =====================================================
+# HIPPOCAMPUS
+# =====================================================
+
+def learn(text,importance=1.0):
 
     words=text.lower().split()
     if len(words)<2:
         return
 
-    energy=math.sqrt(sum(v*v for v in phi.values()))
+    phi=brain_state["phi"]
+    energy=math.sqrt(sum(v*v for v in phi.values()))*importance
 
-    conn=sqlite3.connect(DB)
-    c=conn.cursor()
+    brain_state["hippocampus"].append((words,energy))
 
-    for a,b in zip(words,words[1:]):
-        c.execute("""
-        INSERT INTO synapses VALUES(?,?,?)
-        """,(a,b,energy))
+    if len(brain_state["hippocampus"])>5 and consolidation_gate():
+        consolidate()
 
-    conn.commit()
-    conn.close()
+def consolidate():
 
-# ================= MEMORY QUERY =================
+    L=load_lex()
 
-def next_word(word,phi):
+    for words,energy in brain_state["hippocampus"]:
+        for a,b in zip(words,words[1:]):
+            L.setdefault(a,{})
+            L[a][b]=L[a].get(b,0)+energy
 
-    conn=sqlite3.connect(DB)
-    c=conn.cursor()
+    save_lex(L)
+    brain_state["hippocampus"].clear()
 
-    c.execute("""
-    SELECT w2, SUM(weight)
-    FROM synapses
-    WHERE w1=?
-    GROUP BY w2
-    """,(word,))
+# =====================================================
+# SOMMEIL
+# =====================================================
 
-    rows=c.fetchall()
-    conn.close()
+def sleep_cycle():
 
-    if not rows:
+    L=load_lex()
+    new={}
+
+    for w,con in L.items():
+        filt={t:v*0.997 for t,v in con.items() if v>1.2}
+        if filt:
+            new[w]=filt
+
+    save_lex(new)
+    brain_state["last_sleep"]=time.time()
+
+def auto_sleep_loop():
+
+    while True:
+        time.sleep(30)
+
+        if time.time()-brain_state["last_sleep"]>180:
+            if consolidation_gate():
+                sleep_cycle()
+
+threading.Thread(target=auto_sleep_loop,
+                 daemon=True).start()
+
+# =====================================================
+# GHOST CORTEX
+# =====================================================
+
+def ghost_preload(text):
+
+    L=load_lex()
+    cache={}
+
+    for w in text.lower().split():
+        if w in L:
+            cache[w]=sorted(
+                L[w].items(),
+                key=lambda x:-x[1]
+            )[:5]
+
+    brain_state["ghost_cache"]=cache
+
+# =====================================================
+# CORTEX
+# =====================================================
+
+def contextual_seed(dialog):
+
+    L=load_lex()
+    ctx=" ".join(dialog).split()
+    valid=[w for w in ctx if w in L]
+
+    if valid:
+        return Counter(valid).most_common(1)[0][0]
+
+    return random.choice(list(L.keys())) if L else "oracle"
+
+def associative(word):
+
+    L=load_lex()
+
+    ghost=brain_state["ghost_cache"].get(word)
+    if ghost:
+        return random.choice(ghost)[0]
+
+    if word not in L:
         return word
 
-    words,weights=zip(*rows)
+    opts=L[word]
+    phi=brain_state["phi"]
 
     if random.random()<phi["phi_c"]:
-        return random.choices(words,weights)[0]
+        return random.choices(
+            list(opts.keys()),
+            weights=list(opts.values())
+        )[0]
 
-    return words[weights.index(max(weights))]
+    return max(opts,key=opts.get)
 
-# ================= GENERATION =================
+# =====================================================
+# GÉNÉRATION
+# =====================================================
 
-def reply(dialog,phi):
+def generate(dialog):
 
-    conn=sqlite3.connect(DB)
-    c=conn.cursor()
-
-    c.execute("SELECT w1 FROM synapses LIMIT 100")
-    seeds=[r[0] for r in c.fetchall()]
-    conn.close()
-
-    if not seeds:
+    L=load_lex()
+    if not L:
         return "Mémoire vide."
 
-    context=" ".join(dialog).split()
-    valid=[w for w in context if w in seeds]
-
-    seed=random.choice(valid or seeds)
-
+    seed=contextual_seed(dialog)
     words=[seed]
     used=set(words)
 
-    for _ in range(int(10+phi["phi_m"]*30)):
+    phi=brain_state["phi"]
+    length=int(10+phi["phi_m"]*30)
 
-        nxt=next_word(words[-1],phi)
+    for _ in range(length):
+        nxt=associative(words[-1])
 
         if nxt in used and random.random()<phi["phi_d"]:
             break
 
         words.append(nxt)
         used.add(nxt)
-
-    if phi["phi_m"]>0.6:
-        words.append("continuité")
 
     if phi["phi_c"]>0.65:
         words.append("évolution")
