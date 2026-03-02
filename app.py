@@ -1,16 +1,17 @@
 # =====================================================
-# 🧠 ORACLE V4 — AGENT COGNITIF STABLE
-# TTU-MC³ + META + SELF + HIPPOCAMPUS
+# 🧠 ORACLE V4 FULL — V3.1 + EXTENSION COGNITIVE
+# Toutes entrées V2/V3.1 conservées
 # =====================================================
 
 import streamlit as st
 import random, json, os, math, time, io
 import PyPDF2, docx
 import pandas as pd
+import speech_recognition as sr
 from collections import deque, Counter
 
 # =====================================================
-# 1. CONFIGURATION
+# CONFIGURATION
 # =====================================================
 
 MEM_DIR="oracle_memory"
@@ -19,9 +20,9 @@ SELF_PATH=os.path.join(MEM_DIR,"self_model.json")
 
 os.makedirs(MEM_DIR,exist_ok=True)
 
-def init_file(path,default):
-    if not os.path.exists(path):
-        json.dump(default,open(path,"w",encoding="utf-8"))
+def init_file(p,d):
+    if not os.path.exists(p):
+        json.dump(d,open(p,"w",encoding="utf-8"))
 
 init_file(LEXICON_PATH,{})
 init_file(SELF_PATH,{
@@ -31,7 +32,7 @@ init_file(SELF_PATH,{
 })
 
 # =====================================================
-# 2. SESSION
+# SESSION
 # =====================================================
 
 if "phi" not in st.session_state:
@@ -78,20 +79,21 @@ def evolve_phi(phi,exc):
 # =====================================================
 
 def load_json(p):
-    return json.load(open(p,"r",encoding="utf-8"))
+    try:
+        return json.load(open(p,"r",encoding="utf-8"))
+    except:
+        return {}
 
 def save_json(p,d):
     json.dump(d,open(p,"w",encoding="utf-8"),
               indent=2,ensure_ascii=False)
 
 # =====================================================
-# HIPPOCAMPUS (HIERARCHY)
+# HIPPOCAMPUS (concept hierarchy)
 # =====================================================
 
-def concept_tag(word):
-    if len(word)>7:
-        return word[:4]
-    return word
+def concept_tag(w):
+    return w[:4] if len(w)>7 else w
 
 # =====================================================
 # LEARNING
@@ -104,76 +106,15 @@ def learn(text,phi,importance=1.0):
         return
 
     L=load_json(LEXICON_PATH)
-
     energy=math.sqrt(sum(v*v for v in phi.values()))*importance
 
     for a,b in zip(words,words[1:]):
-
-        ca,cb=concept_tag(a),concept_tag(b)
-
-        L.setdefault(ca,{})
-        L[ca][cb]=L[ca].get(cb,0)+energy
+        a,b=concept_tag(a),concept_tag(b)
+        L.setdefault(a,{})
+        L[a][b]=L[a].get(b,0)+energy
 
     if consolidation_gate():
         save_json(LEXICON_PATH,L)
-
-# =====================================================
-# META-COGNITION
-# =====================================================
-
-def evaluate_response(words):
-
-    unique=len(set(words))
-    ratio=unique/max(len(words),1)
-
-    coherence=min(1,ratio*1.5)
-
-    return coherence
-
-# =====================================================
-# GENERATION
-# =====================================================
-
-def contextual_seed(L):
-
-    context=" ".join(st.session_state.dialog_memory).split()
-    c=[concept_tag(w) for w in context if concept_tag(w) in L]
-
-    if c:
-        return Counter(c).most_common(1)[0][0]
-
-    return random.choice(list(L.keys()))
-
-def oracle_reply(phi):
-
-    L=load_json(LEXICON_PATH)
-    if not L:
-        return "Mémoire vide."
-
-    seed=contextual_seed(L)
-
-    words=[seed]
-
-    for _ in range(int(10+phi["phi_m"]*30)):
-
-        cur=words[-1]
-        if cur not in L:
-            break
-
-        nxt=random.choices(
-            list(L[cur].keys()),
-            weights=list(L[cur].values())
-        )[0]
-
-        words.append(nxt)
-
-    score=evaluate_response(words)
-
-    # métacognition
-    if score<0.35:
-        return "Je reformule ma pensée."
-
-    return " ".join(words).capitalize()+"."
 
 # =====================================================
 # SOMMEIL
@@ -197,8 +138,154 @@ def sleep_cycle():
     save_json(SELF_PATH,self_model)
 
     st.session_state.last_sleep=time.time()
-
     return "🌙 Consolidation terminée"
+
+# =====================================================
+# META-COGNITION
+# =====================================================
+
+def evaluate_response(words):
+    return len(set(words))/max(len(words),1)
+
+# =====================================================
+# THALAMUS
+# =====================================================
+
+def contextual_seed(L):
+
+    context=" ".join(st.session_state.dialog_memory).split()
+    c=[concept_tag(w) for w in context if concept_tag(w) in L]
+
+    if c:
+        return Counter(c).most_common(1)[0][0]
+
+    return random.choice(list(L.keys()))
+
+# =====================================================
+# CORTEX
+# =====================================================
+
+def logical_layer(seq,L):
+    return [w for w in seq if w in L] or seq
+
+def associative_layer(word,L,phi):
+
+    if word not in L:
+        return word
+
+    opts=L[word]
+
+    if random.random()<phi["phi_c"]:
+        return random.choices(
+            list(opts.keys()),
+            weights=list(opts.values())
+        )[0]
+
+    return max(opts,key=opts.get)
+
+def predictive_layer(words,phi):
+
+    if phi["phi_m"]>0.6:
+        words.append("continuité")
+
+    if phi["phi_c"]>0.65:
+        words.append("évolution")
+
+    return words
+
+# =====================================================
+# GENERATION
+# =====================================================
+
+def oracle_reply(phi):
+
+    L=load_json(LEXICON_PATH)
+    if not L:
+        return "Mémoire vide."
+
+    seed=contextual_seed(L)
+    words=[seed]
+    used=set(words)
+
+    for _ in range(int(8+phi["phi_m"]*35)):
+
+        filtered=logical_layer(words,L)
+        current=filtered[-1]
+
+        nxt=associative_layer(current,L,phi)
+
+        if nxt in used and random.random()<phi["phi_d"]:
+            break
+
+        words.append(nxt)
+        used.add(nxt)
+
+    words=predictive_layer(words,phi)
+
+    if evaluate_response(words)<0.35:
+        return "Je reformule ma pensée."
+
+    return " ".join(words).capitalize()+"."
+
+# =====================================================
+# EXTRACTION MULTIMODALE (V2 RESTAURÉ)
+# =====================================================
+
+def extract_content(mode):
+
+    raw=""
+
+    if mode=="Texte":
+        raw=st.text_area("Texte")
+
+    elif mode=="Document":
+        file=st.file_uploader(
+            "PDF / DOCX / TXT",
+            type=["pdf","docx","txt"]
+        )
+
+        if file:
+
+            if file.name.endswith(".pdf"):
+                reader=PyPDF2.PdfReader(file)
+                raw=" ".join(
+                    p.extract_text() for p in reader.pages
+                    if p.extract_text()
+                )
+
+            elif file.name.endswith(".docx"):
+                buffer=io.BytesIO(file.read())
+                doc=docx.Document(buffer)
+                raw="\n".join(p.text for p in doc.paragraphs)
+
+            else:
+                raw=file.read().decode("utf-8")
+
+    elif mode=="Excel":
+
+        file=st.file_uploader("Excel",type=["xlsx","xls"])
+        if file:
+            df=pd.read_excel(file)
+            raw=df.to_string()
+
+    elif mode=="Audio":
+
+        audio=st.file_uploader("Audio WAV",type="wav")
+        if audio:
+            r=sr.Recognizer()
+            with sr.AudioFile(audio) as source:
+                data=r.record(source)
+                try:
+                    raw=r.recognize_google(data,language="fr-FR")
+                    st.success("Transcription réussie")
+                except:
+                    st.error("Transcription impossible")
+
+    return raw
+
+# =====================================================
+# AUTO SOMMEIL
+# =====================================================
 
 def auto_sleep():
     if time.time()-st.session_state.last_sleep>180:
@@ -208,45 +295,26 @@ def auto_sleep():
 auto_sleep()
 
 # =====================================================
-# SAFE DOCX LOADER (FIX AXIOS ERROR)
-# =====================================================
-
-def read_docx_safe(upload):
-
-    try:
-        buffer=io.BytesIO(upload.read())
-        doc=docx.Document(buffer)
-        return "\n".join(p.text for p in doc.paragraphs)
-    except Exception as e:
-        return ""
-
-# =====================================================
 # UI
 # =====================================================
 
 st.set_page_config(page_title="ORACLE V4",page_icon="🧠")
+
 st.title("🧠 ORACLE V4 — Agent Cognitif Stable")
 
-mode=st.radio("Entrée",["Texte","DOCX"])
+mode=st.radio(
+    "Source du savoir",
+    ["Texte","Document","Excel","Audio"]
+)
 
-content=""
+content=extract_content(mode)
 
-if mode=="Texte":
-    content=st.text_area("Texte")
-
-if mode=="DOCX":
-    f=st.file_uploader("Document",type="docx")
-    if f:
-        content=read_docx_safe(f)
-
-if st.button("Apprendre") and content:
+if st.button("🌱 Nourrir") and content:
+    exc=min(1,len(content)/400)
     st.session_state.phi=evolve_phi(
-        st.session_state.phi,
-        min(1,len(content)/400)
-    )
+        st.session_state.phi,exc)
     learn(content,st.session_state.phi,1.2)
 
-# conversation
 msg=st.text_input("Parlez")
 
 if st.button("➡️") and msg:
@@ -268,16 +336,18 @@ for m in st.session_state.dialog_memory:
 
 with st.sidebar:
 
-    st.header("État Cognitif")
+    st.header("🧠 État Cognitif")
 
     size=os.path.getsize(LEXICON_PATH)/1024
-    st.success(f"Mémoire {size:.2f} KB")
+    st.success(f"Mémoire : {size:.2f} KB")
 
     self_model=load_json(SELF_PATH)
-
-    st.write("Âge cognitif:",self_model["cognitive_age"])
+    st.write("Âge cognitif :",self_model["cognitive_age"])
     st.progress(self_model["stability"])
 
-    if st.button("🌙 Sommeil"):
+    for k,v in st.session_state.phi.items():
+        st.progress(v,text=f"{k}:{v:.2f}")
+
+    if st.button("🌙 Sommeil forcé"):
         st.warning(sleep_cycle())
         st.rerun()
