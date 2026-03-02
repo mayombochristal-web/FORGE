@@ -1,12 +1,14 @@
 # =====================================================
-# 🧠 ORACLE V4 FULL — V3.1 + EXTENSION COGNITIVE
-# Toutes entrées V2/V3.1 conservées
+# 🧠 ORACLE V4.5 Ω — AGENT COGNITIF COMPLET
+# Fusion V2 + V3.1 + V4 + V4.5
 # =====================================================
 
 import streamlit as st
-import random, json, os, math, time, io
-import PyPDF2, docx
+import random, json, os, math, time, base64
+import requests
 import pandas as pd
+import PyPDF2
+import docx
 import speech_recognition as sr
 from collections import deque, Counter
 
@@ -14,32 +16,27 @@ from collections import deque, Counter
 # CONFIGURATION
 # =====================================================
 
-MEM_DIR="oracle_memory"
-LEXICON_PATH=os.path.join(MEM_DIR,"lexicon.json")
-SELF_PATH=os.path.join(MEM_DIR,"self_model.json")
+MEM_FILE="oracle_memory.json"
 
-os.makedirs(MEM_DIR,exist_ok=True)
+if not os.path.exists(MEM_FILE):
+    json.dump({},open(MEM_FILE,"w"))
 
-def init_file(p,d):
-    if not os.path.exists(p):
-        json.dump(d,open(p,"w",encoding="utf-8"))
-
-init_file(LEXICON_PATH,{})
-init_file(SELF_PATH,{
-    "cognitive_age":0,
-    "stability":0.5,
-    "interactions":0
-})
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO  = st.secrets["GITHUB_REPO"]
+BRANCH="main"
 
 # =====================================================
-# SESSION
+# SESSION STATE
 # =====================================================
 
 if "phi" not in st.session_state:
     st.session_state.phi={"phi_m":0.5,"phi_c":0.5,"phi_d":0.5}
 
-if "dialog_memory" not in st.session_state:
-    st.session_state.dialog_memory=deque(maxlen=40)
+if "dialog" not in st.session_state:
+    st.session_state.dialog=deque(maxlen=60)
+
+if "hippocampus" not in st.session_state:
+    st.session_state.hippocampus=[]
 
 if "green_state" not in st.session_state:
     st.session_state.green_state=0.0
@@ -48,19 +45,59 @@ if "last_sleep" not in st.session_state:
     st.session_state.last_sleep=time.time()
 
 # =====================================================
-# GREEN NOISE
+# GREEN NOISE (HOMEOSTASIS)
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev+(1-0.92)*random.uniform(-1,1)
+    return 0.92*prev + 0.08*random.uniform(-1,1)
 
 def consolidation_gate():
     st.session_state.green_state=green_noise(
-        st.session_state.green_state)
+        st.session_state.green_state
+    )
     return abs(st.session_state.green_state)<0.25
 
 # =====================================================
-# Φ ENGINE
+# MEMORY
+# =====================================================
+
+def load_memory():
+    return json.load(open(MEM_FILE))
+
+def save_memory(M):
+    json.dump(M,open(MEM_FILE,"w"),indent=2,ensure_ascii=False)
+
+# =====================================================
+# GITHUB AUTO SYNC
+# =====================================================
+
+def github_sync():
+
+    with open(MEM_FILE,"rb") as f:
+        content=base64.b64encode(f.read()).decode()
+
+    url=f"https://api.github.com/repos/{GITHUB_REPO}/contents/{MEM_FILE}"
+    headers={"Authorization":f"token {GITHUB_TOKEN}"}
+
+    r=requests.get(url,headers=headers)
+    sha=None
+
+    if r.status_code==200:
+        sha=r.json()["sha"]
+
+    data={
+        "message":"🧬 Oracle memory auto-sync",
+        "content":content,
+        "branch":BRANCH
+    }
+
+    if sha:
+        data["sha"]=sha
+
+    requests.put(url,headers=headers,json=data)
+
+# =====================================================
+# Φ ENGINE (V3.1)
 # =====================================================
 
 def evolve_phi(phi,exc):
@@ -72,108 +109,86 @@ def evolve_phi(phi,exc):
     s=sum(phi.values())
     for k in phi:
         phi[k]/=s
+
     return phi
 
 # =====================================================
-# MEMORY IO
+# LEARNING — HIPPOCAMPUS
 # =====================================================
 
-def load_json(p):
-    try:
-        return json.load(open(p,"r",encoding="utf-8"))
-    except:
-        return {}
-
-def save_json(p,d):
-    json.dump(d,open(p,"w",encoding="utf-8"),
-              indent=2,ensure_ascii=False)
-
-# =====================================================
-# HIPPOCAMPUS (concept hierarchy)
-# =====================================================
-
-def concept_tag(w):
-    return w[:4] if len(w)>7 else w
-
-# =====================================================
-# LEARNING
-# =====================================================
-
-def learn(text,phi,importance=1.0):
+def learn(text,phi):
 
     words=text.lower().split()
     if len(words)<2:
         return
 
-    L=load_json(LEXICON_PATH)
-    energy=math.sqrt(sum(v*v for v in phi.values()))*importance
+    energy=math.sqrt(sum(v*v for v in phi.values()))
+    st.session_state.hippocampus.append((words,energy))
 
-    for a,b in zip(words,words[1:]):
-        a,b=concept_tag(a),concept_tag(b)
-        L.setdefault(a,{})
-        L[a][b]=L[a].get(b,0)+energy
+    if len(st.session_state.hippocampus)>5 and consolidation_gate():
+        consolidate()
 
-    if consolidation_gate():
-        save_json(LEXICON_PATH,L)
+def consolidate():
+
+    M=load_memory()
+
+    for words,energy in st.session_state.hippocampus:
+        for a,b in zip(words,words[1:]):
+            M.setdefault(a,{})
+            M[a][b]=M[a].get(b,0)+energy
+
+    save_memory(M)
+    st.session_state.hippocampus.clear()
+
+    github_sync()
 
 # =====================================================
-# SOMMEIL
+# SLEEP CYCLE
 # =====================================================
 
 def sleep_cycle():
 
-    L=load_json(LEXICON_PATH)
+    M=load_memory()
     new={}
 
-    for w,con in L.items():
-        f={t:v*0.997 for t,v in con.items() if v>1.2}
-        if f:
-            new[w]=f
+    for w,con in M.items():
+        filt={t:v*0.997 for t,v in con.items() if v>1.2}
+        if filt:
+            new[w]=filt
 
-    save_json(LEXICON_PATH,new)
-
-    self_model=load_json(SELF_PATH)
-    self_model["cognitive_age"]+=1
-    self_model["stability"]=min(1,self_model["stability"]+0.01)
-    save_json(SELF_PATH,self_model)
-
+    save_memory(new)
     st.session_state.last_sleep=time.time()
-    return "🌙 Consolidation terminée"
+
+def auto_sleep():
+    if time.time()-st.session_state.last_sleep>180:
+        if consolidation_gate():
+            sleep_cycle()
+
+auto_sleep()
 
 # =====================================================
-# META-COGNITION
+# CORTEX (V4)
 # =====================================================
 
-def evaluate_response(words):
-    return len(set(words))/max(len(words),1)
+def contextual_seed(M):
 
-# =====================================================
-# THALAMUS
-# =====================================================
+    ctx=" ".join(st.session_state.dialog).split()
+    valid=[w for w in ctx if w in M]
 
-def contextual_seed(L):
+    if valid:
+        return Counter(valid).most_common(1)[0][0]
 
-    context=" ".join(st.session_state.dialog_memory).split()
-    c=[concept_tag(w) for w in context if concept_tag(w) in L]
+    return random.choice(list(M.keys()))
 
-    if c:
-        return Counter(c).most_common(1)[0][0]
+def logical_layer(seq,M):
+    return [w for w in seq if w in M] or seq
 
-    return random.choice(list(L.keys()))
+def associative_layer(word,M,phi):
 
-# =====================================================
-# CORTEX
-# =====================================================
-
-def logical_layer(seq,L):
-    return [w for w in seq if w in L] or seq
-
-def associative_layer(word,L,phi):
-
-    if word not in L:
+    if word not in M:
         return word
 
-    opts=L[word]
+    opts=M[word]
 
     if random.random()<phi["phi_c"]:
         return random.choices(
@@ -197,137 +212,105 @@ def predictive_layer(words,phi):
 # GENERATION
 # =====================================================
 
-def oracle_reply(phi):
+def oracle_reply():
 
-    L=load_json(LEXICON_PATH)
-    if not L:
+    M=load_memory()
+    if not M:
         return "Mémoire vide."
 
-    seed=contextual_seed(L)
+    seed=contextual_seed(M)
     words=[seed]
-    used=set(words)
 
-    for _ in range(int(8+phi["phi_m"]*35)):
+    length=int(10+st.session_state.phi["phi_m"]*30)
 
-        filtered=logical_layer(words,L)
-        current=filtered[-1]
-
-        nxt=associative_layer(current,L,phi)
-
-        if nxt in used and random.random()<phi["phi_d"]:
-            break
-
+    for _ in range(length):
+        filtered=logical_layer(words,M)
+        nxt=associative_layer(filtered[-1],M,
+                              st.session_state.phi)
         words.append(nxt)
-        used.add(nxt)
 
-    words=predictive_layer(words,phi)
-
-    if evaluate_response(words)<0.35:
-        return "Je reformule ma pensée."
+    words=predictive_layer(words,
+                           st.session_state.phi)
 
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# EXTRACTION MULTIMODALE (V2 RESTAURÉ)
+# FILE INSERTS (ALL TYPES)
 # =====================================================
 
-def extract_content(mode):
+def read_file(upload):
 
-    raw=""
+    if upload.type=="application/pdf":
+        reader=PyPDF2.PdfReader(upload)
+        return " ".join(p.extract_text() or "" for p in reader.pages)
 
-    if mode=="Texte":
-        raw=st.text_area("Texte")
+    if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        d=docx.Document(upload)
+        return " ".join(p.text for p in d.paragraphs)
 
-    elif mode=="Document":
-        file=st.file_uploader(
-            "PDF / DOCX / TXT",
-            type=["pdf","docx","txt"]
-        )
+    if upload.type=="text/plain":
+        return upload.read().decode()
 
-        if file:
+    if upload.type=="text/csv":
+        return pd.read_csv(upload).to_string()
 
-            if file.name.endswith(".pdf"):
-                reader=PyPDF2.PdfReader(file)
-                raw=" ".join(
-                    p.extract_text() for p in reader.pages
-                    if p.extract_text()
-                )
-
-            elif file.name.endswith(".docx"):
-                buffer=io.BytesIO(file.read())
-                doc=docx.Document(buffer)
-                raw="\n".join(p.text for p in doc.paragraphs)
-
-            else:
-                raw=file.read().decode("utf-8")
-
-    elif mode=="Excel":
-
-        file=st.file_uploader("Excel",type=["xlsx","xls"])
-        if file:
-            df=pd.read_excel(file)
-            raw=df.to_string()
-
-    elif mode=="Audio":
-
-        audio=st.file_uploader("Audio WAV",type="wav")
-        if audio:
-            r=sr.Recognizer()
-            with sr.AudioFile(audio) as source:
-                data=r.record(source)
-                try:
-                    raw=r.recognize_google(data,language="fr-FR")
-                    st.success("Transcription réussie")
-                except:
-                    st.error("Transcription impossible")
-
-    return raw
+    return ""
 
 # =====================================================
-# AUTO SOMMEIL
+# AUDIO INPUT
 # =====================================================
 
-def auto_sleep():
-    if time.time()-st.session_state.last_sleep>180:
-        if consolidation_gate():
-            sleep_cycle()
+def speech_to_text(audio):
 
-auto_sleep()
+    r=sr.Recognizer()
+
+    with sr.AudioFile(audio) as source:
+        data=r.record(source)
+
+    try:
+        return r.recognize_google(data)
+    except:
+        return ""
 
 # =====================================================
 # UI
 # =====================================================
 
-st.set_page_config(page_title="ORACLE V4",page_icon="🧠")
+st.set_page_config(page_title="ORACLE V4.5 Ω",page_icon="🧠")
 
-st.title("🧠 ORACLE V4 — Agent Cognitif Stable")
+st.title("🧠 ORACLE V4.5 Ω — Agent Cognitif Total")
 
-mode=st.radio(
-    "Source du savoir",
-    ["Texte","Document","Excel","Audio"]
+msg=st.text_input("Parlez à l'Oracle")
+
+file=st.file_uploader(
+    "Insérer fichier / audio",
+    type=["pdf","docx","txt","csv","wav"]
 )
 
-content=extract_content(mode)
+if st.button("Envoyer"):
 
-if st.button("🌱 Nourrir") and content:
-    exc=min(1,len(content)/400)
-    st.session_state.phi=evolve_phi(
-        st.session_state.phi,exc)
-    learn(content,st.session_state.phi,1.2)
+    if file:
+        if file.type=="audio/wav":
+            msg=speech_to_text(file)
+        else:
+            msg=read_file(file)
 
-msg=st.text_input("Parlez")
+    if msg:
 
-if st.button("➡️") and msg:
+        st.session_state.dialog.append(msg)
 
-    st.session_state.dialog_memory.append(msg)
+        exc=min(1,len(msg)/200)
+        st.session_state.phi=evolve_phi(
+            st.session_state.phi,exc
+        )
 
-    learn(msg,st.session_state.phi,1.1)
+        learn(msg,st.session_state.phi)
 
-    reply=oracle_reply(st.session_state.phi)
+        reply=oracle_reply()
 
-    st.session_state.dialog_memory.append(reply)
+        st.session_state.dialog.append(reply)
 
-for m in st.session_state.dialog_memory:
+for m in st.session_state.dialog:
     st.write(m)
 
 # =====================================================
@@ -338,16 +321,13 @@ with st.sidebar:
 
     st.header("🧠 État Cognitif")
 
-    size=os.path.getsize(LEXICON_PATH)/1024
-    st.success(f"Mémoire : {size:.2f} KB")
-
-    self_model=load_json(SELF_PATH)
-    st.write("Âge cognitif :",self_model["cognitive_age"])
-    st.progress(self_model["stability"])
-
     for k,v in st.session_state.phi.items():
         st.progress(v,text=f"{k}:{v:.2f}")
 
     if st.button("🌙 Sommeil forcé"):
-        st.warning(sleep_cycle())
-        st.rerun()
+        sleep_cycle()
+        st.success("Consolidation terminée")
+
+    if st.button("🧬 Sync GitHub"):
+        github_sync()
+        st.success("Mémoire synchronisée")
