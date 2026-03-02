@@ -1,231 +1,124 @@
 # =====================================================
-# 🧠 ORACLE CORE V6 — CERVEAU AUTONOME
-# Architecture TTU-MC³ Stable
+# 🧠 ORACLE CORE V6.1 — AUTO PERSISTENT CORTEX
 # =====================================================
 
-import os, json, random, math, time, threading
-from collections import Counter
+import os
+import json
+import base64
+import time
+import requests
+import streamlit as st
+
+DATA_DIR = "data"
+MEMORY_FILE = f"{DATA_DIR}/memory.json"
+
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # =====================================================
-# CONFIG
+# MEMORY LOAD
 # =====================================================
 
-MEM_DIR = "oracle_memory"
-LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
+def load_memory():
 
-os.makedirs(MEM_DIR, exist_ok=True)
+    if not os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "w") as f:
+            json.dump({"messages": []}, f)
 
-if not os.path.exists(LEXICON_PATH):
-    json.dump({}, open(LEXICON_PATH,"w",encoding="utf-8"))
+    with open(MEMORY_FILE, "r") as f:
+        return json.load(f)
 
-# =====================================================
-# ÉTAT GLOBAL DU CERVEAU
-# =====================================================
-
-brain_state = {
-    "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
-    "green_state":0.0,
-    "hippocampus":[],
-    "ghost_cache":{},
-    "last_sleep":time.time()
-}
-
-lock = threading.Lock()
 
 # =====================================================
-# GREEN NOISE
+# MEMORY SAVE LOCAL
 # =====================================================
 
-def green_noise(prev):
-    return 0.92*prev + 0.08*random.uniform(-1,1)
+def save_memory_local(memory):
 
-def consolidation_gate():
-    brain_state["green_state"]=green_noise(
-        brain_state["green_state"]
-    )
-    return abs(brain_state["green_state"])<0.25
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory, f, indent=2)
+
 
 # =====================================================
-# Φ ENGINE
+# AUTO SAVE FLAG (ghost state)
 # =====================================================
 
-def evolve_phi(exc):
+def mark_dirty():
+    st.session_state["memory_dirty"] = True
+    st.session_state["last_change"] = time.time()
 
-    phi=brain_state["phi"]
-
-    phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))
-    phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))
-    phi["phi_d"]=min(1,max(0.1,phi["phi_d"]+0.02-exc*0.05))
-
-    s=sum(phi.values())
-    for k in phi:
-        phi[k]/=s
 
 # =====================================================
-# MÉMOIRE INCRÉMENTALE
+# ADD MESSAGE
 # =====================================================
 
-def load_lex():
-    with lock:
-        try:
-            return json.load(open(LEXICON_PATH,"r",encoding="utf-8"))
-        except:
-            return {}
+def add_message(role, content):
 
-def save_lex(L):
+    memory = load_memory()
+    memory["messages"].append({
+        "role": role,
+        "content": content,
+        "time": time.time()
+    })
 
-    if len(L)>15000:
-        L=dict(list(L.items())[-12000:])
+    save_memory_local(memory)
+    mark_dirty()
 
-    with lock:
-        json.dump(
-            L,
-            open(LEXICON_PATH,"w",encoding="utf-8"),
-            indent=2,
-            ensure_ascii=False
-        )
 
 # =====================================================
-# HIPPOCAMPUS
+# GITHUB SYNC ENGINE
 # =====================================================
 
-def learn(text,importance=1.0):
+def github_sync():
 
-    words=text.lower().split()
-    if len(words)<2:
+    if not st.session_state.get("memory_dirty"):
         return
 
-    phi=brain_state["phi"]
-    energy=math.sqrt(sum(v*v for v in phi.values()))*importance
+    token = st.secrets["GITHUB_TOKEN"]
+    repo = st.secrets["GITHUB_REPO"]
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
 
-    brain_state["hippocampus"].append((words,energy))
+    url = f"https://api.github.com/repos/{repo}/contents/{MEMORY_FILE}"
 
-    if len(brain_state["hippocampus"])>5 and consolidation_gate():
-        consolidate()
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json"
+    }
 
-def consolidate():
+    with open(MEMORY_FILE, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
 
-    L=load_lex()
+    # get SHA if file exists
+    r = requests.get(url, headers=headers)
 
-    for words,energy in brain_state["hippocampus"]:
-        for a,b in zip(words,words[1:]):
-            L.setdefault(a,{})
-            L[a][b]=L[a].get(b,0)+energy
+    sha = None
+    if r.status_code == 200:
+        sha = r.json()["sha"]
 
-    save_lex(L)
-    brain_state["hippocampus"].clear()
+    data = {
+        "message": "🧠 Auto memory sync",
+        "content": content,
+        "branch": branch
+    }
 
-# =====================================================
-# SOMMEIL
-# =====================================================
+    if sha:
+        data["sha"] = sha
 
-def sleep_cycle():
+    requests.put(url, headers=headers, json=data)
 
-    L=load_lex()
-    new={}
+    st.session_state["memory_dirty"] = False
 
-    for w,con in L.items():
-        filt={t:v*0.997 for t,v in con.items() if v>1.2}
-        if filt:
-            new[w]=filt
-
-    save_lex(new)
-    brain_state["last_sleep"]=time.time()
-
-def auto_sleep_loop():
-
-    while True:
-        time.sleep(30)
-
-        if time.time()-brain_state["last_sleep"]>180:
-            if consolidation_gate():
-                sleep_cycle()
-
-threading.Thread(target=auto_sleep_loop,
-                 daemon=True).start()
 
 # =====================================================
-# GHOST CORTEX
+# AUTO BACKGROUND CHECK
 # =====================================================
 
-def ghost_preload(text):
+def auto_sync_loop(delay=20):
+    """
+    sync every X seconds if modified
+    """
 
-    L=load_lex()
-    cache={}
+    last = st.session_state.get("last_sync_check", 0)
 
-    for w in text.lower().split():
-        if w in L:
-            cache[w]=sorted(
-                L[w].items(),
-                key=lambda x:-x[1]
-            )[:5]
-
-    brain_state["ghost_cache"]=cache
-
-# =====================================================
-# CORTEX
-# =====================================================
-
-def contextual_seed(dialog):
-
-    L=load_lex()
-    ctx=" ".join(dialog).split()
-    valid=[w for w in ctx if w in L]
-
-    if valid:
-        return Counter(valid).most_common(1)[0][0]
-
-    return random.choice(list(L.keys())) if L else "oracle"
-
-def associative(word):
-
-    L=load_lex()
-
-    ghost=brain_state["ghost_cache"].get(word)
-    if ghost:
-        return random.choice(ghost)[0]
-
-    if word not in L:
-        return word
-
-    opts=L[word]
-    phi=brain_state["phi"]
-
-    if random.random()<phi["phi_c"]:
-        return random.choices(
-            list(opts.keys()),
-            weights=list(opts.values())
-        )[0]
-
-    return max(opts,key=opts.get)
-
-# =====================================================
-# GÉNÉRATION
-# =====================================================
-
-def generate(dialog):
-
-    L=load_lex()
-    if not L:
-        return "Mémoire vide."
-
-    seed=contextual_seed(dialog)
-    words=[seed]
-    used=set(words)
-
-    phi=brain_state["phi"]
-    length=int(10+phi["phi_m"]*30)
-
-    for _ in range(length):
-        nxt=associative(words[-1])
-
-        if nxt in used and random.random()<phi["phi_d"]:
-            break
-
-        words.append(nxt)
-        used.add(nxt)
-
-    if phi["phi_c"]>0.65:
-        words.append("évolution")
-
-    return " ".join(words).capitalize()+"."
+    if time.time() - last > delay:
+        github_sync()
+        st.session_state["last_sync_check"] = time.time()
