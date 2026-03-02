@@ -289,14 +289,83 @@ file=st.file_uploader(
 
 if st.button("Envoyer"):
 
-    if file:
-        if file.type=="audio/wav":
-            msg=speech_to_text(file)
-        else:
-            msg=read_file(file)
+    progress = st.progress(0, text="🧠 Activation corticale...")
+    status = st.empty()
 
+    msg = ""
+
+    # ==========================
+    # PHASE 1 — LECTURE FICHIER
+    # ==========================
+    if file:
+
+        status.info("📂 Lecture du fichier...")
+        progress.progress(15)
+
+        time.sleep(0.2)
+
+        if file.type == "audio/wav":
+            status.info("🎙 Analyse audio...")
+            msg = speech_to_text(file)
+        else:
+            msg = read_file(file)
+
+    else:
+        msg = st.session_state.get("pending_text", "")
+
+    progress.progress(35)
+
+    # ==========================
+    # PHASE 2 — ANALYSE TEXTE
+    # ==========================
+    status.info("🔎 Analyse cognitive...")
+    time.sleep(0.2)
+
+    progress.progress(50)
+
+    # ==========================
+    # PHASE 3 — APPRENTISSAGE
+    # ==========================
     if msg:
 
+        st.session_state.dialog.append(msg)
+
+        status.info("🧠 Apprentissage synaptique...")
+        excitation = min(1, len(msg)/200)
+
+        st.session_state.phi = evolve_phi(
+            st.session_state.phi,
+            excitation
+        )
+
+        learn(msg, st.session_state.phi)
+
+    progress.progress(70)
+
+    # ==========================
+    # PHASE 4 — RÉPONSE
+    # ==========================
+    status.info("💭 Génération pensée...")
+    reply = oracle_reply()
+
+    st.session_state.dialog.append(reply)
+
+    progress.progress(85)
+
+    # ==========================
+    # PHASE 5 — SYNC CLOUD
+    # ==========================
+    status.info("☁️ Synchronisation mémoire...")
+    github_sync()
+
+    progress.progress(100)
+
+    # ==========================
+    # FIN
+    # ==========================
+    status.success("✅ Apprentissage terminé — Oracle mis à jour")
+    time.sleep(1)
+    progress.empty()
         st.session_state.dialog.append(msg)
 
         exc=min(1,len(msg)/200)
