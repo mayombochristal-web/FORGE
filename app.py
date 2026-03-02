@@ -57,3 +57,4 @@ if st.session_state.memory_dirty:
     st.caption("🟡 Memory pending sync...")
 else:
     st.caption("🟢 Memory synced")
+st.write("Repo:", st.secrets["GITHUB_REPO"])
