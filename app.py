@@ -1,5 +1,6 @@
 # =====================================================
-# 🧠 ORACLE V2 — SYSTÈME COGNITIF AUTONOME COMPLET
+# 🧠 ORACLE V3 CONFORME — EXTENSION CORTICALE BIO-INSPIREE
+# (V2 + couches corticales non destructives)
 # =====================================================
 
 import streamlit as st
@@ -39,16 +40,18 @@ if "dialog_memory" not in st.session_state:
     st.session_state.dialog_memory = deque(maxlen=40)
 
 # =====================================================
-# 3. MOTEUR Φ
+# 3. MOTEUR Φ (TRONC CÉRÉBRAL)
 # =====================================================
 def evolve_phi(phi, excitation):
+
     phi["phi_m"] = min(1, max(0.1, phi["phi_m"] + excitation*0.15 - 0.01))
     phi["phi_c"] = min(1, max(0.1, phi["phi_c"] + excitation*0.3 - 0.03))
     phi["phi_d"] = min(1, max(0.1, phi["phi_d"] + 0.02 - excitation*0.05))
- # Normalisation Triadique (Optionnel mais recommandé pour la stabilité)
-    total = phi["phi_m"] + phi["phi_c"] + phi["phi_d"]
+
+    total = sum(phi.values())
     for key in phi:
-        phi[key] = phi[key] / total
+        phi[key] /= total
+
     return phi
 
 # =====================================================
@@ -64,11 +67,12 @@ def load_lex():
 def save_lex(L):
     with open(LEXICON_PATH, "w", encoding="utf-8") as f:
         json.dump(L, f, indent=2, ensure_ascii=False)
-       
+
 # =====================================================
-# 5. APPRENTISSAGE
+# 5. APPRENTISSAGE (PLASTICITÉ SYNAPTIQUE)
 # =====================================================
 def learn(text, phi, importance=1.0):
+
     if not text:
         return
 
@@ -86,20 +90,25 @@ def learn(text, phi, importance=1.0):
     save_lex(L)
 
 # =====================================================
-# 6. NETTOYAGE (SOMMEIL)
+# 6. SOMMEIL (ÉLAGAGE + DÉCROISSANCE)
 # =====================================================
 def deep_clean_lexicon(threshold=1.5):
+
     L = load_lex()
     clean_L = {}
 
     ban = ["http","www","uni00a0",".pdf",".docx","____"]
 
     for w, con in L.items():
+
         if len(w) < 2 or len(w) > 30 or any(b in w for b in ban):
             continue
 
-        new = {t:v for t,v in con.items()
-               if v >= threshold and not any(b in t for b in ban)}
+        new = {
+            t: v*0.999   # décroissance synaptique biologique
+            for t, v in con.items()
+            if v >= threshold and not any(b in t for b in ban)
+        }
 
         if new:
             clean_L[w] = new
@@ -108,9 +117,10 @@ def deep_clean_lexicon(threshold=1.5):
     return f"Sommeil terminé — {len(L)-len(clean_L)} connexions oubliées."
 
 # =====================================================
-# 7. SEED CONTEXTUEL
+# 7. SEED CONTEXTUEL (THALAMUS)
 # =====================================================
 def contextual_seed(L):
+
     context = " ".join(st.session_state.dialog_memory).split()
     candidates = [w for w in context if w in L]
 
@@ -120,7 +130,41 @@ def contextual_seed(L):
     return random.choice(list(L.keys()))
 
 # =====================================================
-# 8. GÉNÉRATION
+# 🧠 8. CORTEX V3 — COUCHES SUPÉRIEURES
+# =====================================================
+
+def logical_layer(sequence, L):
+    return [w for w in sequence if w in L] or sequence
+
+
+def associative_layer(word, L, phi):
+
+    if word not in L:
+        return word
+
+    options = L[word]
+
+    if random.random() < phi["phi_c"]:
+        return random.choices(
+            list(options.keys()),
+            weights=list(options.values())
+        )[0]
+    else:
+        return max(options, key=options.get)
+
+
+def predictive_layer(words, phi):
+
+    if phi["phi_m"] > 0.6:
+        words.append("continuité")
+
+    if phi["phi_c"] > 0.65:
+        words.append("évolution")
+
+    return words
+
+# =====================================================
+# 9. GÉNÉRATION CORTICALE V3
 # =====================================================
 def oracle_reply(phi):
 
@@ -129,6 +173,7 @@ def oracle_reply(phi):
         return "Mémoire vide. Nourrissez-moi."
 
     seed = contextual_seed(L)
+
     words = [seed]
     used = set(words)
 
@@ -136,19 +181,10 @@ def oracle_reply(phi):
 
     for _ in range(length):
 
-        current = words[-1]
-        if current not in L:
-            break
+        filtered = logical_layer(words, L)
+        current = filtered[-1]
 
-        options = L[current]
-
-        if random.random() < phi["phi_c"]:
-            nxt = random.choices(
-                list(options.keys()),
-                weights=list(options.values())
-            )[0]
-        else:
-            nxt = max(options, key=options.get)
+        nxt = associative_layer(current, L, phi)
 
         if nxt in used and random.random() < phi["phi_d"]:
             break
@@ -156,10 +192,12 @@ def oracle_reply(phi):
         words.append(nxt)
         used.add(nxt)
 
+    words = predictive_layer(words, phi)
+
     return " ".join(words).capitalize() + "."
 
 # =====================================================
-# 9. EXTRACTION MULTIMODALE
+# 10. EXTRACTION MULTIMODALE (SNP)
 # =====================================================
 def extract_content(mode):
 
@@ -177,17 +215,14 @@ def extract_content(mode):
                 raw_content = " ".join(
                     p.extract_text() for p in reader.pages if p.extract_text()
                 )
-
             elif file.name.endswith(".docx"):
                 doc = docx.Document(file)
                 raw_content = "\n".join(p.text for p in doc.paragraphs)
-
             else:
                 raw_content = file.read().decode("utf-8")
 
     elif mode == "Excel":
-        file = st.file_uploader("📊 Charger Excel",
-                                type=["xlsx","xls"])
+        file = st.file_uploader("📊 Charger Excel", type=["xlsx","xls"])
         if file:
             df = pd.read_excel(file)
             raw_content = df.to_string()
@@ -199,10 +234,7 @@ def extract_content(mode):
             with sr.AudioFile(audio) as source:
                 audio_data = r.record(source)
                 try:
-                    raw_content = r.recognize_google(
-                        audio_data,
-                        language="fr-FR"
-                    )
+                    raw_content = r.recognize_google(audio_data, language="fr-FR")
                     st.info("Transcription réussie.")
                 except:
                     st.error("Transcription impossible.")
@@ -210,25 +242,21 @@ def extract_content(mode):
     return raw_content
 
 # =====================================================
-# 10. INTERFACE
+# 11. INTERFACE
 # =====================================================
-st.set_page_config(page_title="ORACLE V2", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="ORACLE V3", page_icon="🧠", layout="wide")
 
-st.title("🧠 ORACLE V2 — Intelligence Cognitive Autonome")
+st.title("🧠 ORACLE V3 — Cortex Cognitif Bio-Inspiré")
 
 tab1, tab2 = st.tabs(["🌱 Nourrir l'Oracle", "💬 Parler à l'Oracle"])
 
-# =====================================================
-# 🌱 ONGLET APPRENTISSAGE
-# =====================================================
+# ---------- APPRENTISSAGE ----------
 with tab1:
 
     st.subheader("Apprentissage Multimodal")
 
-    mode = st.radio(
-        "Source du savoir",
-        ["Texte","Document","Excel","Audio"]
-    )
+    mode = st.radio("Source du savoir",
+                    ["Texte","Document","Excel","Audio"])
 
     content = extract_content(mode)
 
@@ -236,18 +264,14 @@ with tab1:
         if content:
             excitation = min(1, len(content)/500)
             st.session_state.phi = evolve_phi(
-                st.session_state.phi,
-                excitation
+                st.session_state.phi, excitation
             )
-
             learn(content, st.session_state.phi, 1.3)
             st.success("L'Oracle a appris.")
         else:
             st.warning("Aucun contenu détecté.")
 
-# =====================================================
-# 💬 ONGLET CONVERSATION
-# =====================================================
+# ---------- CONVERSATION ----------
 with tab2:
 
     st.subheader("Conversation")
@@ -265,8 +289,7 @@ with tab2:
 
         excitation = min(1, len(user_msg)/200)
         st.session_state.phi = evolve_phi(
-            st.session_state.phi,
-            excitation
+            st.session_state.phi, excitation
         )
 
         learn(user_msg, st.session_state.phi, 1.1)
@@ -277,7 +300,6 @@ with tab2:
 
         learn(reply, {"phi_m":0.1,"phi_c":0.1,"phi_d":0.1},0.3)
 
-    # affichage conversation
     for msg in st.session_state.dialog_memory:
         st.write(msg)
 
@@ -328,4 +350,3 @@ if L:
             save_lex(json.load(restore))
             st.success("Mémoire restaurée.")
             st.rerun()
-
