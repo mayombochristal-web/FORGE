@@ -145,8 +145,8 @@ def consolidate():
             L.setdefault(a,{})
             L[a][b]=L[a].get(b,0)+energy
 
-    save_lex(L)
-    st.session_state.hippocampus.clear()
+    if len(L) > 12000:
+    L = dict(list(L.items())[-10000:])
 
 # =====================================================
 # 🌙 8. SOMMEIL
