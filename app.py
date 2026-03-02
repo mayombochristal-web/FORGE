@@ -1,128 +1,72 @@
 # =====================================================
-# 🧠 ORACLE V4.5 Ω — AGENT COGNITIF COMPLET FINAL
-# Fusion V2 + V3.1 + V4 + V4.5 + V5 + V5.5 Ghost Cortex
+# 🧠 ORACLE V4.5 Ω — AGENT COGNITIF BIOLOGIQUE COMPLET
+# Base V3.1 + Ghost Cortex + Safe IO + Async Memory
+# Architecture TTU-MC³ Stable
 # =====================================================
 
 import streamlit as st
-import random, json, os, math, time, base64, threading
-import requests
+import random, json, os, math, time, threading
+from collections import deque, Counter
+from io import BytesIO
+
 import pandas as pd
 import PyPDF2
 import docx
 import speech_recognition as sr
-from collections import deque, Counter
-from io import BytesIO
 
 # =====================================================
-# CONFIGURATION
+# 1. CONFIGURATION
 # =====================================================
 
-MEM_FILE="oracle_memory.json"
+MEM_DIR = "oracle_memory"
+LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
 
-if not os.path.exists(MEM_FILE):
-    json.dump({},open(MEM_FILE,"w",encoding="utf-8"))
+os.makedirs(MEM_DIR, exist_ok=True)
 
-GITHUB_TOKEN=st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO=st.secrets["GITHUB_REPO"]
-BRANCH="main"
+if not os.path.exists(LEXICON_PATH):
+    json.dump({}, open(LEXICON_PATH, "w", encoding="utf-8"))
 
-# =====================================================
-# SESSION STATE
-# =====================================================
-
-defaults={
-    "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
-    "dialog":deque(maxlen=60),
-    "hippocampus":[],
-    "green_state":0.0,
-    "last_sleep":time.time(),
-    "ghost_cache":{}
-}
-
-for k,v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k]=v
+# limites sécurité (anti crash Streamlit)
+MAX_FILE_MB = 8
+MAX_PAGES = 40
+MAX_ROWS = 400
 
 # =====================================================
-# GREEN NOISE
+# 2. SESSION STATE
+# =====================================================
+
+def init_state():
+
+    defaults = {
+        "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
+        "dialog_memory":deque(maxlen=60),
+        "green_state":0.0,
+        "last_sleep":time.time(),
+        "ghost_cache":{},
+        "hippocampus":[]
+    }
+
+    for k,v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k]=v
+
+init_state()
+
+# =====================================================
+# 🧠 3. GREEN NOISE
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev+0.08*random.uniform(-1,1)
+    return 0.92*prev + 0.08*random.uniform(-1,1)
 
 def consolidation_gate():
-    st.session_state.green_state=green_noise(
+    st.session_state.green_state = green_noise(
         st.session_state.green_state
     )
     return abs(st.session_state.green_state)<0.25
 
 # =====================================================
-# MEMORY
-# =====================================================
-
-def load_memory():
-    try:
-        with open(MEM_FILE,"r",encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_memory(M):
-    with open(MEM_FILE,"w",encoding="utf-8") as f:
-        json.dump(M,f,indent=2,ensure_ascii=False)
-
-# =====================================================
-# GITHUB SYNC (SAFE ASYNC)
-# =====================================================
-
-def github_sync():
-    try:
-        with open(MEM_FILE,"rb") as f:
-            content=base64.b64encode(f.read()).decode()
-
-        url=f"https://api.github.com/repos/{GITHUB_REPO}/contents/{MEM_FILE}"
-        headers={"Authorization":f"token {GITHUB_TOKEN}"}
-
-        r=requests.get(url,headers=headers,timeout=10)
-        sha=r.json()["sha"] if r.status_code==200 else None
-
-        data={
-            "message":"🧬 Oracle memory auto-sync",
-            "content":content,
-            "branch":BRANCH
-        }
-
-        if sha:
-            data["sha"]=sha
-
-        requests.put(url,headers=headers,json=data,timeout=10)
-
-    except Exception as e:
-        st.warning(f"Sync GitHub échoué : {e}")
-
-def async_sync():
-    threading.Thread(target=github_sync,daemon=True).start()
-
-# =====================================================
-# 👻 GHOST PRELOAD
-# =====================================================
-
-def ghost_preload(text):
-    try:
-        M=load_memory()
-        preload={}
-        for w in text.lower().split():
-            if w in M:
-                preload[w]=sorted(
-                    M[w].items(),
-                    key=lambda x:-x[1]
-                )[:5]
-        st.session_state.ghost_cache=preload
-    except:
-        st.session_state.ghost_cache={}
-
-# =====================================================
-# Φ ENGINE
+# 4. Φ ENGINE
 # =====================================================
 
 def evolve_phi(phi,exc):
@@ -138,16 +82,55 @@ def evolve_phi(phi,exc):
     return phi
 
 # =====================================================
-# HIPPOCAMPUS
+# 5. MÉMOIRE SAFE
 # =====================================================
 
-def learn(text,phi):
+def load_lex():
+    try:
+        with open(LEXICON_PATH,"r",encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_lex(L):
+    tmp = L.copy()
+
+    # limite taille mémoire (anti AxiosError / IO freeze)
+    if len(tmp)>15000:
+        tmp=dict(list(tmp.items())[-12000:])
+
+    with open(LEXICON_PATH,"w",encoding="utf-8") as f:
+        json.dump(tmp,f,indent=2,ensure_ascii=False)
+
+# =====================================================
+# 👻 6. GHOST PRELOAD (V4.5)
+# =====================================================
+
+def ghost_preload(text):
+
+    L=load_lex()
+    cache={}
+
+    for w in text.lower().split():
+        if w in L:
+            cache[w]=sorted(
+                L[w].items(),
+                key=lambda x:-x[1]
+            )[:5]
+
+    st.session_state.ghost_cache=cache
+
+# =====================================================
+# 7. HIPPOCAMPUS (mémoire tampon biologique)
+# =====================================================
+
+def learn(text,phi,importance=1):
 
     words=text.lower().split()
     if len(words)<2:
         return
 
-    energy=math.sqrt(sum(v*v for v in phi.values()))
+    energy=math.sqrt(sum(v*v for v in phi.values()))*importance
     st.session_state.hippocampus.append((words,energy))
 
     if len(st.session_state.hippocampus)>5 and consolidation_gate():
@@ -155,61 +138,69 @@ def learn(text,phi):
 
 def consolidate():
 
-    M=load_memory()
+    L=load_lex()
 
     for words,energy in st.session_state.hippocampus:
         for a,b in zip(words,words[1:]):
-            M.setdefault(a,{})
-            M[a][b]=M[a].get(b,0)+energy
+            L.setdefault(a,{})
+            L[a][b]=L[a].get(b,0)+energy
 
-    save_memory(M)
+    save_lex(L)
     st.session_state.hippocampus.clear()
-    async_sync()
 
 # =====================================================
-# SLEEP
+# 🌙 8. SOMMEIL
 # =====================================================
 
 def sleep_cycle():
 
-    M=load_memory()
+    L=load_lex()
     new={}
 
-    for w,con in M.items():
+    for w,con in L.items():
+
         filt={t:v*0.997 for t,v in con.items() if v>1.2}
+
         if filt:
             new[w]=filt
 
-    save_memory(new)
+    save_lex(new)
     st.session_state.last_sleep=time.time()
 
+    return f"🌙 {len(L)-len(new)} synapses oubliées"
+
+def auto_sleep():
+
+    if time.time()-st.session_state.last_sleep>180:
+        if consolidation_gate():
+            sleep_cycle()
+
+auto_sleep()
+
 # =====================================================
-# CORTEX
+# 🧠 9. CORTEX
 # =====================================================
 
-def contextual_seed(M):
+def contextual_seed(L):
 
-    if not M:
-        return "oracle"
-
-    ctx=" ".join(st.session_state.dialog).split()
-    valid=[w for w in ctx if w in M]
+    ctx=" ".join(st.session_state.dialog_memory).split()
+    valid=[w for w in ctx if w in L]
 
     if valid:
         return Counter(valid).most_common(1)[0][0]
 
-    return random.choice(list(M.keys()))
+    return random.choice(list(L.keys()))
 
-def associative_layer(word,M,phi):
+def associative_layer(word,L,phi):
 
     ghost=st.session_state.ghost_cache.get(word)
     if ghost:
         return random.choice(ghost)[0]
 
-    if word not in M:
+    if word not in L:
         return word
 
-    opts=M[word]
+    opts=L[word]
 
     if random.random()<phi["phi_c"]:
         return random.choices(
@@ -219,78 +210,96 @@ def associative_layer(word,M,phi):
 
     return max(opts,key=opts.get)
 
+# =====================================================
+# 10. GÉNÉRATION
+# =====================================================
+
 def oracle_reply():
 
-    M=load_memory()
-    if not M:
+    L=load_lex()
+    if not L:
         return "Mémoire vide."
 
-    seed=contextual_seed(M)
+    seed=contextual_seed(L)
+
     words=[seed]
+    used=set(words)
 
     length=int(10+st.session_state.phi["phi_m"]*30)
 
     for _ in range(length):
-        nxt=associative_layer(
-            words[-1],M,st.session_state.phi
-        )
+
+        nxt=associative_layer(words[-1],L,
+                              st.session_state.phi)
+
+        if nxt in used and random.random()<st.session_state.phi["phi_d"]:
+            break
+
         words.append(nxt)
+        used.add(nxt)
+
+    if st.session_state.phi["phi_c"]>0.65:
+        words.append("évolution")
 
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# 👻 FILE READING SAFE (ANTI AXIOS)
+# 📂 11. FILE READER SAFE (ANTI AXIOS ERROR)
 # =====================================================
 
-def ghost_read_file(upload):
+def read_file(upload):
+
+    raw=upload.read()
+
+    if len(raw) > MAX_FILE_MB*1024*1024:
+        return ""
 
     try:
-        raw=upload.read()
-        if not raw:
-            return ""
 
         if upload.type=="application/pdf":
             reader=PyPDF2.PdfReader(BytesIO(raw))
-            return " ".join(
-                (p.extract_text() or "")
-                for p in reader.pages[:50]
-            )
+            text=[]
+            for p in reader.pages[:MAX_PAGES]:
+                t=p.extract_text()
+                if t:
+                    text.append(t)
+            return " ".join(text)
 
-        if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        if upload.type.endswith("document"):
             doc=docx.Document(BytesIO(raw))
-            return " ".join(p.text for p in doc.paragraphs[:500])
+            return " ".join(p.text for p in doc.paragraphs[:400])
 
         if upload.type=="text/plain":
             return raw.decode("utf-8","ignore")
 
         if upload.type=="text/csv":
             df=pd.read_csv(BytesIO(raw))
-            return df.head(500).to_string()
+            return df.head(MAX_ROWS).to_string()
 
-    except Exception as e:
-        st.warning(f"Lecture sécurisée interrompue : {e}")
+    except:
+        pass
 
     return ""
 
 # =====================================================
-# AUDIO
+# 🎤 AUDIO
 # =====================================================
 
-def speech_to_text(audio):
+def speech_to_text(file):
     try:
         r=sr.Recognizer()
-        with sr.AudioFile(audio) as source:
-            data=r.record(source)
-        return r.recognize_google(data)
+        with sr.AudioFile(file) as src:
+            audio=r.record(src)
+        return r.recognize_google(audio)
     except:
         return ""
 
 # =====================================================
-# UI
+# 12. UI
 # =====================================================
 
 st.set_page_config(page_title="ORACLE V4.5 Ω",page_icon="🧠")
-st.title("🧠 ORACLE V4.5 Ω — Agent Cognitif Total")
+st.title("🧠 ORACLE V4.5 Ω — Cognitive Agent")
 
 msg_input=st.text_input("Parlez à l'Oracle")
 
@@ -305,62 +314,43 @@ file=st.file_uploader(
 
 if st.button("Envoyer"):
 
-    progress=st.progress(0,text="🧠 Activation corticale...")
-    status=st.empty()
-
     msg=""
 
     if file:
-        status.info("📂 Lecture du fichier...")
-        progress.progress(20)
-
         if file.type=="audio/wav":
             msg=speech_to_text(file)
         else:
-            msg=ghost_read_file(file)
+            msg=read_file(file)
     else:
         msg=msg_input
 
-    progress.progress(40)
-
-    status.info("🔎 Analyse cognitive...")
-    time.sleep(0.2)
-
-    progress.progress(60)
-
     if msg:
+
         ghost_preload(msg)
 
-        st.session_state.dialog.append(msg)
+        st.session_state.dialog_memory.append(msg)
 
-        excitation=min(1,len(msg)/200)
+        exc=min(1,len(msg)/200)
+
         st.session_state.phi=evolve_phi(
-            st.session_state.phi,excitation
+            st.session_state.phi,exc
         )
 
         learn(msg,st.session_state.phi)
 
-    progress.progress(75)
+        reply=oracle_reply()
 
-    status.info("💭 Génération pensée...")
-    reply=oracle_reply()
-    st.session_state.dialog.append(reply)
+        st.session_state.dialog_memory.append(reply)
 
-    progress.progress(90)
-
-    status.info("☁️ Synchronisation mémoire...")
-    async_sync()
-
-    progress.progress(100)
-    status.success("✅ Oracle mis à jour")
-    time.sleep(1)
-    progress.empty()
+        learn(reply,
+              {"phi_m":0.1,"phi_c":0.1,"phi_d":0.1},
+              0.3)
 
 # =====================================================
 # DISPLAY
 # =====================================================
 
-for m in st.session_state.dialog:
+for m in st.session_state.dialog_memory:
     st.write(m)
 
 # =====================================================
@@ -371,13 +361,12 @@ with st.sidebar:
 
     st.header("🧠 État Cognitif")
 
+    size=os.path.getsize(LEXICON_PATH)/1024
+    st.success(f"Mémoire : {size:.2f} KB")
+
     for k,v in st.session_state.phi.items():
-        st.progress(v,text=f"{k}:{v:.2f}")
+        st.progress(v,text=f"{k}: {v:.2f}")
 
     if st.button("🌙 Sommeil forcé"):
-        sleep_cycle()
-        st.success("Consolidation terminée")
-
-    if st.button("🧬 Sync GitHub"):
-        async_sync()
-        st.success("Mémoire synchronisée")
+        st.warning(sleep_cycle())
+        st.rerun()
