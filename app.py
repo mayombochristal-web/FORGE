@@ -139,13 +139,48 @@ with tab3:
     except:
         st.write("Dossier vide ou inaccessible.")
 
-# ---------- SIDEBAR ÉTAT ----------
+# ---------- Sidebar : état cognitif ----------
 with st.sidebar:
+    st.header("🧠 État cognitif")
+
+    # Taille de la mémoire locale
+    if os.path.exists(brain.memory_file):
+        mem_size = os.path.getsize(brain.memory_file) / 1024
+        st.metric("Mémoire Locale (Ko)", f"{mem_size:.2f}")
+
     st.divider()
-    st.subheader("📊 État Cognitif")
-    for k, v in brain.phi.items():
-        st.progress(v, text=f"{k}")
     
-    if st.button("💾 Forcer Synchro GitHub"):
-        sauvegarder_memoire_github(nom_memoire, "Sauvegarde manuelle")
-        st.toast("Mémoire envoyée sur GitHub !")
+    # =====================================================
+    # 💾 NOUVEAU BLOC : GESTION CLOUD GITHUB
+    # =====================================================
+    st.subheader("☁️ Cloud GitHub (Mémoires)")
+
+    try:
+        # 1. Lister les fichiers .json dans le dossier 'oracle_memory' du dépôt
+        repo_files = repo.get_contents(FOLDER, ref=BRANCH)
+        file_list = [f.name for f in repo_files if f.name.endswith('.json')]
+        
+        # 2. Sélecteur pour choisir un fichier existant sur GitHub
+        selected_backup = st.selectbox("Charger une mémoire Cloud", ["-- Choisir --"] + file_list)
+        
+        if selected_backup != "-- Choisir --":
+            if st.button("🔄 Restaurer / Charger"):
+                with st.spinner("Téléchargement depuis GitHub..."):
+                    if charger_memoire_github(selected_backup):
+                        # On réinitialise l'Oracle avec le nouveau fichier téléchargé
+                        st.session_state.brain = OracleBrain(selected_backup)
+                        st.session_state.current_mem = selected_backup
+                        st.success(f"Mémoire '{selected_backup}' chargée !")
+                        time.sleep(1)
+                        st.rerun()
+    except Exception as e:
+        st.error("Erreur de lecture GitHub")
+
+    # 3. Bouton pour envoyer la mémoire actuelle vers le Cloud
+    if st.button("📤 Sauvegarder l'état actuel sur GitHub"):
+        with st.spinner("Envoi vers GitHub..."):
+            sauvegarder_memoire_github(nom_memoire, "Backup via interface Streamlit")
+            st.success("Synchronisé sur le Cloud !")
+
+    st.divider()
+    # ... (Le reste de votre sidebar : Phi Dynamique, Fantôme, etc.)
