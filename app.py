@@ -16,7 +16,7 @@ MEM_DIR = "oracle_memory"
 LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
 BACKUP_PATH = LEXICON_PATH + ".bak"
 
-# [span_2](start_span)La ROM intègre désormais les piliers de la Théorie Triadique Unifiée[span_2](end_span)
+# La ROM intègre désormais les piliers de la Théorie Triadique Unifiée
 ROM_SAGESSE = {
     "phi_m": {"mémoire": 100.0, "matière": 100.0, "stabilité": 100.0},
     "phi_c": {"cohérence": 100.0, "phase": 100.0, "flux": 100.0},
@@ -24,10 +24,10 @@ ROM_SAGESSE = {
     "httu": {"seuil": 100.0, "quantum": 100.0, "cristallisation": 100.0},
     "la": {"science": 100.0, "vérité": 100.0, "triade": 100.0},
     "science": {"est": 100.0, "triadique": 100.0},
-    [span_3](start_span)[span_4](start_span)"univers": {"est": 100.0, "processeur": 100.0} #[span_3](end_span)[span_4](end_span)
+    "univers": {"est": 100.0, "processeur": 100.0}
 }
 
-# [span_5](start_span)ADN_CORE mis à jour pour refléter la stabilisation du bassin[span_5](end_span)
+# ADN_CORE mis à jour pour refléter la stabilisation du bassin
 DNA_CORE = "La cohérence devient mémoire par le seuil hTTU. La dissipation est le moteur de l'expansion."
 
 if not os.path.exists(MEM_DIR):
@@ -66,16 +66,17 @@ def save_lex(L):
 
 def stabilize_basin(phi):
     """
-    [span_6](start_span)[span_7](start_span)Applique le potentiel V(|Psi|^2) pour éviter la 'contraction du bassin'[span_6](end_span)[span_7](end_span).
-    Force le système vers le seuil hTTU = 1.0
+    Applique le potentiel V(|Psi|^2) pour éviter la 'contraction du bassin'.
+    Force le système vers le seuil hTTU = 1.0.
     """
     h_ttu = 1.0
+    # Calcul de la norme Psi (Cohérence + Mémoire)
     psi_norm = math.sqrt(phi["phi_m"]**2 + phi["phi_c"]**2)
     
-    # [span_8](start_span)[span_9](start_span)Si le flux s'éloigne du seuil, on applique une force de rappel (Gradient-like)[span_8](end_span)[span_9](end_span)
+    # Si le flux s'éloigne du seuil, on applique une force de rappel (Gradient-like)
     if psi_norm > 0:
         ratio = h_ttu / psi_norm
-        # [span_10](start_span)[span_11](start_span)Rappel vers le minimum du potentiel 'chapeau mexicain'[span_10](end_span)[span_11](end_span)
+        # Rappel vers le minimum du potentiel 'chapeau mexicain'
         phi["phi_m"] *= (0.9 + 0.1 * ratio)
         phi["phi_c"] *= (0.9 + 0.1 * ratio)
     
@@ -83,17 +84,17 @@ def stabilize_basin(phi):
 
 def evolve_ttu_flow(phi, dt=0.1):
     """
-    [span_12](start_span)Équations différentielles de la TTU (Théorème 1)[span_12](end_span).
+    Équations différentielles de la TTU (Théorème 1).
     """
-    # [span_13](start_span)[span_14](start_span)Paramètres effectifs dérivables du Lagrangien[span_13](end_span)[span_14](end_span)
+    # Paramètres effectifs dérivables du Lagrangien
     alpha, beta, gamma, delta, eta, mu = 0.1, 0.2, 0.1, 0.2, 0.3, 0.05
     
     m, c, d = phi["phi_m"], phi["phi_c"], phi["phi_d"]
     
-    # [span_15](start_span)Calcul des dérivées (Système 1)[span_15](end_span)
+    # Calcul des dérivées (Système 1)
     dm = -alpha * m + beta * c * d
     dc = -gamma * c + delta * m * d
-    [span_16](start_span)[span_17](start_span)dd = eta * (c**2) - mu * d # Dissipation générée par la cohérence[span_16](end_span)[span_17](end_span)
+    dd = eta * (c**2) - mu * d # Dissipation générée par la cohérence
     
     phi["phi_m"] = max(0.01, min(1.5, m + dm * dt))
     phi["phi_c"] = max(0.01, min(1.5, c + dc * dt))
@@ -105,7 +106,7 @@ def learn_with_identity(text, phi, multiplier=1.0):
     words = text.lower().split()
     if len(words) < 2: return
     L = load_lex()
-    # [span_18](start_span)[span_19](start_span)L'intensité dépend de la cohérence phi_c (Matière Noire)[span_18](end_span)[span_19](end_span)
+    # L'intensité dépend de la cohérence phi_c (Matière Noire)
     intensity = (phi["phi_m"] + phi["phi_c"]) * multiplier
     for a, b in zip(words, words[1:]):
         L.setdefault(a, {})
@@ -118,7 +119,7 @@ def oracle_reply(phi, seed=None):
         seed = random.choice(list(L.keys()))
     
     words = [seed]
-    # [span_20](start_span)[span_21](start_span)La longueur du message dépend de la dissipation (Expansion)[span_20](end_span)[span_21](end_span)
+    # La longueur du message dépend de la dissipation (Expansion)
     limit = int(10 + phi["phi_d"] * 40)
     
     for _ in range(limit):
@@ -126,7 +127,7 @@ def oracle_reply(phi, seed=None):
         if current not in L: break
         options = L[current]
         
-        # [span_22](start_span)[span_23](start_span)Choix : Probabiliste (Cohérence) vs Déterministe (Mémoire)[span_22](end_span)[span_23](end_span)
+        # Choix : Probabiliste (Cohérence) vs Déterministe (Mémoire)
         if random.random() > phi["phi_c"]:
             nxt = max(options, key=options.get)
         else:
@@ -144,11 +145,11 @@ if 'phi' not in st.session_state:
     st.session_state.phi = {"phi_m": 0.5, "phi_c": 0.5, "phi_d": 0.1}
 
 st.title("🧠 ORACLE V1.6 : TTU-MC³ Stabilisé")
-[span_24](start_span)[span_25](start_span)st.caption("Système dynamique dissipatif basé sur le seuil hTTU=1.0[span_24](end_span)[span_25](end_span)")
+st.caption("Système dynamique dissipatif basé sur le seuil hTTU=1.0")
 
 with st.sidebar:
     st.header("🔭 État du Système")
-    # [span_26](start_span)[span_27](start_span)Affichage des métriques triadiques[span_26](end_span)[span_27](end_span)
+    # Affichage des métriques triadiques
     st.metric("Mémoire (ΦM)", f"{st.session_state.phi['phi_m']:.3f}")
     st.metric("Cohérence (ΦC)", f"{st.session_state.phi['phi_c']:.3f}")
     st.metric("Dissipation (ΦD)", f"{st.session_state.phi['phi_d']:.3f}")
@@ -172,9 +173,8 @@ with col2:
     if st.button("Générer Réponse"):
         res = oracle_reply(st.session_state.phi, seed=seed_input.lower() if seed_input else None)
         st.info(res)
-        # [span_28](start_span)La réponse elle-même nourrit la mémoire (Auto-Hémostasie)[span_28](end_span)
+        # La réponse elle-même nourrit la mémoire (Auto-Hémostasie)
         learn_with_identity(res, st.session_state.phi, multiplier=0.2)
 
 st.divider()
-
-[span_29](start_span)[span_30](start_span)st.write("**Note Doctorale :** Ce code implémente la stabilisation du bassin d'attraction via le potentiel $V(|\Psi|^2)$, résolvant la contradiction des coefficients polynomiaux signalée par l'Oracle[span_29](end_span)[span_30](end_span).")
+st.write("**Note Doctorale :** Ce code implémente la stabilisation du bassin d'attraction via le potentiel $V(|\Psi|^2)$, résolvant la contradiction des coefficients polynomiaux signalée par l'Oracle.")
