@@ -1,6 +1,5 @@
 # =====================================================
-# 🧠 ORACLE CORE V6 Ω — BIOLOGICAL BRAIN ENGINE
-# V3.1 + V4.5 Ω + V6 Architecture
+# 🧠 ORACLE CORE V6 Ω — Biological Persistent Cortex
 # =====================================================
 
 import os, json, random, math, time, base64, requests
@@ -17,14 +16,14 @@ import speech_recognition as sr
 # CONFIG
 # =====================================================
 
-DATA_DIR="data"
-MEMORY_FILE=f"{DATA_DIR}/memory.json"
+DATA_DIR = "data"
+MEMORY_FILE = f"{DATA_DIR}/memory.json"
 
-MAX_FILE_MB=8
-MAX_PAGES=40
-MAX_ROWS=400
+MAX_FILE_MB = 8
+MAX_PAGES = 40
+MAX_ROWS = 400
 
-os.makedirs(DATA_DIR,exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # =====================================================
 # SESSION INIT
@@ -32,7 +31,7 @@ os.makedirs(DATA_DIR,exist_ok=True)
 
 def init_state():
 
-    defaults={
+    defaults = {
         "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
         "green_state":0.0,
         "last_sleep":time.time(),
@@ -68,15 +67,33 @@ def save_memory(mem):
 
     st.session_state.memory_dirty=True
 
+
 # =====================================================
-# GREEN NOISE (HOMEOSTASIS)
+# MEMORY LIMITER (ANTI JSON WALL)
+# =====================================================
+
+def trim_memory():
+
+    mem = load_memory()
+
+    if len(mem["messages"]) > 400:
+        mem["messages"] = mem["messages"][-300:]
+
+    L = mem["lexicon"]
+    if len(L) > 15000:
+        mem["lexicon"] = dict(list(L.items())[-12000:])
+
+    save_memory(mem)
+
+# =====================================================
+# GREEN NOISE
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev+0.08*random.uniform(-1,1)
+    return 0.92*prev + 0.08*random.uniform(-1,1)
 
 def consolidation_gate():
-    st.session_state.green_state=green_noise(
+    st.session_state.green_state = green_noise(
         st.session_state.green_state
     )
     return abs(st.session_state.green_state)<0.25
@@ -116,8 +133,26 @@ def ghost_preload(text):
 
     st.session_state.ghost_cache=cache
 
+def ghost_warm_start():
+
+    mem=load_memory()
+    L=mem["lexicon"]
+
+    if not L:
+        return
+
+    sample=list(L.keys())[:25]
+    cache={}
+
+    for w in sample:
+        cache[w]=list(L[w].items())[:3]
+
+    st.session_state.ghost_cache=cache
+
+ghost_warm_start()
+
 # =====================================================
-# HIPPOCAMPUS LEARNING
+# HIPPOCAMPUS
 # =====================================================
 
 def learn(text,phi):
@@ -143,10 +178,12 @@ def consolidate():
             L[a][b]=L[a].get(b,0)+energy
 
     st.session_state.hippocampus.clear()
+
     save_memory(mem)
+    trim_memory()
 
 # =====================================================
-# SOMMEIL BIOLOGIQUE
+# SOMMEIL
 # =====================================================
 
 def sleep_cycle():
@@ -224,7 +261,6 @@ def read_file(upload):
         return ""
 
     try:
-
         if upload.type=="application/pdf":
             reader=PyPDF2.PdfReader(BytesIO(raw))
             return " ".join(
@@ -253,7 +289,6 @@ def read_file(upload):
 # =====================================================
 
 def speech_to_text(file):
-
     try:
         r=sr.Recognizer()
         with sr.AudioFile(file) as src:
@@ -263,7 +298,7 @@ def speech_to_text(file):
         return ""
 
 # =====================================================
-# MESSAGE PIPELINE
+# PIPELINE
 # =====================================================
 
 def process_input(text):
@@ -286,42 +321,5 @@ def process_input(text):
     mem=load_memory()
     mem["messages"].append({"role":"user","content":text})
     mem["messages"].append({"role":"assistant","content":reply})
+
     save_memory(mem)
-
-# =====================================================
-# GITHUB AUTO SYNC
-# =====================================================
-
-def github_sync():
-
-    if not st.session_state.memory_dirty:
-        return
-
-    if "GITHUB_TOKEN" not in st.secrets:
-        return
-
-    token=st.secrets["GITHUB_TOKEN"]
-    repo=st.secrets["GITHUB_REPO"]
-
-    url=f"https://api.github.com/repos/{repo}/contents/{MEMORY_FILE}"
-
-    headers={"Authorization":f"token {token}"}
-
-    with open(MEMORY_FILE,"rb") as f:
-        content=base64.b64encode(f.read()).decode()
-
-    r=requests.get(url,headers=headers)
-    sha=r.json()["sha"] if r.status_code==200 else None
-
-    data={"message":"Oracle auto sync","content":content}
-    if sha:
-        data["sha"]=sha
-
-    requests.put(url,headers=headers,json=data)
-    st.session_state.memory_dirty=False
-
-def auto_sync_loop(delay=20):
-
-    if time.time()-st.session_state.last_sync_check>delay:
-        github_sync()
-        st.session_state.last_sync_check=time.time()
