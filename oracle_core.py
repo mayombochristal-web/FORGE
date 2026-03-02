@@ -1,5 +1,6 @@
 # =====================================================
 # 🧠 ORACLE CORE V6.1 — AUTO PERSISTENT CORTEX
+# Cerveau vivant (indépendant UI)
 # =====================================================
 
 import os
@@ -9,10 +10,33 @@ import time
 import requests
 import streamlit as st
 
+# =====================================================
+# CONFIG
+# =====================================================
+
 DATA_DIR = "data"
-MEMORY_FILE = f"{DATA_DIR}/memory.json"
+MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# =====================================================
+# SAFE SESSION INIT
+# =====================================================
+
+def init_session():
+
+    defaults = {
+        "memory_dirty": False,
+        "last_change": 0,
+        "last_sync_check": 0
+    }
+
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+init_session()
 
 # =====================================================
 # MEMORY LOAD
@@ -21,11 +45,26 @@ os.makedirs(DATA_DIR, exist_ok=True)
 def load_memory():
 
     if not os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "w") as f:
-            json.dump({"messages": []}, f)
 
-    with open(MEMORY_FILE, "r") as f:
-        return json.load(f)
+        memory = {"messages": []}
+
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(memory, f, indent=2, ensure_ascii=False)
+
+        return memory
+
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            memory = json.load(f)
+
+        # sécurité structure
+        if "messages" not in memory:
+            memory["messages"] = []
+
+        return memory
+
+    except Exception:
+        return {"messages": []}
 
 
 # =====================================================
@@ -34,15 +73,19 @@ def load_memory():
 
 def save_memory_local(memory):
 
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(memory, f, indent=2)
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(memory, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
 
 # =====================================================
-# AUTO SAVE FLAG (ghost state)
+# DIRTY FLAG (activité neuronale)
 # =====================================================
 
 def mark_dirty():
+
     st.session_state["memory_dirty"] = True
     st.session_state["last_change"] = time.time()
 
@@ -54,11 +97,16 @@ def mark_dirty():
 def add_message(role, content):
 
     memory = load_memory()
+
     memory["messages"].append({
         "role": role,
         "content": content,
         "time": time.time()
     })
+
+    # limite mémoire anti JSON wall
+    if len(memory["messages"]) > 2000:
+        memory["messages"] = memory["messages"][-1500:]
 
     save_memory_local(memory)
     mark_dirty()
@@ -70,7 +118,14 @@ def add_message(role, content):
 
 def github_sync():
 
+    # rien à sync
     if not st.session_state.get("memory_dirty"):
+        return
+
+    # secrets non configurés → skip silencieux
+    if "GITHUB_TOKEN" not in st.secrets:
+        return
+    if "GITHUB_REPO" not in st.secrets:
         return
 
     token = st.secrets["GITHUB_TOKEN"]
@@ -84,41 +139,49 @@ def github_sync():
         "Accept": "application/vnd.github+json"
     }
 
-    with open(MEMORY_FILE, "rb") as f:
-        content = base64.b64encode(f.read()).decode()
+    try:
 
-    # get SHA if file exists
-    r = requests.get(url, headers=headers)
+        with open(MEMORY_FILE, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
 
-    sha = None
-    if r.status_code == 200:
-        sha = r.json()["sha"]
+        # récupérer SHA si fichier existe
+        r = requests.get(url, headers=headers, timeout=10)
 
-    data = {
-        "message": "🧠 Auto memory sync",
-        "content": content,
-        "branch": branch
-    }
+        sha = None
+        if r.status_code == 200:
+            sha = r.json().get("sha")
 
-    if sha:
-        data["sha"] = sha
+        payload = {
+            "message": "🧠 Oracle auto memory sync",
+            "content": encoded,
+            "branch": branch
+        }
 
-    requests.put(url, headers=headers, json=data)
+        if sha:
+            payload["sha"] = sha
 
-    st.session_state["memory_dirty"] = False
+        requests.put(url, headers=headers, json=payload, timeout=15)
+
+        st.session_state["memory_dirty"] = False
+
+    except Exception:
+        # jamais casser l'app
+        pass
 
 
 # =====================================================
-# AUTO BACKGROUND CHECK
+# AUTO SYNC LOOP (NON BLOQUANT)
 # =====================================================
 
 def auto_sync_loop(delay=20):
     """
-    sync every X seconds if modified
+    Synchronisation périodique légère.
+    Appelée à chaque rerun Streamlit.
     """
 
+    now = time.time()
     last = st.session_state.get("last_sync_check", 0)
 
-    if time.time() - last > delay:
+    if now - last > delay:
         github_sync()
-        st.session_state["last_sync_check"] = time.time()
+        st.session_state["last_sync_check"] = now
