@@ -1,12 +1,11 @@
 # =====================================================
 # 🧠 ORACLE CORE V6 Ω — Biological Persistent Cortex
-# STABLE EDITION (SELF-HEALING MEMORY)
+# STABLE EDITION
 # =====================================================
 
-import os, json, random, math, time
+import os, json, random, math, time, base64, requests
 from io import BytesIO
 import streamlit as st
-
 import pandas as pd
 import PyPDF2
 import docx
@@ -16,49 +15,38 @@ import speech_recognition as sr
 # CONFIG
 # =====================================================
 
-DATA_DIR = "data"
-MEMORY_FILE = f"{DATA_DIR}/memory.json"
+DATA_DIR="data"
+MEMORY_FILE=f"{DATA_DIR}/memory.json"
 
-MAX_FILE_MB = 8
-MAX_PAGES = 40
-MAX_ROWS = 400
+MAX_FILE_MB=8
+MAX_PAGES=40
+MAX_ROWS=400
 
-os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(DATA_DIR,exist_ok=True)
 
 # =====================================================
-# SESSION INIT
+# SAFE SESSION INIT
 # =====================================================
 
 def init_state():
 
-    defaults = {
+    defaults={
         "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
         "green_state":0.0,
         "last_sleep":time.time(),
         "ghost_cache":{},
-        "hippocampus":[]
+        "hippocampus":[],
+        "memory_dirty":False,
+        "last_sync_check":0
     }
 
     for k,v in defaults.items():
         if k not in st.session_state:
             st.session_state[k]=v
 
-init_state()
-
 # =====================================================
-# MEMORY (SELF HEALING)
+# MEMORY SAFE LOAD
 # =====================================================
-
-def ensure_memory_structure(mem):
-
-    if "messages" not in mem:
-        mem["messages"] = []
-
-    if "lexicon" not in mem:
-        mem["lexicon"] = {}
-
-    return mem
-
 
 def load_memory():
 
@@ -67,28 +55,30 @@ def load_memory():
             json.dump({"messages":[],"lexicon":{}},f)
 
     with open(MEMORY_FILE,"r",encoding="utf-8") as f:
-        mem = json.load(f)
+        mem=json.load(f)
 
-    mem = ensure_memory_structure(mem)
+    # protection anti KeyError
+    mem.setdefault("messages",[])
+    mem.setdefault("lexicon",{})
+
     return mem
-
 
 def save_memory(mem):
 
-    mem = ensure_memory_structure(mem)
-
     with open(MEMORY_FILE,"w",encoding="utf-8") as f:
         json.dump(mem,f,indent=2,ensure_ascii=False)
+
+    st.session_state.memory_dirty=True
 
 # =====================================================
 # GREEN NOISE
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev + 0.08*random.uniform(-1,1)
+    return 0.92*prev+0.08*random.uniform(-1,1)
 
 def consolidation_gate():
-    st.session_state.green_state = green_noise(
+    st.session_state.green_state=green_noise(
         st.session_state.green_state
     )
     return abs(st.session_state.green_state)<0.25
@@ -110,16 +100,15 @@ def evolve_phi(phi,exc):
     return phi
 
 # =====================================================
-# 👻 GHOST CORTEX (SAFE)
+# 👻 GHOST CORTEX
 # =====================================================
 
 def ghost_preload(text):
 
     mem=load_memory()
-    L=mem.get("lexicon",{})
+    L=mem["lexicon"]
 
     cache={}
-
     for w in text.lower().split():
         if w in L:
             cache[w]=sorted(
@@ -128,25 +117,6 @@ def ghost_preload(text):
             )[:5]
 
     st.session_state.ghost_cache=cache
-
-
-def ghost_warm_start():
-
-    mem=load_memory()
-    L=mem.get("lexicon",{})
-
-    if not L:
-        return
-
-    sample=list(L.keys())[:25]
-
-    cache={}
-    for w in sample:
-        cache[w]=list(L[w].items())[:3]
-
-    st.session_state.ghost_cache=cache
-
-ghost_warm_start()
 
 # =====================================================
 # HIPPOCAMPUS
@@ -184,10 +154,9 @@ def consolidate():
 def sleep_cycle():
 
     mem=load_memory()
-    L=mem["lexicon"]
     new={}
 
-    for w,con in L.items():
+    for w,con in mem["lexicon"].items():
         filt={t:v*0.997 for t,v in con.items() if v>1.2}
         if filt:
             new[w]=filt
@@ -196,8 +165,14 @@ def sleep_cycle():
     save_memory(mem)
     st.session_state.last_sleep=time.time()
 
+def auto_sleep():
+
+    if time.time()-st.session_state.last_sleep>180:
+        if consolidation_gate():
+            sleep_cycle()
+
 # =====================================================
-# CORTEX
+# GENERATION
 # =====================================================
 
 def associative_layer(word,L):
@@ -239,60 +214,12 @@ def generate_reply():
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# FILE INSERTS
-# =====================================================
-
-def read_file(upload):
-
-    raw=upload.read()
-    if len(raw)>MAX_FILE_MB*1024*1024:
-        return ""
-
-    try:
-
-        if upload.type=="application/pdf":
-            reader=PyPDF2.PdfReader(BytesIO(raw))
-            return " ".join(
-                p.extract_text() or ""
-                for p in reader.pages[:MAX_PAGES]
-            )
-
-        if upload.type.endswith("document"):
-            doc=docx.Document(BytesIO(raw))
-            return " ".join(p.text for p in doc.paragraphs)
-
-        if upload.type=="text/plain":
-            return raw.decode("utf-8","ignore")
-
-        if upload.type=="text/csv":
-            df=pd.read_csv(BytesIO(raw))
-            return df.head(MAX_ROWS).to_string()
-
-    except:
-        pass
-
-    return ""
-
-# =====================================================
-# AUDIO
-# =====================================================
-
-def speech_to_text(file):
-
-    try:
-        r=sr.Recognizer()
-        with sr.AudioFile(file) as src:
-            audio=r.record(src)
-        return r.recognize_google(audio)
-    except:
-        return ""
-
-# =====================================================
 # PIPELINE
 # =====================================================
 
 def process_input(text):
 
+    auto_sleep()
     ghost_preload(text)
 
     exc=min(1,len(text)/200)
@@ -304,9 +231,11 @@ def process_input(text):
 
     reply=generate_reply()
 
-    mem=load_memory()
+    learn(reply,{"phi_m":0.1,"phi_c":0.1,"phi_d":0.1})
 
+    mem=load_memory()
     mem["messages"].append({"role":"user","content":text})
     mem["messages"].append({"role":"assistant","content":reply})
-
     save_memory(mem)
+
+    return reply
