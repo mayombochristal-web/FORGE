@@ -1,9 +1,9 @@
 # =====================================================
 # 🧠 ORACLE CORE V6 Ω — Biological Persistent Cortex
+# STABLE EDITION (SELF-HEALING MEMORY)
 # =====================================================
 
-import os, json, random, math, time, base64, requests
-from collections import Counter
+import os, json, random, math, time
 from io import BytesIO
 import streamlit as st
 
@@ -36,9 +36,7 @@ def init_state():
         "green_state":0.0,
         "last_sleep":time.time(),
         "ghost_cache":{},
-        "hippocampus":[],
-        "memory_dirty":False,
-        "last_sync_check":0
+        "hippocampus":[]
     }
 
     for k,v in defaults.items():
@@ -48,8 +46,19 @@ def init_state():
 init_state()
 
 # =====================================================
-# MEMORY
+# MEMORY (SELF HEALING)
 # =====================================================
+
+def ensure_memory_structure(mem):
+
+    if "messages" not in mem:
+        mem["messages"] = []
+
+    if "lexicon" not in mem:
+        mem["lexicon"] = {}
+
+    return mem
+
 
 def load_memory():
 
@@ -58,32 +67,18 @@ def load_memory():
             json.dump({"messages":[],"lexicon":{}},f)
 
     with open(MEMORY_FILE,"r",encoding="utf-8") as f:
-        return json.load(f)
+        mem = json.load(f)
+
+    mem = ensure_memory_structure(mem)
+    return mem
+
 
 def save_memory(mem):
 
+    mem = ensure_memory_structure(mem)
+
     with open(MEMORY_FILE,"w",encoding="utf-8") as f:
         json.dump(mem,f,indent=2,ensure_ascii=False)
-
-    st.session_state.memory_dirty=True
-
-
-# =====================================================
-# MEMORY LIMITER (ANTI JSON WALL)
-# =====================================================
-
-def trim_memory():
-
-    mem = load_memory()
-
-    if len(mem["messages"]) > 400:
-        mem["messages"] = mem["messages"][-300:]
-
-    L = mem["lexicon"]
-    if len(L) > 15000:
-        mem["lexicon"] = dict(list(L.items())[-12000:])
-
-    save_memory(mem)
 
 # =====================================================
 # GREEN NOISE
@@ -115,13 +110,14 @@ def evolve_phi(phi,exc):
     return phi
 
 # =====================================================
-# 👻 GHOST CORTEX
+# 👻 GHOST CORTEX (SAFE)
 # =====================================================
 
 def ghost_preload(text):
 
     mem=load_memory()
-    L=mem["lexicon"]
+    L=mem.get("lexicon",{})
+
     cache={}
 
     for w in text.lower().split():
@@ -133,17 +129,18 @@ def ghost_preload(text):
 
     st.session_state.ghost_cache=cache
 
+
 def ghost_warm_start():
 
     mem=load_memory()
-    L=mem["lexicon"]
+    L=mem.get("lexicon",{})
 
     if not L:
         return
 
     sample=list(L.keys())[:25]
-    cache={}
 
+    cache={}
     for w in sample:
         cache[w]=list(L[w].items())[:3]
 
@@ -178,9 +175,7 @@ def consolidate():
             L[a][b]=L[a].get(b,0)+energy
 
     st.session_state.hippocampus.clear()
-
     save_memory(mem)
-    trim_memory()
 
 # =====================================================
 # SOMMEIL
@@ -200,12 +195,6 @@ def sleep_cycle():
     mem["lexicon"]=new
     save_memory(mem)
     st.session_state.last_sleep=time.time()
-
-def auto_sleep():
-
-    if time.time()-st.session_state.last_sleep>180:
-        if consolidation_gate():
-            sleep_cycle()
 
 # =====================================================
 # CORTEX
@@ -242,8 +231,7 @@ def generate_reply():
     words=[seed]
 
     for _ in range(int(10+30*st.session_state.phi["phi_m"])):
-        nxt=associative_layer(words[-1],L)
-        words.append(nxt)
+        words.append(associative_layer(words[-1],L))
 
     if st.session_state.phi["phi_c"]>0.65:
         words.append("évolution")
@@ -261,6 +249,7 @@ def read_file(upload):
         return ""
 
     try:
+
         if upload.type=="application/pdf":
             reader=PyPDF2.PdfReader(BytesIO(raw))
             return " ".join(
@@ -289,6 +278,7 @@ def read_file(upload):
 # =====================================================
 
 def speech_to_text(file):
+
     try:
         r=sr.Recognizer()
         with sr.AudioFile(file) as src:
@@ -303,8 +293,6 @@ def speech_to_text(file):
 
 def process_input(text):
 
-    auto_sleep()
-
     ghost_preload(text)
 
     exc=min(1,len(text)/200)
@@ -316,9 +304,8 @@ def process_input(text):
 
     reply=generate_reply()
 
-    learn(reply,{"phi_m":0.1,"phi_c":0.1,"phi_d":0.1})
-
     mem=load_memory()
+
     mem["messages"].append({"role":"user","content":text})
     mem["messages"].append({"role":"assistant","content":reply})
 
