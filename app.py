@@ -1,51 +1,31 @@
-# =====================================================
-# 🧠 ORACLE V6 Ω — Biological Persistent Cortex
-# =====================================================
-
 import streamlit as st
 from oracle_core import *
 
-st.set_page_config(page_title="ORACLE V6 Ω", layout="wide")
+# IMPORTANT — INITIALISATION
+init_state()
 
-st.title("🧠 ORACLE V6 Ω — Biological Persistent Cortex")
+st.title("🧠 ORACLE V6 Ω — Biological Cortex")
 
-memory = load_memory()
+mem = load_memory()
 
-# DISPLAY CHAT
-for msg in memory["messages"]:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+# afficher phi
+st.subheader("Φ State")
+for k,v in st.session_state.phi.items():
+    st.write(f"{k}: {round(v,3)}")
 
-# INPUT
-uploaded = st.file_uploader(
-    "Insert file / audio",
-    type=["pdf","docx","txt","csv","wav"]
-)
+# historique
+for m in mem["messages"][-10:]:
+    with st.chat_message(m["role"]):
+        st.write(m["content"])
 
-prompt = st.chat_input("Message...")
+# input
+prompt = st.chat_input("Parle à Oracle...")
 
-if prompt or uploaded:
+if prompt:
+    with st.chat_message("user"):
+        st.write(prompt)
 
-    if uploaded:
-        if uploaded.type=="audio/wav":
-            text=speech_to_text(uploaded)
-        else:
-            text=read_file(uploaded)
-    else:
-        text=prompt
+    reply = process_input(prompt)
 
-    if text:
-        process_input(text)
-        st.rerun()
-
-# SIDEBAR
-with st.sidebar:
-
-    st.header("🧠 Cognitive State")
-
-    for k,v in st.session_state.phi.items():
-        st.progress(v,text=f"{k}: {v:.2f}")
-
-    if st.button("🌙 Sleep now"):
-        sleep_cycle()
-        st.success("Consolidation complete")
+    with st.chat_message("assistant"):
+        st.write(reply)
