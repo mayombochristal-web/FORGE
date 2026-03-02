@@ -1,31 +1,79 @@
+# =====================================================
+# 🧠 ORACLE V6 Ω — BIOLOGICAL WORKSPACE
+# =====================================================
+
 import streamlit as st
 from oracle_core import *
 
-# IMPORTANT — INITIALISATION
-init_state()
+st.set_page_config(page_title="ORACLE V6 Ω", layout="wide")
 
-st.title("🧠 ORACLE V6 Ω — Biological Cortex")
+st.title("🧠 ORACLE V6 Ω — Biological Persistent Cortex")
 
-mem = load_memory()
+memory = load_memory()
 
-# afficher phi
-st.subheader("Φ State")
-for k,v in st.session_state.phi.items():
-    st.write(f"{k}: {round(v,3)}")
+# =====================================================
+# GLOBAL WORKSPACE DISPLAY
+# =====================================================
 
-# historique
-for m in mem["messages"][-10:]:
-    with st.chat_message(m["role"]):
-        st.write(m["content"])
+for msg in memory["messages"]:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-# input
-prompt = st.chat_input("Parle à Oracle...")
+# =====================================================
+# INPUT ZONE
+# =====================================================
 
-if prompt:
-    with st.chat_message("user"):
-        st.write(prompt)
+col1,col2=st.columns([4,1])
 
-    reply = process_input(prompt)
+with col1:
+    prompt = st.chat_input("Message au cortex...")
 
-    with st.chat_message("assistant"):
-        st.write(reply)
+with col2:
+    file = st.file_uploader("Insert/compiler")
+
+# =====================================================
+# PROCESS
+# =====================================================
+
+if prompt or file:
+
+    text=""
+
+    if file:
+        text=read_file(file)
+
+    if prompt:
+        text+=(" "+prompt)
+
+    if text.strip():
+        process_input(text)
+
+    st.rerun()
+
+# =====================================================
+# AUTO SYNC
+# =====================================================
+
+auto_sync_loop()
+
+# =====================================================
+# STATUS BAR (HOMEOSTASIS)
+# =====================================================
+
+st.divider()
+
+c1,c2,c3=st.columns(3)
+
+with c1:
+    st.caption(
+        "🧠 Φ : " +
+        ", ".join(f"{k}:{round(v,2)}"
+        for k,v in st.session_state.phi.items())
+    )
+
+with c2:
+    state="🟡 pending" if st.session_state.memory_dirty else "🟢 synced"
+    st.caption(f"Memory {state}")
+
+with c3:
+    st.caption(f"Green noise: {round(st.session_state.green_state,3)}")
