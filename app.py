@@ -238,34 +238,63 @@ def oracle_reply():
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# FILE READING (Ghost Cached)
+# FILE READING — SAFE STREAM (ANTI AXIOS)
 # =====================================================
+
+def safe_bytes(upload):
+    """
+    Copie le fichier pour éviter la perte du buffer Streamlit
+    """
+    try:
+        return upload.read()
+    except:
+        return None
+
 
 def read_file(upload):
 
     try:
-        if upload.type=="application/pdf":
-            reader=PyPDF2.PdfReader(upload)
-            return " ".join(p.extract_text() or "" for p in reader.pages)
+        raw = safe_bytes(upload)
 
-        if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            d=docx.Document(upload)
-            return " ".join(p.text for p in d.paragraphs)
+        if not raw:
+            return ""
 
-        if upload.type=="text/plain":
-            return upload.read().decode("utf-8",errors="ignore")
+        # --- PDF ---
+        if upload.type == "application/pdf":
 
-        if upload.type=="text/csv":
-            return pd.read_csv(upload).to_string()
+            from io import BytesIO
+            reader = PyPDF2.PdfReader(BytesIO(raw))
+
+            text=[]
+            for page in reader.pages[:50]:  # limite sécurité
+                t=page.extract_text()
+                if t:
+                    text.append(t)
+
+            return " ".join(text)
+
+        # --- DOCX ---
+        if upload.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+
+            from io import BytesIO
+            doc = docx.Document(BytesIO(raw))
+
+            return " ".join(p.text for p in doc.paragraphs[:500])
+
+        # --- TXT ---
+        if upload.type == "text/plain":
+            return raw.decode("utf-8", errors="ignore")
+
+        # --- CSV ---
+        if upload.type == "text/csv":
+            from io import BytesIO
+            df = pd.read_csv(BytesIO(raw))
+            return df.head(500).to_string()
 
     except Exception as e:
-        st.error(f"Erreur lecture fichier : {e}")
+        st.warning(f"Lecture sécurisée interrompue : {e}")
 
     return ""
-
-@st.cache_data(show_spinner=False)
-def ghost_read_file(upload):
-    return read_file(upload)
 
 # =====================================================
 # AUDIO
