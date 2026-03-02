@@ -1,132 +1,73 @@
 # =====================================================
-# 🧠 ORACLE V6.1 — AUTONOMOUS CORTEX APP
-# Streamlit = Cortex Sensoriel
-# oracle_core = Cerveau vivant
+# 🧠 ORACLE V6 Ω — CORTEX SENSORIEL
 # =====================================================
 
 import streamlit as st
+from oracle_core import *
+
+st.set_page_config(page_title="ORACLE V6 Ω",layout="wide")
+
+st.title("🧠 ORACLE V6 Ω — Cortex Autonome")
+
+memory=load_memory()
 
 # =====================================================
-# IMPORT ORACLE CORE
+# DISPLAY CHAT
 # =====================================================
 
-from oracle_core import (
-    load_memory,
-    add_message,
-    auto_sync_loop
+for msg in memory["messages"]:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# =====================================================
+# INPUT
+# =====================================================
+
+prompt=st.chat_input("Message à l'Oracle")
+
+file=st.file_uploader(
+    "Insert fichier / audio",
+    type=["pdf","docx","txt","csv","wav"]
 )
 
-# =====================================================
-# STREAMLIT CONFIG
-# =====================================================
+if prompt or file:
 
-st.set_page_config(
-    page_title="ORACLE V6.1",
-    page_icon="🧠",
-    layout="wide"
-)
+    text=""
 
-# =====================================================
-# SESSION INIT (ANTI RERUN BUG)
-# =====================================================
-
-if "memory_dirty" not in st.session_state:
-    st.session_state.memory_dirty = False
-
-if "initialized" not in st.session_state:
-    st.session_state.initialized = True
-
-# =====================================================
-# SAFE MEMORY LOAD
-# =====================================================
-
-try:
-    memory = load_memory()
-except Exception as e:
-    st.error("❌ Memory loading failed")
-    st.stop()
-
-# sécurité structure
-if "messages" not in memory:
-    memory["messages"] = []
-
-# =====================================================
-# UI HEADER
-# =====================================================
-
-st.title("🧠 ORACLE V6.1 — Auto Persistent Cortex")
-
-# =====================================================
-# CHAT DISPLAY
-# =====================================================
-
-chat_container = st.container()
-
-with chat_container:
-
-    for msg in memory["messages"]:
-
-        role = msg.get("role", "assistant")
-        content = msg.get("content", "")
-
-        with st.chat_message(role):
-            st.write(content)
-
-# =====================================================
-# USER INPUT
-# =====================================================
-
-prompt = st.chat_input("Message...")
-
-if prompt:
-
-    # USER MESSAGE
-    add_message("user", prompt)
-
-    # ORACLE RESPONSE (placeholder cortex)
-    response = f"Oracle processed: {prompt}"
-
-    add_message("assistant", response)
-
-    # rerun propre
-    st.rerun()
-
-# =====================================================
-# AUTO SYNC BACKGROUND
-# =====================================================
-
-try:
-    auto_sync_loop()
-except Exception:
-    # jamais bloquer UI
-    pass
-
-# =====================================================
-# STATUS BAR
-# =====================================================
-
-st.divider()
-
-col1, col2 = st.columns([1,1])
-
-with col1:
-    if st.session_state.memory_dirty:
-        st.caption("🟡 Memory pending sync...")
+    if file:
+        if file.type=="audio/wav":
+            text=speech_to_text(file)
+        else:
+            text=read_file(file)
     else:
-        st.caption("🟢 Memory synced")
+        text=prompt
 
-with col2:
-    try:
-        repo = st.secrets["GITHUB_REPO"]
-        st.caption(f"Repo: {repo}")
-    except Exception:
-        st.caption("⚠️ GitHub repo not configured")
+    if text:
+        process_input(text)
+        st.rerun()
 
 # =====================================================
-# FOOTER (DEBUG SAFE)
+# AUTO SYNC
 # =====================================================
 
-with st.expander("⚙️ Cortex Status", expanded=False):
+auto_sync_loop()
 
-    st.write("Messages stored:", len(memory["messages"]))
-    st.write("Session active:", st.session_state.initialized)
+# =====================================================
+# SIDEBAR
+# =====================================================
+
+with st.sidebar:
+
+    st.header("🧠 État Cognitif")
+
+    for k,v in st.session_state.phi.items():
+        st.progress(v,text=f"{k}:{v:.2f}")
+
+    if st.button("🌙 Sommeil forcé"):
+        sleep_cycle()
+        st.rerun()
+
+    if st.session_state.memory_dirty:
+        st.caption("🟡 Sync en attente")
+    else:
+        st.caption("🟢 Mémoire synchronisée")
