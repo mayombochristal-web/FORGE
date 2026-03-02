@@ -66,24 +66,43 @@ def evolve_phi(phi, excitation):
 # 4. LA BRÈCHE (WEB SCRAPING AUTONOME)
 # =====================================================
 def open_web_breach(query, phi):
-    """L'Oracle ouvre une brèche sur le web pour s'auto-alimenter."""
+    """Version 3.1 : Infiltration avec identité de navigateur"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
     try:
+        # Recherche de liens
         urls = search(query, num_results=3, lang="fr")
         raw_text = ""
+        
         for url in urls:
             try:
-                res = requests.get(url, timeout=4)
-                soup = BeautifulSoup(res.text, 'html.parser')
-                paragraphs = soup.find_all('p')
-                raw_text += " ".join([p.text for p in paragraphs[:5]]) + " "
-            except: continue
+                # Simulation d'une visite humaine
+                res = requests.get(url, headers=headers, timeout=5)
+                if res.status_code == 200:
+                    soup = BeautifulSoup(res.text, 'html.parser')
+                    # Extraction sélective (on évite les menus et pieds de page)
+                    for script in soup(["script", "style"]): 
+                        script.decompose()
+                    
+                    paragraphs = soup.find_all('p')
+                    text_content = " ".join([p.text for p in paragraphs[:8]])
+                    raw_text += text_content + " "
+                    
+            except Exception as e:
+                print(f"Erreur sur l'URL {url} : {e}")
+                continue
         
-        if raw_text:
-            learn(raw_text, phi, importance=0.8)
+        if len(raw_text.strip()) > 10:
+            # INTEGRATION REELLE DANS LA MEMOIRE
+            learn(raw_text, phi, importance=1.5)
+            # Forcer la mise à jour de l'UI pour montrer l'apprentissage
             return True
-    except: return False
+    except Exception as e:
+        print(f"Erreur globale Brèche : {e}")
+        return False
     return False
-
+    
 # =====================================================
 # 5. MÉMOIRE ET APPRENTISSAGE (MOTEUR V2 OPTIMISÉ)
 # =====================================================
