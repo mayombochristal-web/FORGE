@@ -1,6 +1,5 @@
 # =====================================================
-# 🧠 ORACLE CORE V6 Ω — Biological Persistent Cortex
-# STABLE EDITION
+# 🧠 ORACLE CORE V6 Ω — BIOLOGICAL PERSISTENT CORTEX
 # =====================================================
 
 import os, json, random, math, time, base64, requests
@@ -9,43 +8,45 @@ import streamlit as st
 import pandas as pd
 import PyPDF2
 import docx
-import speech_recognition as sr
 
 # =====================================================
 # CONFIG
 # =====================================================
 
-DATA_DIR="data"
-MEMORY_FILE=f"{DATA_DIR}/memory.json"
+DATA_DIR = "data"
+MEMORY_FILE = f"{DATA_DIR}/memory.json"
 
-MAX_FILE_MB=8
-MAX_PAGES=40
-MAX_ROWS=400
+MAX_FILE_MB = 8
+MAX_PAGES = 40
+MAX_ROWS = 400
 
-os.makedirs(DATA_DIR,exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # =====================================================
-# SAFE SESSION INIT
+# SESSION INIT (HOMEOSTASIS)
 # =====================================================
 
 def init_state():
 
-    defaults={
-        "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
+    defaults = {
+        "phi":{"phi_m":0.4,"phi_c":0.4,"phi_d":0.2},
         "green_state":0.0,
-        "last_sleep":time.time(),
         "ghost_cache":{},
         "hippocampus":[],
         "memory_dirty":False,
-        "last_sync_check":0
+        "last_sync_check":0,
+        "last_sleep":time.time(),
+        "identity_entropy":0.5
     }
 
     for k,v in defaults.items():
         if k not in st.session_state:
             st.session_state[k]=v
 
+init_state()
+
 # =====================================================
-# MEMORY SAFE LOAD
+# MEMORY
 # =====================================================
 
 def load_memory():
@@ -57,41 +58,41 @@ def load_memory():
     with open(MEMORY_FILE,"r",encoding="utf-8") as f:
         mem=json.load(f)
 
-    # protection anti KeyError
     mem.setdefault("messages",[])
     mem.setdefault("lexicon",{})
-
     return mem
 
-def save_memory(mem):
 
+def save_memory(mem):
     with open(MEMORY_FILE,"w",encoding="utf-8") as f:
         json.dump(mem,f,indent=2,ensure_ascii=False)
 
     st.session_state.memory_dirty=True
 
 # =====================================================
-# GREEN NOISE
+# GREEN NOISE — HOMEOSTASIS
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev+0.08*random.uniform(-1,1)
+    return 0.92*prev + 0.08*random.uniform(-1,1)
 
 def consolidation_gate():
-    st.session_state.green_state=green_noise(
+    st.session_state.green_state = green_noise(
         st.session_state.green_state
     )
-    return abs(st.session_state.green_state)<0.25
+    return abs(st.session_state.green_state) < 0.25
 
 # =====================================================
-# Φ ENGINE
+# Φ ENGINE (MENTAL STATE)
 # =====================================================
 
 def evolve_phi(phi,exc):
 
-    phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))
-    phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))
-    phi["phi_d"]=min(1,max(0.1,phi["phi_d"]+0.02-exc*0.05))
+    noise = st.session_state.green_state
+
+    phi["phi_m"] = max(0.1,min(1,phi["phi_m"]+exc*0.12))
+    phi["phi_c"] = max(0.1,min(1,phi["phi_c"]+exc*0.2+noise*0.05))
+    phi["phi_d"] = max(0.1,min(1,phi["phi_d"]+0.02-exc*0.05))
 
     s=sum(phi.values())
     for k in phi:
@@ -100,15 +101,15 @@ def evolve_phi(phi,exc):
     return phi
 
 # =====================================================
-# 👻 GHOST CORTEX
+# 👻 GHOST — PREDICTIVE PROCESSING
 # =====================================================
 
 def ghost_preload(text):
 
     mem=load_memory()
     L=mem["lexicon"]
-
     cache={}
+
     for w in text.lower().split():
         if w in L:
             cache[w]=sorted(
@@ -119,7 +120,7 @@ def ghost_preload(text):
     st.session_state.ghost_cache=cache
 
 # =====================================================
-# HIPPOCAMPUS
+# HIPPOCAMPUS (FAST LEARNING)
 # =====================================================
 
 def learn(text,phi):
@@ -148,16 +149,17 @@ def consolidate():
     save_memory(mem)
 
 # =====================================================
-# SOMMEIL
+# SLEEP — MEMORY PRUNING
 # =====================================================
 
 def sleep_cycle():
 
     mem=load_memory()
-    new={}
+    L=mem["lexicon"]
 
-    for w,con in mem["lexicon"].items():
-        filt={t:v*0.997 for t,v in con.items() if v>1.2}
+    new={}
+    for w,con in L.items():
+        filt={t:v*0.997 for t,v in con.items() if v>1.1}
         if filt:
             new[w]=filt
 
@@ -167,12 +169,14 @@ def sleep_cycle():
 
 def auto_sleep():
 
-    if time.time()-st.session_state.last_sleep>180:
+    mem=load_memory()
+
+    if len(mem["lexicon"])>800:
         if consolidation_gate():
             sleep_cycle()
 
 # =====================================================
-# GENERATION
+# GLOBAL WORKSPACE — GENERATION
 # =====================================================
 
 def associative_layer(word,L):
@@ -200,29 +204,63 @@ def generate_reply():
     L=mem["lexicon"]
 
     if not L:
-        return "Mémoire vide."
+        return "Je commence à apprendre."
 
     seed=random.choice(list(L.keys()))
     words=[seed]
 
-    for _ in range(int(10+30*st.session_state.phi["phi_m"])):
+    for _ in range(int(8+30*st.session_state.phi["phi_m"])):
         words.append(associative_layer(words[-1],L))
-
-    if st.session_state.phi["phi_c"]>0.65:
-        words.append("évolution")
 
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# PIPELINE
+# FILE INSERTS (PERCEPTION)
+# =====================================================
+
+def read_file(upload):
+
+    raw=upload.read()
+    if len(raw)>MAX_FILE_MB*1024*1024:
+        return ""
+
+    try:
+        if upload.type=="application/pdf":
+            reader=PyPDF2.PdfReader(BytesIO(raw))
+            return " ".join(
+                p.extract_text() or ""
+                for p in reader.pages[:MAX_PAGES]
+            )
+
+        if upload.type.endswith("document"):
+            doc=docx.Document(BytesIO(raw))
+            return " ".join(p.text for p in doc.paragraphs)
+
+        if upload.type=="text/plain":
+            return raw.decode("utf-8","ignore")
+
+        if upload.type=="text/csv":
+            df=pd.read_csv(BytesIO(raw))
+            return df.head(MAX_ROWS).to_string()
+
+    except:
+        pass
+
+    return ""
+
+# =====================================================
+# COGNITIVE PIPELINE
 # =====================================================
 
 def process_input(text):
 
     auto_sleep()
+
     ghost_preload(text)
 
-    exc=min(1,len(text)/200)
+    ghost_factor=len(st.session_state.ghost_cache)/5
+    exc=min(1,(len(text)/200)+ghost_factor*0.2)
+
     st.session_state.phi=evolve_phi(
         st.session_state.phi,exc
     )
@@ -238,4 +276,43 @@ def process_input(text):
     mem["messages"].append({"role":"assistant","content":reply})
     save_memory(mem)
 
-    return reply
+# =====================================================
+# GITHUB SYNC
+# =====================================================
+
+def github_sync():
+
+    if not st.session_state.memory_dirty:
+        return
+
+    if "GITHUB_TOKEN" not in st.secrets:
+        return
+
+    token=st.secrets["GITHUB_TOKEN"]
+    repo=st.secrets["GITHUB_REPO"]
+
+    url=f"https://api.github.com/repos/{repo}/contents/{MEMORY_FILE}"
+
+    headers={"Authorization":f"token {token}"}
+
+    with open(MEMORY_FILE,"rb") as f:
+        content=base64.b64encode(f.read()).decode()
+
+    r=requests.get(url,headers=headers)
+    sha=r.json()["sha"] if r.status_code==200 else None
+
+    data={"message":"Oracle biological sync","content":content}
+    if sha:
+        data["sha"]=sha
+
+    requests.put(url,headers=headers,json=data)
+    st.session_state.memory_dirty=False
+
+def auto_sync_loop(delay=20):
+
+    last=st.session_state.get("last_sync_check",0)
+
+    if time.time()-last>delay:
+        if consolidation_gate():
+            github_sync()
+        st.session_state.last_sync_check=time.time()
