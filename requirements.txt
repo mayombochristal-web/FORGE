@@ -2,7 +2,5 @@ streamlit
 PyPDF2
 python-docx
 pandas
-speechrecognition
-googlesearch-python
-beautifulsoup4
-requests
+openpyxl
+SpeechRecognition
