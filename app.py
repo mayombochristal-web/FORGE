@@ -45,6 +45,10 @@ def evolve_phi(phi, excitation):
     phi["phi_m"] = min(1, max(0.1, phi["phi_m"] + excitation*0.15 - 0.01))
     phi["phi_c"] = min(1, max(0.1, phi["phi_c"] + excitation*0.3 - 0.03))
     phi["phi_d"] = min(1, max(0.1, phi["phi_d"] + 0.02 - excitation*0.05))
+ # Normalisation Triadique (Optionnel mais recommandé pour la stabilité)
+    total = phi["phi_m"] + phi["phi_c"] + phi["phi_d"]
+    for key in phi:
+        phi[key] = phi[key] / total 
     return phi
 
 # =====================================================
