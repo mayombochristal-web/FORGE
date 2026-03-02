@@ -52,14 +52,15 @@ def evolve_phi(phi, excitation):
 # =====================================================
 def load_lex():
     try:
-        return json.load(open(LEXICON_PATH, "r", encoding="utf-8"))
+        with open(LEXICON_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
     except:
         return {}
 
 def save_lex(L):
-    json.dump(L, open(LEXICON_PATH, "w", encoding="utf-8"),
-              indent=2, ensure_ascii=False)
-
+    with open(LEXICON_PATH, "w", encoding="utf-8") as f:
+        json.dump(L, f, indent=2, ensure_ascii=False)
+        
 # =====================================================
 # 5. APPRENTISSAGE
 # =====================================================
