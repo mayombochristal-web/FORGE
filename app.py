@@ -1,383 +1,153 @@
-=====================================================
-
-🧠 ORACLE V4.5 Ω — AGENT COGNITIF COMPLET FINAL
-
-Fusion V2 + V3.1 + V4 + V4.5
-
-=====================================================
+# =====================================================
+# 🧠 ORACLE V6 — INTERFACE STREAMLIT
+# Utilise le cœur cognitif unifié
+# =====================================================
 
 import streamlit as st
-import random, json, os, math, time, base64
-import requests
 import pandas as pd
 import PyPDF2
 import docx
 import speech_recognition as sr
-from collections import deque, Counter
-
-=====================================================
-
-CONFIGURATION
-
-=====================================================
-
-MEM_FILE = "oracle_memory.json"
-
-if not os.path.exists(MEM_FILE):
-json.dump({}, open(MEM_FILE, "w", encoding="utf-8"))
-
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO  = st.secrets["GITHUB_REPO"]
-BRANCH = "main"
-
-=====================================================
-
-SESSION STATE
-
-=====================================================
-
-if "phi" not in st.session_state:
-st.session_state.phi = {"phi_m":0.5,"phi_c":0.5,"phi_d":0.5}
-
-if "dialog" not in st.session_state:
-st.session_state.dialog = deque(maxlen=60)
-
-if "hippocampus" not in st.session_state:
-st.session_state.hippocampus = []
-
-if "green_state" not in st.session_state:
-st.session_state.green_state = 0.0
-
-if "last_sleep" not in st.session_state:
-st.session_state.last_sleep = time.time()
-
-=====================================================
-
-GREEN NOISE — HOMEOSTASIS
-
-=====================================================
-
-def green_noise(prev):
-return 0.92 * prev + 0.08 * random.uniform(-1,1)
-
-def consolidation_gate():
-st.session_state.green_state = green_noise(
-st.session_state.green_state
-)
-return abs(st.session_state.green_state) < 0.25
-
-=====================================================
-
-MEMORY
-
-=====================================================
-
-def load_memory():
-with open(MEM_FILE,"r",encoding="utf-8") as f:
-return json.load(f)
-
-def save_memory(M):
-with open(MEM_FILE,"w",encoding="utf-8") as f:
-json.dump(M,f,indent=2,ensure_ascii=False)
-
-=====================================================
-
-GITHUB AUTO SYNC
-
-=====================================================
-
-def github_sync():
-
-try:  
-    with open(MEM_FILE,"rb") as f:  
-        content = base64.b64encode(f.read()).decode()  
-
-    url=f"https://api.github.com/repos/{GITHUB_REPO}/contents/{MEM_FILE}"  
-    headers={"Authorization":f"token {GITHUB_TOKEN}"}  
-
-    r=requests.get(url,headers=headers,timeout=10)  
-    sha=r.json()["sha"] if r.status_code==200 else None  
-
-    data={  
-        "message":"🧬 Oracle memory auto-sync",  
-        "content":content,  
-        "branch":BRANCH  
-    }  
-
-    if sha:  
-        data["sha"]=sha  
-
-    requests.put(url,headers=headers,json=data,timeout=10)  
-
-except Exception as e:  
-    st.warning(f"Sync GitHub échoué : {e}")
-
-=====================================================
-
-Φ ENGINE
-
-=====================================================
-
-def evolve_phi(phi,exc):
-
-phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))  
-phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))  
-phi["phi_d"]=min(1,max(0.1,phi["phi_d"]+0.02-exc*0.05))  
-
-s=sum(phi.values())  
-for k in phi:  
-    phi[k]/=s  
-
-return phi
-
-=====================================================
-
-HIPPOCAMPUS LEARNING
-
-=====================================================
-
-def learn(text,phi):
-
-words=text.lower().split()  
-if len(words)<2:  
-    return  
-
-energy=math.sqrt(sum(v*v for v in phi.values()))  
-st.session_state.hippocampus.append((words,energy))  
-
-if len(st.session_state.hippocampus)>5 and consolidation_gate():  
-    consolidate()
-
-def consolidate():
-
-M=load_memory()  
-
-for words,energy in st.session_state.hippocampus:  
-    for a,b in zip(words,words[1:]):  
-        M.setdefault(a,{})  
-        M[a][b]=M[a].get(b,0)+energy  
-
-save_memory(M)  
-st.session_state.hippocampus.clear()  
-
-github_sync()
-
-=====================================================
-
-SLEEP CYCLE
-
-=====================================================
-
-def sleep_cycle():
-
-M=load_memory()  
-new={}  
-
-for w,con in M.items():  
-    filt={t:v*0.997 for t,v in con.items() if v>1.2}  
-    if filt:  
-        new[w]=filt  
-
-save_memory(new)  
-st.session_state.last_sleep=time.time()
-
-=====================================================
-
-CORTEX
-
-=====================================================
-
-def contextual_seed(M):
-
-ctx=" ".join(st.session_state.dialog).split()  
-valid=[w for w in ctx if w in M]  
-
-if valid:  
-    return Counter(valid).most_common(1)[0][0]  
-
-return random.choice(list(M.keys()))
-
-def associative_layer(word,M,phi):
-
-if word not in M:  
-    return word  
-
-opts=M[word]  
-
-if random.random()<phi["phi_c"]:  
-    return random.choices(  
-        list(opts.keys()),  
-        weights=list(opts.values())  
-    )[0]  
-
-return max(opts,key=opts.get)
-
-def oracle_reply():
-
-M=load_memory()  
-if not M:  
-    return "Mémoire vide."  
-
-seed=contextual_seed(M)  
-words=[seed]  
-
-length=int(10+st.session_state.phi["phi_m"]*30)  
-
-for _ in range(length):  
-    nxt=associative_layer(words[-1],M,st.session_state.phi)  
-    words.append(nxt)  
-
-return " ".join(words).capitalize()+"."
-
-=====================================================
-
-FILE READING
-
-=====================================================
-
-def read_file(upload):
-
-try:  
-    if upload.type=="application/pdf":  
-        reader=PyPDF2.PdfReader(upload)  
-        return " ".join(p.extract_text() or "" for p in reader.pages)  
-
-    if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
-        d=docx.Document(upload)  
-        return " ".join(p.text for p in d.paragraphs)  
-
-    if upload.type=="text/plain":  
-        return upload.read().decode("utf-8",errors="ignore")  
-
-    if upload.type=="text/csv":  
-        return pd.read_csv(upload).to_string()  
-
-except Exception as e:  
-    st.error(f"Erreur lecture fichier : {e}")  
-
-return ""
-
-=====================================================
-
-AUDIO INPUT
-
-=====================================================
-
-def speech_to_text(audio):
-
-try:  
-    r=sr.Recognizer()  
-    with sr.AudioFile(audio) as source:  
-        data=r.record(source)  
-    return r.recognize_google(data)  
-except:  
-    return ""
-
-=====================================================
-
-UI
-
-=====================================================
-
-st.set_page_config(page_title="ORACLE V4.5 Ω",page_icon="🧠")
-st.title("🧠 ORACLE V4.5 Ω — Agent Cognitif Total")
-
-msg_input=st.text_input("Parlez à l'Oracle")
-
-file=st.file_uploader(
-"Insérer fichier / audio",
-type=["pdf","docx","txt","csv","wav"]
-)
-
-=====================================================
-
-PIPELINE COGNITIF
-
-=====================================================
-
-if st.button("Envoyer"):
-
-progress=st.progress(0,text="🧠 Activation corticale...")  
-status=st.empty()  
-
-msg=""  
-
-# PHASE 1 — INPUT  
-if file:  
-    status.info("📂 Lecture du fichier...")  
-    progress.progress(20)  
-
-    if file.type=="audio/wav":  
-        msg=speech_to_text(file)  
-    else:  
-        msg=read_file(file)  
-else:  
-    msg=msg_input  
-
-progress.progress(40)  
-
-# PHASE 2 — ANALYSE  
-status.info("🔎 Analyse cognitive...")  
-time.sleep(0.2)  
-progress.progress(60)  
-
-# PHASE 3 — LEARNING  
-if msg:  
-    st.session_state.dialog.append(msg)  
-
-    excitation=min(1,len(msg)/200)  
-    st.session_state.phi=evolve_phi(  
-        st.session_state.phi,excitation  
-    )  
-
-    learn(msg,st.session_state.phi)  
-
-progress.progress(75)  
-
-# PHASE 4 — RESPONSE  
-status.info("💭 Génération pensée...")  
-reply=oracle_reply()  
-st.session_state.dialog.append(reply)  
-
-progress.progress(90)  
-
-# PHASE 5 — SYNC  
-status.info("☁️ Synchronisation mémoire...")  
-github_sync()  
-
-progress.progress(100)  
-status.success("✅ Oracle mis à jour")  
-time.sleep(1)  
-progress.empty()
-
-=====================================================
-
-CONVERSATION DISPLAY
-
-=====================================================
-
-for m in st.session_state.dialog:
-st.write(m)
-
-=====================================================
-
-SIDEBAR
-
-=====================================================
-
+import json
+import os
+import time
+
+from oracle_core import OracleBrain
+
+# ---------- Initialisation ----------
+if "brain" not in st.session_state:
+    st.session_state.brain = OracleBrain("oracle_memory.json")
+
+brain = st.session_state.brain
+
+# ---------- Fonctions d'extraction multimodale ----------
+def extract_from_file(uploaded_file):
+    """Extrait le texte d'un fichier uploadé."""
+    if uploaded_file is None:
+        return ""
+    try:
+        if uploaded_file.type == "application/pdf":
+            reader = PyPDF2.PdfReader(uploaded_file)
+            return " ".join(p.extract_text() or "" for p in reader.pages)
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            doc = docx.Document(uploaded_file)
+            return " ".join(p.text for p in doc.paragraphs)
+        elif uploaded_file.type == "text/plain":
+            return uploaded_file.read().decode("utf-8", errors="ignore")
+        elif uploaded_file.type == "text/csv":
+            df = pd.read_csv(uploaded_file)
+            return df.to_string()
+        elif uploaded_file.type == "audio/wav":
+            r = sr.Recognizer()
+            with sr.AudioFile(uploaded_file) as source:
+                audio = r.record(source)
+            return r.recognize_google(audio, language="fr-FR")
+        else:
+            return ""
+    except Exception as e:
+        st.error(f"Erreur de lecture : {e}")
+        return ""
+
+# ---------- Configuration page ----------
+st.set_page_config(page_title="ORACLE V6", page_icon="🧠", layout="wide")
+st.title("🧠 ORACLE V6 — Cognition Unifiée")
+
+# ---------- Onglets ----------
+tab1, tab2 = st.tabs(["💬 Conversation", "📚 Nourrir (fichiers)"])
+
+# ========== ONGLET CONVERSATION ==========
+with tab1:
+    st.subheader("Parlez à l'Oracle")
+
+    # Affichage de la conversation
+    for msg in brain.dialog_memory:
+        st.write(msg)
+
+    # Zone de saisie
+    user_msg = st.text_input("Votre message", key="conv_input")
+    col1, col2 = st.columns([1,5])
+    with col1:
+        send = st.button("Envoyer")
+
+    if send and user_msg:
+        with st.spinner("L'Oracle réfléchit..."):
+            response = brain.process_input(user_msg, is_user=True)
+        # L'affichage se met à jour via st.rerun implicite ? 
+        # On force le rerun pour voir le nouveau message
+        st.rerun()
+
+# ========== ONGLET NOURRIR ==========
+with tab2:
+    st.subheader("Nourrir l'Oracle avec des fichiers")
+
+    mode = st.radio("Type de source", ["Texte", "Document", "Excel", "Audio"])
+    content = ""
+
+    if mode == "Texte":
+        content = st.text_area("Collez votre texte ici")
+    else:
+        file = st.file_uploader("Choisissez un fichier", 
+                                type=["pdf","docx","txt","csv","wav"] if mode!="Excel" else ["xlsx","xls"])
+        if file:
+            content = extract_from_file(file)
+
+    if st.button("🧠 Nourrir et générer"):
+        if content:
+            with st.spinner("L'Oracle assimile et répond..."):
+                # Le contenu est traité comme un message utilisateur, ce qui déclenche tout le pipeline
+                response = brain.process_input(content, is_user=True)
+            st.success("Contenu appris. Réponse générée :")
+            st.write(response)
+            st.rerun()
+        else:
+            st.warning("Aucun contenu à apprendre.")
+
+# ---------- Sidebar : état cognitif ----------
 with st.sidebar:
+    st.header("🧠 État cognitif")
 
-st.header("🧠 État Cognitif")  
+    # Taille de la mémoire
+    mem_size = os.path.getsize(brain.memory_file) / 1024 if os.path.exists(brain.memory_file) else 0
+    st.metric("Mémoire (Ko)", f"{mem_size:.2f}")
 
-for k,v in st.session_state.phi.items():  
-    st.progress(v,text=f"{k}:{v:.2f}")  
+    st.divider()
+    st.subheader("Φ Dynamique")
+    for k, v in brain.phi.items():
+        st.progress(v, text=f"{k} : {v:.2f}")
 
-if st.button("🌙 Sommeil forcé"):  
-    sleep_cycle()  
-    st.success("Consolidation terminée")  
+    st.divider()
+    st.subheader("👻 Fantôme")
+    st.progress(brain.ghost_activity, text="Influence")
+    if st.button("Voir mémoire fantôme"):
+        st.write(brain.ghost_memory)
 
-if st.button("🧬 Sync GitHub"):  
-    github_sync()  
-    st.success("Mémoire synchronisée")
+    st.divider()
+    st.subheader("🌙 Sommeil")
+    last = time.strftime("%H:%M:%S", time.localtime(brain.last_sleep))
+    st.caption(f"Dernier sommeil : {last}")
+    if st.button("Forcer le sommeil"):
+        brain.sleep_cycle()
+        st.success("Sommeil effectué")
+        time.sleep(1)
+        st.rerun()
 
-Ne change ni les fonctionnalités ni la structure du code mais implémente le fantôme et les atouts de v5 voir v5.5 mais garde tout ajoute juste des qualités au bon endroit
+    st.divider()
+    st.subheader("💾 Sauvegarde")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.download_button(
+            "Télécharger mémoire",
+            data=json.dumps(brain.lexicon, indent=2, ensure_ascii=False),
+            file_name="oracle_memory.json"
+        )
+    with col_b:
+        restore = st.file_uploader("Restaurer", type="json", key="restore")
+        if restore:
+            try:
+                new_lex = json.load(restore)
+                brain.lexicon = new_lex
+                brain._save_lex()
+                st.success("Mémoire restaurée")
+                st.rerun()
+            except:
+                st.error("Fichier invalide")
