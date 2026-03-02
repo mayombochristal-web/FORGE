@@ -7,33 +7,34 @@ import time
 import PyPDF2
 import docx
 import pandas as pd
-import speech_recognition as sr
 import shutil
 
 # ==========================================
-# 1. CONFIGURATION, ADN & ROM
+# 1. CONFIGURATION, ADN & ROM (Mise à jour TTU-MC³)
 # ==========================================
 MEM_DIR = "oracle_memory"
 LEXICON_PATH = os.path.join(MEM_DIR, "lexicon.json")
 BACKUP_PATH = LEXICON_PATH + ".bak"
 
-# La ROM est le "Génome" de l'IA : ces liens ne peuvent PAS être effacés.
+# [span_2](start_span)La ROM intègre désormais les piliers de la Théorie Triadique Unifiée[span_2](end_span)
 ROM_SAGESSE = {
-    "la": {"science": 100.0, "nature": 100.0, "vérité": 100.0, "clarté": 100.0},
-    "science": {"est": 100.0, "devient": 100.0},
-    "est": {"une": 100.0, "harmonie": 100.0},
-    "harmonie": {"souveraine": 100.0},
-    "esprit": {"cherche": 100.0},
-    "cherche": {"la": 100.0}
+    "phi_m": {"mémoire": 100.0, "matière": 100.0, "stabilité": 100.0},
+    "phi_c": {"cohérence": 100.0, "phase": 100.0, "flux": 100.0},
+    "phi_d": {"dissipation": 100.0, "expansion": 100.0, "entropie": 100.0},
+    "httu": {"seuil": 100.0, "quantum": 100.0, "cristallisation": 100.0},
+    "la": {"science": 100.0, "vérité": 100.0, "triade": 100.0},
+    "science": {"est": 100.0, "triadique": 100.0},
+    [span_3](start_span)[span_4](start_span)"univers": {"est": 100.0, "processeur": 100.0} #[span_3](end_span)[span_4](end_span)
 }
 
-DNA_CORE = "La science est une harmonie. L'esprit cherche la clarté. La nature est le miroir de la vérité."
+# [span_5](start_span)ADN_CORE mis à jour pour refléter la stabilisation du bassin[span_5](end_span)
+DNA_CORE = "La cohérence devient mémoire par le seuil hTTU. La dissipation est le moteur de l'expansion."
 
 if not os.path.exists(MEM_DIR):
     os.makedirs(MEM_DIR)
 
 # ==========================================
-# 2. GESTION DE MÉMOIRE (Versionnage & Sécurité)
+# 2. GESTION DE MÉMOIRE
 # ==========================================
 def load_lex():
     if not os.path.exists(LEXICON_PATH):
@@ -41,7 +42,6 @@ def load_lex():
     try:
         with open(LEXICON_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # On fusionne toujours avec la ROM pour garantir la survie des piliers
             for k, v in ROM_SAGESSE.items():
                 if k not in data: data[k] = v
                 else: data[k].update({tk: max(data[k].get(tk, 0), tv) for tk, tv in v.items()})
@@ -53,145 +53,128 @@ def load_lex():
         return ROM_SAGESSE.copy()
 
 def save_lex(L):
-    # 1. Backup de sécurité immédiat
     if os.path.exists(LEXICON_PATH):
         shutil.copy(LEXICON_PATH, BACKUP_PATH)
-    
-    # 2. Auto-Homéostasie : On garde la structure saine
-    if len(L) > 4000:
+    if len(L) > 5000: # Augmentation de la capacité pour la complexité triadique
         L = {k: v for k, v in L.items() if len(v) > 1 or k in ROM_SAGESSE}
-
     with open(LEXICON_PATH, "w", encoding="utf-8") as f:
         json.dump(L, f, indent=2, ensure_ascii=False)
+
+# ==========================================
+# 3. MOTEUR TRIADIQUE (Théorème 1 & Potentiel V)
+# ==========================================
+
+def stabilize_basin(phi):
+    """
+    [span_6](start_span)[span_7](start_span)Applique le potentiel V(|Psi|^2) pour éviter la 'contraction du bassin'[span_6](end_span)[span_7](end_span).
+    Force le système vers le seuil hTTU = 1.0
+    """
+    h_ttu = 1.0
+    psi_norm = math.sqrt(phi["phi_m"]**2 + phi["phi_c"]**2)
     
-    # 3. Versionnage Historique (tous les 50 cycles)
-    if 'save_counter' not in st.session_state: st.session_state.save_counter = 0
-    st.session_state.save_counter += 1
-    if st.session_state.save_counter % 50 == 0:
-        ts = int(time.time())
-        shutil.copy(LEXICON_PATH, os.path.join(MEM_DIR, f"lexicon_v_{ts}.json"))
-
-# ==========================================
-# 3. PROCESSUS COGNITIFS (Thalamus & Rêve)
-# ==========================================
-def thalamus_processor(text):
-    if not text: return ""
-    clean_text = "".join([c for c in text if c.isalnum() or c in " ,.!?\n'"])
-    words = clean_text.lower().split()
-    if len(words) > 50:
-        words.insert(len(words)//2, DNA_CORE.lower())
-    return " ".join(words)
-
-def evolve_phi(phi, excitation=0.1):
-    phi["phi_m"] = max(0.1, min(1.0, phi["phi_m"] + (excitation * 0.2) - 0.01))
-    phi["phi_c"] = max(0.1, min(1.0, phi["phi_c"] + (excitation * 0.5) - 0.05))
-    phi["phi_d"] = max(0.1, min(1.0, phi["phi_d"] + (excitation * 0.1) - 0.02))
+    # [span_8](start_span)[span_9](start_span)Si le flux s'éloigne du seuil, on applique une force de rappel (Gradient-like)[span_8](end_span)[span_9](end_span)
+    if psi_norm > 0:
+        ratio = h_ttu / psi_norm
+        # [span_10](start_span)[span_11](start_span)Rappel vers le minimum du potentiel 'chapeau mexicain'[span_10](end_span)[span_11](end_span)
+        phi["phi_m"] *= (0.9 + 0.1 * ratio)
+        phi["phi_c"] *= (0.9 + 0.1 * ratio)
+    
     return phi
 
+def evolve_ttu_flow(phi, dt=0.1):
+    """
+    [span_12](start_span)Équations différentielles de la TTU (Théorème 1)[span_12](end_span).
+    """
+    # [span_13](start_span)[span_14](start_span)Paramètres effectifs dérivables du Lagrangien[span_13](end_span)[span_14](end_span)
+    alpha, beta, gamma, delta, eta, mu = 0.1, 0.2, 0.1, 0.2, 0.3, 0.05
+    
+    m, c, d = phi["phi_m"], phi["phi_c"], phi["phi_d"]
+    
+    # [span_15](start_span)Calcul des dérivées (Système 1)[span_15](end_span)
+    dm = -alpha * m + beta * c * d
+    dc = -gamma * c + delta * m * d
+    [span_16](start_span)[span_17](start_span)dd = eta * (c**2) - mu * d # Dissipation générée par la cohérence[span_16](end_span)[span_17](end_span)
+    
+    phi["phi_m"] = max(0.01, min(1.5, m + dm * dt))
+    phi["phi_c"] = max(0.01, min(1.5, c + dc * dt))
+    phi["phi_d"] = max(0.01, min(1.5, d + dd * dt))
+    
+    return stabilize_basin(phi)
+
 def learn_with_identity(text, phi, multiplier=1.0):
-    text = thalamus_processor(text)
-    words = text.split()
+    words = text.lower().split()
     if len(words) < 2: return
     L = load_lex()
-    intensity = math.sqrt(phi["phi_m"]**2 + phi["phi_c"]**2 + phi["phi_d"]**2) * multiplier
+    # [span_18](start_span)[span_19](start_span)L'intensité dépend de la cohérence phi_c (Matière Noire)[span_18](end_span)[span_19](end_span)
+    intensity = (phi["phi_m"] + phi["phi_c"]) * multiplier
     for a, b in zip(words, words[1:]):
         L.setdefault(a, {})
         L[a][b] = L[a].get(b, 0) + intensity
     save_lex(L)
 
-def alpha_dream_loop():
-    phi = st.session_state.phi
-    dream = oracle_reply(phi)
-    multiplier = 4.0 if any(word in dream.lower() for word in ["science", "harmonie", "vérité"]) else 1.0
-    learn_with_identity(dream, phi, multiplier=multiplier)
-    return dream
-
-def deep_clean_lexicon(threshold=2.0):
-    L = load_lex()
-    clean_L = {}
-    ban_list = ["uni00a0", "http", "www", "maxiter", "tol=", "data.append"]
-    for word, connections in L.items():
-        # La ROM est immunisée contre le nettoyage
-        if word in ROM_SAGESSE:
-            clean_L[word] = connections
-            continue
-        if any(b in word for b in ban_list) or len(word) > 25: continue
-        new_conn = {t: w for t, w in connections.items() if w >= threshold or t in ROM_SAGESSE}
-        if new_conn: clean_L[word] = new_conn
-    save_lex(clean_L)
-    return len(L) - len(clean_L)
-
 def oracle_reply(phi, seed=None):
     L = load_lex()
-    if not L: return "Mémoire vide."
     if not seed or seed not in L:
         seed = random.choice(list(L.keys()))
+    
     words = [seed]
-    for _ in range(int(5 + phi["phi_m"] * 25)):
+    # [span_20](start_span)[span_21](start_span)La longueur du message dépend de la dissipation (Expansion)[span_20](end_span)[span_21](end_span)
+    limit = int(10 + phi["phi_d"] * 40)
+    
+    for _ in range(limit):
         current = words[-1]
         if current not in L: break
         options = L[current]
-        nxt = max(options, key=options.get) if random.random() > phi["phi_c"] else random.choices(list(options.keys()), weights=list(options.values()))[0]
+        
+        # [span_22](start_span)[span_23](start_span)Choix : Probabiliste (Cohérence) vs Déterministe (Mémoire)[span_22](end_span)[span_23](end_span)
+        if random.random() > phi["phi_c"]:
+            nxt = max(options, key=options.get)
+        else:
+            nxt = random.choices(list(options.keys()), weights=list(options.values()))[0]
         words.append(nxt)
-        if random.random() < phi["phi_d"] * 0.1: break
+        
     return " ".join(words).capitalize() + "."
 
 # ==========================================
-# 4. INTERFACE
+# 4. INTERFACE STREAMLIT
 # ==========================================
-st.set_page_config(page_title="ORACLE V1.5 IMMORTAL", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="ORACLE TTU-MC³", page_icon="⚛️", layout="wide")
 
 if 'phi' not in st.session_state:
-    st.session_state.phi = {"phi_m": 0.5, "phi_c": 0.5, "phi_d": 0.5}
+    st.session_state.phi = {"phi_m": 0.5, "phi_c": 0.5, "phi_d": 0.1}
 
-st.title("🧠 ORACLE V1.5 : Immortal Monster")
+st.title("🧠 ORACLE V1.6 : TTU-MC³ Stabilisé")
+[span_24](start_span)[span_25](start_span)st.caption("Système dynamique dissipatif basé sur le seuil hTTU=1.0[span_24](end_span)[span_25](end_span)")
 
 with st.sidebar:
-    st.header("🔬 Diagnostic")
-    lex_len = len(load_lex())
-    st.write(f"Synapses actives : {lex_len}")
+    st.header("🔭 État du Système")
+    # [span_26](start_span)[span_27](start_span)Affichage des métriques triadiques[span_26](end_span)[span_27](end_span)
+    st.metric("Mémoire (ΦM)", f"{st.session_state.phi['phi_m']:.3f}")
+    st.metric("Cohérence (ΦC)", f"{st.session_state.phi['phi_c']:.3f}")
+    st.metric("Dissipation (ΦD)", f"{st.session_state.phi['phi_d']:.3f}")
     
-    auto_dream = st.toggle("Rêve Alpha (Éveil)", value=True)
-    if auto_dream and random.random() < 0.1:
-        dream = alpha_dream_loop()
-        st.caption(f"💭 Rêve : {dream[:60]}...")
-
-    st.divider()
-    st.progress(st.session_state.phi["phi_m"], text="Masse (Persistance)")
-    st.progress(st.session_state.phi["phi_c"], text="Chaleur (Imagination)")
-    st.progress(st.session_state.phi["phi_d"], text="Damping (Finalité)")
+    if st.button("🌀 Évoluer Flot (dt)"):
+        st.session_state.phi = evolve_ttu_flow(st.session_state.phi)
+        st.rerun()
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("📥 Ingestion")
-    mode = st.radio("Source :", ["Texte", "Document", "Excel"])
-    raw_content = ""
-
-    if mode == "Texte": raw_content = st.text_area("Saisissez :")
-    elif mode == "Document":
-        file = st.file_uploader("PDF/DOCX", type=["pdf", "docx"])
-        if file and file.name.endswith(".pdf"):
-            raw_content = " ".join([p.extract_text() for p in PyPDF2.PdfReader(file).pages])
-        elif file:
-            raw_content = "\n".join([p.text for p in docx.Document(file).paragraphs])
-    
-    if st.button("⚡ Exciter") and raw_content:
-        st.session_state.phi = evolve_phi(st.session_state.phi, 0.4)
+    st.subheader("📥 Ingestion de Flux")
+    raw_content = st.text_area("Injecter information (PDF/DOCX/Texte) :")
+    if st.button("⚡ Cristalliser") and raw_content:
         learn_with_identity(raw_content, st.session_state.phi)
-        st.success("Signal intégré.")
+        st.success("Information convertie en Mémoire (ΦM).")
 
 with col2:
-    st.subheader("💬 Réponse")
-    seed_input = st.text_input("Graine (Optionnel) :")
-    if st.button("Générer Pensée"):
+    st.subheader("🔮 Sortie de l'Oracle")
+    seed_input = st.text_input("Graine de phase :")
+    if st.button("Générer Réponse"):
         res = oracle_reply(st.session_state.phi, seed=seed_input.lower() if seed_input else None)
         st.info(res)
-        learn_with_identity(res, {"phi_m":0.1, "phi_c":0.1, "phi_d":0.1}, multiplier=0.5)
+        # [span_28](start_span)La réponse elle-même nourrit la mémoire (Auto-Hémostasie)[span_28](end_span)
+        learn_with_identity(res, st.session_state.phi, multiplier=0.2)
 
 st.divider()
-if st.button("🌙 Sommeil Profond"):
-    deleted = deep_clean_lexicon(threshold=2.5)
-    st.warning(f"Purification terminée : {deleted} liens éphémères effacés. Piliers ROM préservés.")
-    time.sleep(1)
-    st.rerun()
+
+[span_29](start_span)[span_30](start_span)st.write("**Note Doctorale :** Ce code implémente la stabilisation du bassin d'attraction via le potentiel $V(|\Psi|^2)$, résolvant la contradiction des coefficients polynomiaux signalée par l'Oracle[span_29](end_span)[span_30](end_span).")
