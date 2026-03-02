@@ -11,49 +11,44 @@ import PyPDF2
 import docx
 import speech_recognition as sr
 from collections import deque, Counter
+from io import BytesIO
 
 # =====================================================
 # CONFIGURATION
 # =====================================================
 
-MEM_FILE = "oracle_memory.json"
+MEM_FILE="oracle_memory.json"
 
 if not os.path.exists(MEM_FILE):
-    json.dump({}, open(MEM_FILE, "w", encoding="utf-8"))
+    json.dump({},open(MEM_FILE,"w",encoding="utf-8"))
 
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO  = st.secrets["GITHUB_REPO"]
-BRANCH = "main"
+GITHUB_TOKEN=st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO=st.secrets["GITHUB_REPO"]
+BRANCH="main"
 
 # =====================================================
 # SESSION STATE
 # =====================================================
 
-if "phi" not in st.session_state:
-    st.session_state.phi={"phi_m":0.5,"phi_c":0.5,"phi_d":0.5}
+defaults={
+    "phi":{"phi_m":0.5,"phi_c":0.5,"phi_d":0.5},
+    "dialog":deque(maxlen=60),
+    "hippocampus":[],
+    "green_state":0.0,
+    "last_sleep":time.time(),
+    "ghost_cache":{}
+}
 
-if "dialog" not in st.session_state:
-    st.session_state.dialog=deque(maxlen=60)
-
-if "hippocampus" not in st.session_state:
-    st.session_state.hippocampus=[]
-
-if "green_state" not in st.session_state:
-    st.session_state.green_state=0.0
-
-if "last_sleep" not in st.session_state:
-    st.session_state.last_sleep=time.time()
-
-# 👻 Ghost cognition
-if "ghost_cache" not in st.session_state:
-    st.session_state.ghost_cache={}
+for k,v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k]=v
 
 # =====================================================
-# GREEN NOISE — HOMEOSTASIS
+# GREEN NOISE
 # =====================================================
 
 def green_noise(prev):
-    return 0.92*prev + 0.08*random.uniform(-1,1)
+    return 0.92*prev+0.08*random.uniform(-1,1)
 
 def consolidation_gate():
     st.session_state.green_state=green_noise(
@@ -66,15 +61,18 @@ def consolidation_gate():
 # =====================================================
 
 def load_memory():
-    with open(MEM_FILE,"r",encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(MEM_FILE,"r",encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {}
 
 def save_memory(M):
     with open(MEM_FILE,"w",encoding="utf-8") as f:
         json.dump(M,f,indent=2,ensure_ascii=False)
 
 # =====================================================
-# GITHUB AUTO SYNC (ASYNC)
+# GITHUB SYNC (SAFE ASYNC)
 # =====================================================
 
 def github_sync():
@@ -103,10 +101,10 @@ def github_sync():
         st.warning(f"Sync GitHub échoué : {e}")
 
 def async_sync():
-    threading.Thread(target=github_sync).start()
+    threading.Thread(target=github_sync,daemon=True).start()
 
 # =====================================================
-# 👻 GHOST PRELOAD (V5/V5.5)
+# 👻 GHOST PRELOAD
 # =====================================================
 
 def ghost_preload(text):
@@ -121,7 +119,7 @@ def ghost_preload(text):
                 )[:5]
         st.session_state.ghost_cache=preload
     except:
-        pass
+        st.session_state.ghost_cache={}
 
 # =====================================================
 # Φ ENGINE
@@ -166,7 +164,6 @@ def consolidate():
 
     save_memory(M)
     st.session_state.hippocampus.clear()
-
     async_sync()
 
 # =====================================================
@@ -187,10 +184,13 @@ def sleep_cycle():
     st.session_state.last_sleep=time.time()
 
 # =====================================================
-# CORTEX (Ghost Accelerated)
+# CORTEX
 # =====================================================
 
 def contextual_seed(M):
+
+    if not M:
+        return "oracle"
 
     ctx=" ".join(st.session_state.dialog).split()
     valid=[w for w in ctx if w in M]
@@ -231,64 +231,40 @@ def oracle_reply():
     length=int(10+st.session_state.phi["phi_m"]*30)
 
     for _ in range(length):
-        nxt=associative_layer(words[-1],M,
-                              st.session_state.phi)
+        nxt=associative_layer(
+            words[-1],M,st.session_state.phi
+        )
         words.append(nxt)
 
     return " ".join(words).capitalize()+"."
 
 # =====================================================
-# FILE READING — SAFE STREAM (ANTI AXIOS)
+# 👻 FILE READING SAFE (ANTI AXIOS)
 # =====================================================
 
-def safe_bytes(upload):
-    """
-    Copie le fichier pour éviter la perte du buffer Streamlit
-    """
-    try:
-        return upload.read()
-    except:
-        return None
-
-
-def read_file(upload):
+def ghost_read_file(upload):
 
     try:
-        raw = safe_bytes(upload)
-
+        raw=upload.read()
         if not raw:
             return ""
 
-        # --- PDF ---
-        if upload.type == "application/pdf":
+        if upload.type=="application/pdf":
+            reader=PyPDF2.PdfReader(BytesIO(raw))
+            return " ".join(
+                (p.extract_text() or "")
+                for p in reader.pages[:50]
+            )
 
-            from io import BytesIO
-            reader = PyPDF2.PdfReader(BytesIO(raw))
-
-            text=[]
-            for page in reader.pages[:50]:  # limite sécurité
-                t=page.extract_text()
-                if t:
-                    text.append(t)
-
-            return " ".join(text)
-
-        # --- DOCX ---
-        if upload.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-
-            from io import BytesIO
-            doc = docx.Document(BytesIO(raw))
-
+        if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            doc=docx.Document(BytesIO(raw))
             return " ".join(p.text for p in doc.paragraphs[:500])
 
-        # --- TXT ---
-        if upload.type == "text/plain":
-            return raw.decode("utf-8", errors="ignore")
+        if upload.type=="text/plain":
+            return raw.decode("utf-8","ignore")
 
-        # --- CSV ---
-        if upload.type == "text/csv":
-            from io import BytesIO
-            df = pd.read_csv(BytesIO(raw))
+        if upload.type=="text/csv":
+            df=pd.read_csv(BytesIO(raw))
             return df.head(500).to_string()
 
     except Exception as e:
