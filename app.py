@@ -57,6 +57,7 @@ def extract_multimodal(uploaded_file):
         return ""
 
 def charger_memoire_github(nom_fichier):
+    """Télécharge un fichier mémoire depuis GitHub et le sauvegarde localement."""
     path = f"{FOLDER}/{nom_fichier}"
     try:
         content = repo.get_contents(path, ref=BRANCH)
@@ -64,10 +65,13 @@ def charger_memoire_github(nom_fichier):
         with open(nom_fichier, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
-    except: return False
+    except:
+        return False
 
 def sauvegarder_memoire_github(nom_fichier, msg="Update"):
-    if not os.path.exists(nom_fichier): return
+    """Sauvegarde le fichier mémoire local vers GitHub (création ou mise à jour)."""
+    if not os.path.exists(nom_fichier):
+        return
     path = f"{FOLDER}/{nom_fichier}"
     with open(nom_fichier, "r", encoding="utf-8") as f:
         content = f.read()
@@ -103,46 +107,60 @@ with tab1:
         brain.dialog_memory.clear()
         st.rerun()
 
-    # Affichage des messages
+    # Affichage des messages stockés dans brain.dialog_memory
     for i, msg in enumerate(brain.dialog_memory):
-        is_oracle = "Oracle:" in msg or i % 2 != 0 # Logique simplifiée pour l'affichage
-        
+        # Déterminer si le message vient de l'Oracle (contient "Oracle:")
+        is_oracle = "Oracle:" in msg
         with st.chat_message("assistant" if is_oracle else "user", avatar="🧠" if is_oracle else "👤"):
-            clean_text = msg.replace("Oracle:", "").strip()
+            clean_text = msg.replace("Oracle:", "").replace("User:", "").strip()
             st.write(clean_text)
             if is_oracle:
-                st.button("📋 Copier la réponse", key=f"copy_{i}", on_click=lambda t=clean_text: st.toast(f"Copié !"))
+                st.button("📋 Copier la réponse", key=f"copy_{i}", 
+                         on_click=lambda t=clean_text: st.toast(f"Copié : {t[:50]}..."))
 
     user_msg = st.chat_input("Échangez avec l'Oracle...")
     if user_msg:
         with st.spinner("L'Oracle analyse..."):
             response = brain.process_input(user_msg)
+            # Sauvegarde asynchrone (ne bloque pas l'expérience)
             sauvegarder_memoire_github(st.session_state.current_mem, f"Échange : {user_msg[:20]}")
         st.rerun()
 
 # --- ONGLET 2 : NOURRIR (EXTRACTION COMPLÈTE) ---
 with tab2:
     st.subheader("📥 Importer des connaissances")
-    target_db = st.selectbox("Sélectionner la base de destination", ["oracle_memory.json", "technique.json", "philosophie.json", "projets.json"])
+    target_db = st.selectbox(
+        "Sélectionner la base de destination",
+        ["oracle_memory.json", "technique.json", "philosophie.json", "projets.json"]
+    )
     
-    media = st.radio("Format de la source", ["Document (PDF, Word, Excel, CSV, TXT)", "Audio (WAV, FLAC)", "Saisie Manuelle"])
+    media = st.radio(
+        "Format de la source",
+        ["Document (PDF, Word, Excel, CSV, TXT)", "Audio (WAV, FLAC)", "Saisie Manuelle"]
+    )
     
     input_data = ""
     if media == "Saisie Manuelle":
         input_data = st.text_area("Collez votre texte ici")
     elif media == "Audio (WAV, FLAC)":
         f = st.file_uploader("Fichier Audio", type=["wav", "flac"])
-        if f: input_data = extract_multimodal(f)
+        if f:
+            input_data = extract_multimodal(f)
     else:
         f = st.file_uploader("Fichier Document", type=["pdf", "docx", "xlsx", "xls", "csv", "txt"])
-        if f: input_data = extract_multimodal(f)
+        if f:
+            input_data = extract_multimodal(f)
 
     if st.button("🧠 Assimiler & Synchroniser"):
         if input_data:
             with st.spinner("Assimilation en cours..."):
+                # Charger la mémoire cible depuis GitHub
                 charger_memoire_github(target_db)
+                # Créer un brain temporaire pour cette mémoire
                 temp_brain = OracleBrain(target_db)
+                # Envoyer le contenu pour apprentissage (process_input génère aussi une réponse ignorée)
                 temp_brain.process_input(input_data)
+                # Sauvegarder la mémoire mise à jour
                 sauvegarder_memoire_github(target_db, "Assimilation automatique")
                 st.success(f"Données intégrées avec succès dans {target_db} !")
         else:
@@ -152,12 +170,11 @@ with tab2:
 with tab3:
     st.subheader("📂 Gestionnaire de Mémoires Cloud")
     
-    # Barre de recherche
     search_query = st.text_input("🔍 Rechercher un fichier mémoire (ex: 'technique', '2024'...)")
     
     try:
         all_items = repo.get_contents(FOLDER, ref=BRANCH)
-        # Filtrage en temps réel
+        # Filtrer selon la recherche
         filtered_items = [i for i in all_items if search_query.lower() in i.name.lower()]
         
         if not filtered_items:
@@ -174,15 +191,15 @@ with tab3:
             if c3.button("🗑️", key=f"del_{item.name}", help="Supprimer du Cloud"):
                 repo.delete_file(item.path, f"Suppression de {item.name}", item.sha, branch=BRANCH)
                 st.rerun()
-    except:
-        st.error("Accès au dépôt GitHub impossible.")
+    except Exception as e:
+        st.error(f"Impossible d'accéder au dépôt GitHub : {e}")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("📊 État de l'Oracle")
     st.write(f"Base : **{st.session_state.current_mem}**")
     
-    # Indicateurs Phi
+    # Afficher les paramètres homéostatiques phi
     for k, v in brain.phi.items():
         st.progress(v, text=f"{k} : {v:.2f}")
 
@@ -190,5 +207,5 @@ with st.sidebar:
     if st.button("🌙 Sommeil Profond"):
         brain.sleep_cycle()
         sauvegarder_memoire_github(st.session_state.current_mem, "Cycle de sommeil")
-        st.success("Mémoire nettoyée.")
+        st.success("Mémoire nettoyée et sauvegardée.")
         st.rerun()
