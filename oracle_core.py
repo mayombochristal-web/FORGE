@@ -89,7 +89,12 @@ class OracleBrain:
         """Sélectionne le mot graine en fonction du contexte dialogique et des embeddings."""
         context_words = list(self.dialog_memory)
         if not context_words:
-            return random.choice(list(self.lexicon.keys())) if self.lexicon else "forge"
+            # Si aucun contexte, choisir un mot parmi ceux qui ont le plus de connexions
+            if self.lexicon:
+                # Prendre le mot avec le plus grand nombre de transitions sortantes
+                best_word = max(self.lexicon.items(), key=lambda item: len(item[1]))[0]
+                return best_word
+            return "oracle"
 
         # Embedding moyen du contexte (uniquement messages utilisateur)
         context_embs = []
@@ -104,6 +109,9 @@ class OracleBrain:
             candidates = [w for w in flat if w in self.lexicon or w in self.nexus_lexicon]
             if candidates:
                 counts = Counter(candidates)
+                # Pondérer par le nombre de connexions pour éviter les mots isolés
+                for c in counts:
+                    counts[c] *= len(self.lexicon.get(c, {}))
                 return counts.most_common(1)[0][0]
             return "oracle"
 
@@ -118,6 +126,8 @@ class OracleBrain:
             if word in self.embeddings:
                 emb = self.embeddings[word]
                 sim = sum(c*e for c, e in zip(avg_ctx, emb))
+                # Bonus pour les mots ayant beaucoup de connexions
+                sim += 0.1 * math.log(1 + len(self.lexicon[word]))
                 if sim > best_sim:
                     best_sim = sim
                     best_word = word
@@ -194,8 +204,11 @@ class OracleBrain:
         words = [seed] if seed else ["oracle"]
         used_bi_grams = set()
         length = int(10 + self.phi["phi_m"] * 30)
+        max_attempts = length * 2  # Pour éviter les boucles infinies
+        attempts = 0
 
-        for _ in range(length):
+        while len(words) < length and attempts < max_attempts:
+            attempts += 1
             current = words[-1]
 
             # Cherche d'abord dans le Nexus, puis dans le lexique principal
@@ -208,12 +221,25 @@ class OracleBrain:
             elif main_next:
                 nxt = main_next
             else:
-                break
+                # Aucune transition trouvée : on choisit un mot aléatoire du lexique
+                # pour éviter de bloquer la phrase
+                if self.lexicon:
+                    nxt = random.choice(list(self.lexicon.keys()))
+                else:
+                    break
 
+            # Éviter les répétitions trop proches
             if (current, nxt) in used_bi_grams:
-                break
+                continue
+
             used_bi_grams.add((current, nxt))
             words.append(nxt)
+
+        # Si la phrase est trop courte (moins de 3 mots), on ajoute des mots génériques
+        if len(words) < 3:
+            fallbacks = ["pensée", "philosophie", "concept", "idée", "réflexion"]
+            while len(words) < 5:
+                words.append(random.choice(fallbacks))
 
         # Injection de connecteurs si nécessaire
         words = self._inject_connecteurs(words)
