@@ -68,7 +68,18 @@ def charger_memoire_github(nom_fichier):
         return False
 
 def sauvegarder_memoire_github(nom_fichier, msg="Update"):
-    @st.cache_data(ttl=60)  # cache pendant 60 secondes
+    if not os.path.exists(nom_fichier):
+        return
+    path = f"{FOLDER}/{nom_fichier}"
+    with open(nom_fichier, "r", encoding="utf-8") as f:
+        content = f.read()
+    try:
+        git_file = repo.get_contents(path, ref=BRANCH)
+        repo.update_file(git_file.path, msg, content, git_file.sha, branch=BRANCH)
+    except:
+        repo.create_file(path, msg, content, branch=BRANCH)
+
+@st.cache_data(ttl=60)  # cache pendant 60 secondes
 def lister_fichiers_json_github():
     """Retourne la liste des fichiers .json présents dans le dossier GitHub FOLDER."""
     try:
@@ -78,6 +89,7 @@ def lister_fichiers_json_github():
     except Exception as e:
         st.error(f"Impossible de lister les fichiers GitHub : {e}")
         return []
+
 # =====================================================
 # 🚀 INITIALISATION DE LA SESSION
 # =====================================================
@@ -124,10 +136,14 @@ with tab1:
 # --- ONGLET 2 : NOURRIR (EXTRACTION COMPLÈTE) ---
 with tab2:
     st.subheader("📥 Importer des connaissances")
-    target_db = st.selectbox(
-        "Sélectionner la base de destination",
-        ["oracle_memory.json", "technique.json", "philosophie.json", "projets.json"]
-    )
+
+    # Récupération dynamique de la liste des fichiers JSON
+    fichiers_json = lister_fichiers_json_github()
+    if not fichiers_json:
+        st.warning("Aucun fichier JSON trouvé dans le dossier GitHub. Utilisation de la liste par défaut.")
+        fichiers_json = ["oracle_memory.json", "technique.json", "philosophie.json", "projets.json"]
+
+    target_db = st.selectbox("Sélectionner la base de destination", fichiers_json)
 
     media = st.radio(
         "Format de la source",
