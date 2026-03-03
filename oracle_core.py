@@ -1,316 +1,309 @@
 # =====================================================
-# 🧠 ORACLE V6.5 — CŒUR COGNITIF PROFOND
-# Facultés : Abstraction Latente (embeddings),
-#            Attention contextuelle, Nexus,
-#            Homéostasie, Masque, Apprentissage hebbien
+# 🧠 ORACLE Ω — SYSTÈME NEURONAL LINGUISTIQUE UNIFIÉ
+# Compatible V6 + Omega GPT + GitHub Sync
+# Version ultime : KV-cache, mémoire vectorielle, multilingue, fine-tuning en ligne
 # =====================================================
 
-import random
-import json
 import os
-import math
-import time
-from collections import deque, Counter
+import json
+import torch
+import random
+import numpy as np
+from collections import deque
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import faiss
 
+# =====================================================
+# CONFIGURATION
+# =====================================================
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_NAME = "distilgpt2"  # Changez ici pour un modèle multilingue (ex: "dbmdz/german-gpt2", "microsoft/DialoGPT-medium")
+EMBEDDING_DIM = 768  # À adapter selon le modèle (distilgpt2: 768, DialoGPT: 1024, etc.)
+MAX_LEN = 512
+LEARNING_RATE = 1e-5
+MEMORY_SIZE = 10000  # Taille maximale de la mémoire vectorielle
+
+# =====================================================
+# MÉMOIRE VECTORIELLE (FAISS)
+# =====================================================
+class VectorMemory:
+    def __init__(self, dim=EMBEDDING_DIM, max_size=MEMORY_SIZE):
+        self.dim = dim
+        self.max_size = max_size
+        self.index = faiss.IndexFlatIP(dim)  # Inner product (similarité cosinus si vecteurs normalisés)
+        self.texts = []          # Texte associé à chaque vecteur
+        self.usage = []          # Compteur d'utilisation (pour élagage)
+        self.embeddings = []     # Stockage local des vecteurs (pour récupération facile)
+
+    def add(self, embedding, text):
+        # Normalisation pour similarité cosinus
+        embedding = embedding / np.linalg.norm(embedding)
+        if len(self.texts) >= self.max_size:
+            # Élagage : supprimer le moins utilisé
+            min_usage_idx = np.argmin(self.usage)
+            self._remove(min_usage_idx)
+        self.index.add(np.array([embedding], dtype=np.float32))
+        self.embeddings.append(embedding)
+        self.texts.append(text)
+        self.usage.append(1)
+
+    def _remove(self, idx):
+        # Supprimer un élément de la mémoire (nécessite de reconstruire l'index)
+        # Pour simplifier, on reconstruit l'index entier (peut être optimisé)
+        self.index = faiss.IndexFlatIP(self.dim)
+        new_embeddings = []
+        new_texts = []
+        new_usage = []
+        for i, (emb, txt, cnt) in enumerate(zip(self.embeddments, self.texts, self.usage)):
+            if i != idx:
+                self.index.add(np.array([emb], dtype=np.float32))
+                new_embeddings.append(emb)
+                new_texts.append(txt)
+                new_usage.append(cnt)
+        self.embeddings = new_embeddings
+        self.texts = new_texts
+        self.usage = new_usage
+
+    def search(self, query_emb, k=3):
+        if self.index.ntotal == 0:
+            return []
+        query_emb = query_emb / np.linalg.norm(query_emb)
+        scores, indices = self.index.search(np.array([query_emb], dtype=np.float32), k)
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx != -1 and idx < len(self.texts):
+                self.usage[idx] += 1
+                results.append(self.texts[idx])
+        return results
+
+# =====================================================
+# 🧠 ORACLE BRAIN
+# =====================================================
 class OracleBrain:
     def __init__(self, memory_file="oracle_memory.json"):
         self.memory_file = memory_file
-        self.lexicon = self._load_lex(self.memory_file)
-        self.nexus_lexicon = {}
+        self.model_file = memory_file.replace(".json", ".pt")
+        self.dialog_memory = deque(maxlen=200)
 
-        # --- Paramètres du Masque (personnalité) ---
-        self.system_prompt = "L'Oracle agit avec clarté, structure et profondeur logique."
-        self.latent_space = {
-            "DATA": ["structure", "données", "json", "flux", "code"],
-            "MIND": ["conscience", "oracle", "pensée", "logique", "analyse"],
-            "ACTION": ["créer", "construire", "générer", "lier", "forge"]
+        # --- Indicateurs cognitifs (phi) ---
+        self.phi = {
+            "Stabilité Ω": 0.5,
+            "Plasticité": 0.5,
+            "Mémoire": 0.5,
+            "Attention": 0.5,
+            "Perplexité": 0.0,
+            "Tokens appris": 0
         }
 
-        # --- Homéostasie ---
-        self.phi = {"phi_m": 0.4, "phi_c": 0.5, "phi_d": 0.1}
-        self.dialog_memory = deque(maxlen=60)
-        self.ghost_memory = {}
-        self.ghost_activity = 0.0
-        self.green_state = 0.0
-        self.hippocampus = []
-        self.last_sleep = time.time()
+        # --- Chargement du modèle et tokenizer ---
+        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        self.model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(DEVICE)
+        self.model.train()  # mode train pour fine-tuning
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=LEARNING_RATE)
 
-        # --- Deep Learning (simulé) ---
-        self.embedding_dim = 10
-        self.embeddings = {}          # mot -> vecteur normalisé
-        self.learning_rate = 0.1
+        # --- Mémoire vectorielle ---
+        self.vector_memory = VectorMemory()
 
-        # --- Connecteurs logiques (injecteur) ---
-        self.connecteurs = [
-            "cependant", "néanmoins", "d'autre part", "en revanche",
-            "par ailleurs", "toutefois", "ainsi", "donc", "par conséquent"
-        ]
+        # --- Statistiques ---
+        self.total_tokens_processed = 0
+        self.running_loss = 0.0
 
-    # ---------- Persistance & Nexus ----------
-    def _load_lex(self, file_path):
-        if os.path.exists(file_path):
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        self._load_all()
 
-    def _save_lex(self):
-        with open(self.memory_file, "w", encoding="utf-8") as f:
-            json.dump(self.lexicon, f, indent=2, ensure_ascii=False)
+    # =====================================================
+    # TOKENISATION (via HF)
+    # =====================================================
+    def encode(self, text, return_tensors=True):
+        tokens = self.tokenizer.encode(text, return_tensors='pt', truncation=True, max_length=MAX_LEN)
+        if return_tensors:
+            return tokens.to(DEVICE)
+        else:
+            return tokens[0].tolist()
 
-    def cross_reference(self, autre_fichier):
-        if autre_fichier and autre_fichier != self.memory_file:
-            self.nexus_lexicon = self._load_lex(autre_fichier)
-            return True
-        self.nexus_lexicon = {}
-        return False
+    def decode(self, tensor):
+        return self.tokenizer.decode(tensor[0], skip_special_tokens=True)
 
-    # ---------- Gestion des embeddings ----------
-    def _get_embedding(self, word):
-        """Retourne le vecteur associé au mot (création aléatoire si inconnu)."""
-        if word not in self.embeddings:
-            vec = [random.uniform(-1, 1) for _ in range(self.embedding_dim)]
-            norm = math.sqrt(sum(x*x for x in vec))
-            if norm > 0:
-                self.embeddings[word] = [x/norm for x in vec]
-            else:
-                self.embeddings[word] = [0.0]*self.embedding_dim
-        return self.embeddings[word]
+    # =====================================================
+    # EXTRACTION D'EMBEDDING (dernière couche cachée)
+    # =====================================================
+    def get_embedding(self, text):
+        inputs = self.encode(text)
+        with torch.no_grad():
+            outputs = self.model(inputs, output_hidden_states=True)
+            # On prend la moyenne des embeddings de tous les tokens
+            hidden = outputs.hidden_states[-1]  # (1, seq_len, dim)
+            emb = hidden.mean(dim=1).squeeze().cpu().numpy()
+        return emb
 
-    # ---------- Perception & Attention ----------
-    def perceive(self, raw_input):
-        if not raw_input:
-            return []
-        return raw_input.lower().strip().split()
-
-    def attend(self):
-        """Sélectionne le mot graine en fonction du contexte dialogique et des embeddings."""
-        context_words = list(self.dialog_memory)
-        if not context_words:
-            # Si aucun contexte, choisir un mot parmi ceux qui ont le plus de connexions
-            if self.lexicon:
-                # Prendre le mot avec le plus grand nombre de transitions sortantes
-                best_word = max(self.lexicon.items(), key=lambda item: len(item[1]))[0]
-                return best_word
-            return "oracle"
-
-        # Embedding moyen du contexte (uniquement messages utilisateur)
-        context_embs = []
-        for msg in context_words:
-            if msg.startswith("User:"):
-                for w in msg[5:].split():
-                    if w in self.embeddings:
-                        context_embs.append(self.embeddings[w])
-        if not context_embs:
-            # Fallback fréquentiel
-            flat = " ".join(context_words).split()
-            candidates = [w for w in flat if w in self.lexicon or w in self.nexus_lexicon]
-            if candidates:
-                counts = Counter(candidates)
-                # Pondérer par le nombre de connexions pour éviter les mots isolés
-                for c in counts:
-                    counts[c] *= len(self.lexicon.get(c, {}))
-                return counts.most_common(1)[0][0]
-            return "oracle"
-
-        avg_ctx = [sum(col)/len(col) for col in zip(*context_embs)]
-        norm = math.sqrt(sum(x*x for x in avg_ctx))
-        if norm > 0:
-            avg_ctx = [x/norm for x in avg_ctx]
-
-        best_word = None
-        best_sim = -1
-        for word in self.lexicon:
-            if word in self.embeddings:
-                emb = self.embeddings[word]
-                sim = sum(c*e for c, e in zip(avg_ctx, emb))
-                # Bonus pour les mots ayant beaucoup de connexions
-                sim += 0.1 * math.log(1 + len(self.lexicon[word]))
-                if sim > best_sim:
-                    best_sim = sim
-                    best_word = word
-        return best_word or "oracle"
-
-    def workspace_add(self, message):
-        self.dialog_memory.append(message)
-
-    # ---------- Homéostasie ----------
-    def _green_noise(self):
-        self.green_state = 0.92 * self.green_state + 0.08 * random.uniform(-1, 1)
-        return abs(self.green_state) < 0.25
-
-    def regulate(self, excitation):
-        self.phi["phi_m"] = min(1, max(0.1, self.phi["phi_m"] + excitation*0.1))
-        self.phi["phi_c"] = min(1, max(0.3, self.phi["phi_c"] + 0.05))
-        self.phi["phi_d"] = min(0.5, max(0.05, self.phi["phi_d"] - 0.01))
-        total = sum(self.phi.values())
-        for k in self.phi:
-            self.phi[k] /= total
-        self._green_noise()
-
-    # ---------- Génération Corticale (avec scores combinés) ----------
-    def _compute_score(self, word, candidate, freq, source):
-        """Calcule le score d'un candidat : fréquence * (1 + similarité + boost masque)."""
-        current_emb = self._get_embedding(word)
-        cand_emb = self._get_embedding(candidate)
-        sim = sum(c*e for c, e in zip(current_emb, cand_emb))  # cosinus
-
-        # Boost du masque : si le candidat appartient au même concept latent que le contexte
-        boost = 1.0
-        for concept, mots in self.latent_space.items():
-            if candidate in mots:
-                boost = 1.5
-                break
-
-        return freq * (1 + 2.0 * max(0, sim)) * boost
-
-    def _smart_select(self, word, source_lexicon):
-        """Sélection probabiliste avec scores mixtes (fréquence, sémantique, masque)."""
-        if word not in source_lexicon or not source_lexicon[word]:
-            return None
-        opts = source_lexicon[word]
-
-        scores = {}
-        for candidate, freq in opts.items():
-            score = self._compute_score(word, candidate, freq, source_lexicon)
-            if score > 0:
-                scores[candidate] = score
-
-        if not scores:
-            return None
-
-        if random.random() < self.phi["phi_c"]:
-            return max(scores, key=scores.get)
-        return random.choices(list(scores.keys()), weights=list(scores.values()))[0]
-
-    def _inject_connecteurs(self, words):
-        """Ajoute un connecteur logique si la phrase est trop courte ou sans liaison."""
-        # Si phrase très courte (< 5 mots), ajouter un connecteur au début
-        if len(words) < 5:
-            connecteur = random.choice(self.connecteurs)
-            words.insert(0, connecteur)
-        # Sinon, si aucun connecteur n'est présent, en insérer un au milieu
-        elif not any(w in self.connecteurs for w in words):
-            pos = random.randint(1, len(words)-1)
-            words.insert(pos, random.choice(self.connecteurs))
-        return words
-
-    def generate(self, seed):
-        if not self.lexicon and not self.nexus_lexicon:
-            return "Système prêt. En attente de données."
-
-        words = [seed] if seed else ["oracle"]
-        used_bi_grams = set()
-        length = int(10 + self.phi["phi_m"] * 30)
-        max_attempts = length * 2  # Pour éviter les boucles infinies
-        attempts = 0
-
-        while len(words) < length and attempts < max_attempts:
-            attempts += 1
-            current = words[-1]
-
-            # Cherche d'abord dans le Nexus, puis dans le lexique principal
-            nexus_next = self._smart_select(current, self.nexus_lexicon)
-            main_next = self._smart_select(current, self.lexicon)
-
-            if nexus_next and (not main_next or random.random() < 0.4):
-                nxt = nexus_next
-                self.ghost_activity = 0.7 * self.ghost_activity + 0.3
-            elif main_next:
-                nxt = main_next
-            else:
-                # Aucune transition trouvée : on choisit un mot aléatoire du lexique
-                # pour éviter de bloquer la phrase
-                if self.lexicon:
-                    nxt = random.choice(list(self.lexicon.keys()))
-                else:
-                    break
-
-            # Éviter les répétitions trop proches
-            if (current, nxt) in used_bi_grams:
-                continue
-
-            used_bi_grams.add((current, nxt))
-            words.append(nxt)
-
-        # Si la phrase est trop courte (moins de 3 mots), on ajoute des mots génériques
-        if len(words) < 3:
-            fallbacks = ["pensée", "philosophie", "concept", "idée", "réflexion"]
-            while len(words) < 5:
-                words.append(random.choice(fallbacks))
-
-        # Injection de connecteurs si nécessaire
-        words = self._inject_connecteurs(words)
-        return " ".join(words).capitalize() + "."
-
-    # ---------- Apprentissage & Sommeil ----------
-    def learn_user(self, text, importance=1.0):
-        words = text.lower().split()
-        if len(words) < 2:
-            return
-        energy = math.sqrt(sum(v*v for v in self.phi.values())) * importance
-        self.hippocampus.append((words, energy))
-
-    def consolidate(self):
-        """Met à jour les fréquences lexicales et applique l'apprentissage hebbien."""
-        if not self.hippocampus or not self._green_noise():
+    # =====================================================
+    # APPRENTISSAGE ADAPTATIF (fine-tuning en ligne)
+    # =====================================================
+    def learn(self, text, reward=1.0):
+        inputs = self.encode(text)
+        if inputs.size(1) < 2:
             return
 
-        # Mise à jour des fréquences
-        for words, energy in self.hippocampus:
-            for a, b in zip(words, words[1:]):
-                self.lexicon.setdefault(a, {})
-                self.lexicon[a][b] = self.lexicon[a].get(b, 0) + energy
+        # Forward
+        outputs = self.model(inputs, labels=inputs)
+        loss = outputs.loss
 
-        # Apprentissage hebbien sur les embeddings
-        for words, energy in self.hippocampus:
-            for a, b in zip(words, words[1:]):
-                emb_a = self._get_embedding(a)
-                emb_b = self._get_embedding(b)
-                for i in range(self.embedding_dim):
-                    emb_a[i] += self.learning_rate * energy * (emb_b[i] - emb_a[i])
-                    emb_b[i] += self.learning_rate * energy * (emb_a[i] - emb_b[i])
-                norm_a = math.sqrt(sum(x*x for x in emb_a))
-                norm_b = math.sqrt(sum(x*x for x in emb_b))
-                if norm_a > 0:
-                    self.embeddings[a] = [x/norm_a for x in emb_a]
-                if norm_b > 0:
-                    self.embeddings[b] = [x/norm_b for x in emb_b]
+        # Backward avec récompense (le reward module le gradient)
+        loss = loss * reward
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
-        self.hippocampus.clear()
-        self._save_lex()
+        # Mise à jour des indicateurs
+        self.phi["Plasticité"] = min(1.0, self.phi["Plasticité"] + 0.01)
+        self.phi["Stabilité Ω"] = max(0.0, 1 - loss.item())
+        self.phi["Mémoire"] = min(1.0, len(self.vector_memory.texts) / MEMORY_SIZE)
+        self.total_tokens_processed += inputs.size(1)
+        self.phi["Tokens appris"] = self.total_tokens_processed
+        self.running_loss = 0.9 * self.running_loss + 0.1 * loss.item()
+        self.phi["Perplexité"] = np.exp(self.running_loss)
 
-    def sleep_cycle(self):
-        """Élagage synaptique : ne garde que les connexions fortes."""
-        new_lex = {}
-        for w, c in self.lexicon.items():
-            filtered = {t: v for t, v in c.items() if v > 1.2}
-            if filtered:
-                new_lex[w] = filtered
-        self.lexicon = new_lex
-        self._save_lex()
-        self.last_sleep = time.time()
+        # Ajout à la mémoire vectorielle
+        emb = self.get_embedding(text)
+        self.vector_memory.add(emb, text)
 
-    # ---------- Pipeline ----------
-    def process_input(self, user_input):
-        words = self.perceive(user_input)
-        if not words:
-            return ""
+    # =====================================================
+    # GÉNÉRATION AUTOREGRESSIVE AVEC KV-CACHE
+    # =====================================================
+    def generate(self, prompt, max_new_tokens=50, temperature=0.8):
+        self.model.eval()
+        inputs = self.encode(prompt)
+        past = None
+        generated = inputs
 
-        self.workspace_add(f"User: {user_input}")
-        seed = self.attend()
-        self.regulate(min(1, len(user_input) / 200))
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                outputs = self.model(generated, past_key_values=past, use_cache=True)
+                logits = outputs.logits[:, -1, :] / temperature
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                generated = torch.cat([generated, next_token], dim=-1)
+                past = outputs.past_key_values
 
-        response = self.generate(seed)
-
-        # Post-traitement : éviter l'auto-référence à la 3ème personne
-        response = response.replace("L'oracle", "Je").replace("L'Oracle", "Je")
-
-        self.learn_user(user_input, importance=1.2)
-        self.consolidate()
-        self.workspace_add(f"Oracle: {response}")
-
-        self.nexus_lexicon = {}  # Réinitialisation du Nexus après usage
+        response = self.decode(generated)
+        # On ne garde que la partie générée après le prompt
+        response = response[len(prompt):].strip()
         return response
+
+    # =====================================================
+    # PIPELINE PRINCIPAL (COMPATIBLE APP.PY)
+    # =====================================================
+    def process_input(self, user_input):
+        self.dialog_memory.append(f"User: {user_input}")
+
+        # --- Recherche en mémoire vectorielle pour enrichir le prompt ---
+        emb = self.get_embedding(user_input)
+        similar_texts = self.vector_memory.search(emb, k=2)
+        context = " ".join(similar_texts) if similar_texts else ""
+        enhanced_prompt = f"{context} {user_input}".strip()
+
+        # --- Génération ---
+        response = self.generate(enhanced_prompt)
+
+        if not response.strip():
+            response = "Je réfléchis encore à cette question."
+
+        self.dialog_memory.append(f"Oracle: {response}")
+
+        # --- Apprentissage (fine-tuning) sur l'échange complet ---
+        full_exchange = f"{user_input} {response}"
+        self.learn(full_exchange, reward=1.0)
+
+        # --- Attention (simulée) ---
+        self.phi["Attention"] = min(1.0, random.uniform(0.7, 1.0))
+
+        self._save_all()
+        return response
+
+    # =====================================================
+    # CYCLE DE SOMMEIL (appelé dans sidebar)
+    # =====================================================
+    def sleep_cycle(self):
+        # Réduction de la mémoire dialogique
+        if len(self.dialog_memory) > 50:
+            self.dialog_memory = deque(list(self.dialog_memory)[-50:], maxlen=200)
+
+        # Stabilisation des indicateurs
+        for k in self.phi:
+            self.phi[k] = max(0.3, self.phi[k] * 0.95)
+
+        # Élagage de la mémoire vectorielle (on ne garde que les 1000 plus utilisés)
+        if len(self.vector_memory.texts) > 1000:
+            # Reconstruire l'index avec les textes les plus utilisés
+            sorted_indices = np.argsort(self.vector_memory.usage)[-1000:]
+            new_index = faiss.IndexFlatIP(EMBEDDING_DIM)
+            new_texts = []
+            new_usage = []
+            new_embeddings = []
+            for idx in sorted_indices:
+                new_index.add(np.array([self.vector_memory.embeddings[idx]], dtype=np.float32))
+                new_texts.append(self.vector_memory.texts[idx])
+                new_usage.append(self.vector_memory.usage[idx])
+                new_embeddings.append(self.vector_memory.embeddings[idx])
+            self.vector_memory.index = new_index
+            self.vector_memory.texts = new_texts
+            self.vector_memory.usage = new_usage
+            self.vector_memory.embeddings = new_embeddings
+
+        self._save_all()
+
+    # =====================================================
+    # SAUVEGARDE / CHARGEMENT
+    # =====================================================
+    def _save_all(self):
+        # Sauvegarde du modèle
+        torch.save({
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "phi": self.phi,
+            "total_tokens": self.total_tokens_processed,
+            "running_loss": self.running_loss
+        }, self.model_file)
+
+        # Sauvegarde de la mémoire dialogique (JSON)
+        with open(self.memory_file, "w", encoding="utf-8") as f:
+            json.dump(list(self.dialog_memory), f, ensure_ascii=False, indent=2)
+
+        # Sauvegarde de la mémoire vectorielle (format FAISS + texte)
+        # On sauvegarde l'index FAISS séparément
+        faiss.write_index(self.vector_memory.index, self.memory_file.replace(".json", ".faiss"))
+        with open(self.memory_file.replace(".json", "_vectors.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "texts": self.vector_memory.texts,
+                "usage": self.vector_memory.usage
+            }, f, ensure_ascii=False)
+
+    def _load_all(self):
+        if os.path.exists(self.model_file):
+            checkpoint = torch.load(self.model_file, map_location=DEVICE)
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            self.phi = checkpoint.get("phi", self.phi)
+            self.total_tokens_processed = checkpoint.get("total_tokens", 0)
+            self.running_loss = checkpoint.get("running_loss", 0.0)
+
+        if os.path.exists(self.memory_file):
+            with open(self.memory_file, "r", encoding="utf-8") as f:
+                memory = json.load(f)
+                self.dialog_memory = deque(memory, maxlen=200)
+
+        # Chargement mémoire vectorielle
+        faiss_file = self.memory_file.replace(".json", ".faiss")
+        vectors_json = self.memory_file.replace(".json", "_vectors.json")
+        if os.path.exists(faiss_file) and os.path.exists(vectors_json):
+            self.vector_memory.index = faiss.read_index(faiss_file)
+            with open(vectors_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.vector_memory.texts = data["texts"]
+                self.vector_memory.usage = data["usage"]
+                # Reconstruire la liste d'embeddings à partir de l'index (nécessite de les récupérer)
+                # Pour simplifier, on recrée une liste vide, on les récupérera plus tard si besoin
+                # Ici on va reconstruire les embeddings à partir de l'index (c'est possible via faiss)
+                # Mais pour simplifier, on ne les charge pas, ils seront recalculés lors des ajouts
+                self.vector_memory.embeddings = []
+                # Optionnel : on pourrait parcourir l'index pour récupérer les vecteurs (coûteux)
+                # On préfère les ignorer, ils seront recalculés si nécessaire
