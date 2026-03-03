@@ -1,6 +1,6 @@
 # =====================================================
 # 🧠 ORACLE Ω — SYSTÈME NEURONAL LINGUISTIQUE UNIFIÉ
-# Version stable avec HF Transformers, KV-cache via generate()
+# Version stable avec HF Transformers, FAISS, et sauvegarde complète
 # Compatible avec app.py existant
 # =====================================================
 
@@ -17,13 +17,13 @@ import faiss
 # CONFIGURATION
 # =====================================================
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_NAME = "distilgpt2"  # Modèle léger, peut être changé (ex: "dbmdz/german-gpt2" pour allemand)
+MODEL_NAME = "distilgpt2"  # Modèle léger, peut être changé (ex: "dbmdz/german-gpt2" pour allemand, "asi/gpt-fr-cased-small" pour français)
 EMBEDDING_DIM = 768        # Correspond à distilgpt2, ajustez si vous changez de modèle
 MAX_LEN = 512
 MEMORY_SIZE = 10000        # Taille max de la mémoire vectorielle
 
 # =====================================================
-# MÉMOIRE VECTORIELLE (FAISS)
+# MÉMOIRE VECTORIELLE (FAISS) avec persistance des embeddings
 # =====================================================
 class VectorMemory:
     def __init__(self, dim=EMBEDDING_DIM, max_size=MEMORY_SIZE):
@@ -32,11 +32,15 @@ class VectorMemory:
         self.index = faiss.IndexFlatIP(dim)  # Similarité cosinus (après normalisation)
         self.texts = []
         self.usage = []
-        self.embeddings = []
+        self.embeddings = []  # On garde les vecteurs pour la sauvegarde
 
     def add(self, embedding, text):
         # Normalisation pour la similarité cosinus
-        embedding = embedding / np.linalg.norm(embedding)
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
+        else:
+            embedding = np.zeros(self.dim)
         if len(self.texts) >= self.max_size:
             # Supprimer le moins utilisé
             min_usage_idx = np.argmin(self.usage)
@@ -47,7 +51,7 @@ class VectorMemory:
         self.usage.append(1)
 
     def _remove(self, idx):
-        # Reconstruire l'index (simplifié)
+        # Reconstruire l'index (simplifié, mais préserve les vecteurs)
         new_index = faiss.IndexFlatIP(self.dim)
         new_embeddings = []
         new_texts = []
@@ -66,7 +70,9 @@ class VectorMemory:
     def search(self, query_emb, k=3):
         if self.index.ntotal == 0:
             return []
-        query_emb = query_emb / np.linalg.norm(query_emb)
+        norm = np.linalg.norm(query_emb)
+        if norm > 0:
+            query_emb = query_emb / norm
         scores, indices = self.index.search(np.array([query_emb], dtype=np.float32), k)
         results = []
         for idx in indices[0]:
@@ -75,6 +81,26 @@ class VectorMemory:
                 results.append(self.texts[idx])
         return results
 
+    def save(self, path_prefix):
+        # Sauvegarde de l'index FAISS
+        faiss.write_index(self.index, f"{path_prefix}.faiss")
+        # Sauvegarde des métadonnées et des embeddings
+        with open(f"{path_prefix}_vectors.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "texts": self.texts,
+                "usage": self.usage,
+                "embeddings": [emb.tolist() for emb in self.embeddings]
+            }, f, ensure_ascii=False)
+
+    def load(self, path_prefix):
+        if os.path.exists(f"{path_prefix}.faiss") and os.path.exists(f"{path_prefix}_vectors.json"):
+            self.index = faiss.read_index(f"{path_prefix}.faiss")
+            with open(f"{path_prefix}_vectors.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.texts = data["texts"]
+                self.usage = data["usage"]
+                self.embeddings = [np.array(emb) for emb in data["embeddings"]]
+
 # =====================================================
 # 🧠 ORACLE BRAIN
 # =====================================================
@@ -82,6 +108,7 @@ class OracleBrain:
     def __init__(self, memory_file="oracle_memory.json"):
         self.memory_file = memory_file
         self.model_file = memory_file.replace(".json", ".pt")
+        self.vector_prefix = memory_file.replace(".json", "")  # pour les fichiers FAISS
         self.dialog_memory = deque(maxlen=200)
 
         # Indicateurs cognitifs (affichés dans la sidebar)
@@ -182,9 +209,9 @@ class OracleBrain:
 
     # ---------- Sauvegarde / Chargement ----------
     def _save_all(self):
-        # Modèle
+        # Modèle (seulement l'état, pas nécessaire si on utilise le modèle pré-entraîné)
+        # On sauvegarde les indicateurs et le compteur
         torch.save({
-            "model_state": self.model.state_dict(),
             "phi": self.phi,
             "total_tokens": self.total_tokens_processed
         }, self.model_file)
@@ -193,18 +220,12 @@ class OracleBrain:
         with open(self.memory_file, "w", encoding="utf-8") as f:
             json.dump(list(self.dialog_memory), f, ensure_ascii=False, indent=2)
 
-        # Mémoire vectorielle (FAISS + métadonnées)
-        faiss.write_index(self.vector_memory.index, self.memory_file.replace(".json", ".faiss"))
-        with open(self.memory_file.replace(".json", "_vectors.json"), "w", encoding="utf-8") as f:
-            json.dump({
-                "texts": self.vector_memory.texts,
-                "usage": self.vector_memory.usage
-            }, f, ensure_ascii=False)
+        # Mémoire vectorielle
+        self.vector_memory.save(self.vector_prefix)
 
     def _load_all(self):
         if os.path.exists(self.model_file):
             data = torch.load(self.model_file, map_location=DEVICE)
-            self.model.load_state_dict(data["model_state"])
             self.phi = data.get("phi", self.phi)
             self.total_tokens_processed = data.get("total_tokens", 0)
 
@@ -212,12 +233,4 @@ class OracleBrain:
             with open(self.memory_file, "r", encoding="utf-8") as f:
                 self.dialog_memory = deque(json.load(f), maxlen=200)
 
-        faiss_file = self.memory_file.replace(".json", ".faiss")
-        vec_file = self.memory_file.replace(".json", "_vectors.json")
-        if os.path.exists(faiss_file) and os.path.exists(vec_file):
-            self.vector_memory.index = faiss.read_index(faiss_file)
-            with open(vec_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                self.vector_memory.texts = data["texts"]
-                self.vector_memory.usage = data["usage"]
-                # Les embeddings ne sont pas rechargés pour simplifier, ils seront recalculés si nécessaire
+        self.vector_memory.load(self.vector_prefix)
