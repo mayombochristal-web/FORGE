@@ -1,5 +1,4 @@
 streamlit
-requests
 pandas
 PyPDF2
 python-docx
@@ -7,5 +6,5 @@ SpeechRecognition
 PyGithub
 torch
 transformers
-faiss-cpu  # ou faiss-gpu si GPU disponible
+faiss-cpu
 numpy
