@@ -6,11 +6,11 @@ import speech_recognition as sr
 import json
 import os
 import time
-from github import Github
+from github import Github, Auth
 from oracle_core import OracleBrain
 
 # =====================================================
-# 🔐 CONFIGURATION GITHUB
+# 🔐 CONFIGURATION GITHUB (avec nouvelle syntaxe Auth)
 # =====================================================
 try:
     TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -18,7 +18,9 @@ try:
     FOLDER = st.secrets["GITHUB_MEMORY_DIR"]
     BRANCH = st.secrets["GITHUB_BRANCH"]
 
-    g = Github(TOKEN)
+    # Utilisation de l'authentification par token (supprime le warning)
+    auth = Auth.Token(TOKEN)
+    g = Github(auth=auth)
     repo = g.get_repo(REPO_NAME)
 except Exception as e:
     st.error("⚠️ Configuration GitHub manquante dans les Secrets Streamlit.")
@@ -79,7 +81,7 @@ def sauvegarder_memoire_github(nom_fichier, msg="Update"):
     except:
         repo.create_file(path, msg, content, branch=BRANCH)
 
-@st.cache_data(ttl=60)  # cache pendant 60 secondes
+@st.cache_data(ttl=60)
 def lister_fichiers_json_github():
     """Retourne la liste des fichiers .json présents dans le dossier GitHub FOLDER."""
     try:
@@ -137,7 +139,6 @@ with tab1:
 with tab2:
     st.subheader("📥 Importer des connaissances")
 
-    # Récupération dynamique de la liste des fichiers JSON
     fichiers_json = lister_fichiers_json_github()
     if not fichiers_json:
         st.warning("Aucun fichier JSON trouvé dans le dossier GitHub. Utilisation de la liste par défaut.")
