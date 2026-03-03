@@ -144,8 +144,8 @@ class OracleBrain:
 
     # ---------- Génération Corticale ----------
     def _smart_select(self, word, source_lexicon):
-        """Sélection probabiliste améliorée (Softmax simplifié) intégrant la similarité sémantique."""
-        if word not in source_lexicon:
+        """Sélection probabiliste améliorée intégrant la similarité sémantique."""
+        if word not in source_lexicon or not source_lexicon[word]:
             return None
         opts = source_lexicon[word]
         current_emb = self._get_embedding(word)
@@ -154,8 +154,12 @@ class OracleBrain:
         for candidate, freq in opts.items():
             cand_emb = self._get_embedding(candidate)
             sim = sum(c*e for c, e in zip(current_emb, cand_emb))  # produit scalaire (cosinus car norm=1)
-            # Mélange fréquence + sémantique (alpha = 2.0)
-            scores[candidate] = freq * (1 + 2.0 * max(0, sim))
+            score = freq * (1 + 2.0 * max(0, sim))
+            if score > 0:
+                scores[candidate] = score
+
+        if not scores:
+            return None
 
         if random.random() < self.phi["phi_c"]:
             return max(scores, key=scores.get)
@@ -259,15 +263,3 @@ class OracleBrain:
         
         self.nexus_lexicon = {} 
         return response
-
-
-# --- Petit test rapide (optionnel) ---
-if __name__ == "__main__":
-    brain = OracleBrain()
-    print("Oracle prêt. Tapez 'quit' pour quitter.\n")
-    while True:
-        user = input("Vous : ")
-        if user.lower() in ["quit", "exit"]:
-            break
-        rep = brain.process_input(user)
-        print(f"Oracle : {rep}\n")
