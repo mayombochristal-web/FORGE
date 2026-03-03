@@ -68,17 +68,16 @@ def charger_memoire_github(nom_fichier):
         return False
 
 def sauvegarder_memoire_github(nom_fichier, msg="Update"):
-    if not os.path.exists(nom_fichier):
-        return
-    path = f"{FOLDER}/{nom_fichier}"
-    with open(nom_fichier, "r", encoding="utf-8") as f:
-        content = f.read()
+    @st.cache_data(ttl=60)  # cache pendant 60 secondes
+def lister_fichiers_json_github():
+    """Retourne la liste des fichiers .json présents dans le dossier GitHub FOLDER."""
     try:
-        git_file = repo.get_contents(path, ref=BRANCH)
-        repo.update_file(git_file.path, msg, content, git_file.sha, branch=BRANCH)
-    except:
-        repo.create_file(path, msg, content, branch=BRANCH)
-
+        contents = repo.get_contents(FOLDER, ref=BRANCH)
+        fichiers = [c.name for c in contents if c.name.endswith('.json')]
+        return fichiers
+    except Exception as e:
+        st.error(f"Impossible de lister les fichiers GitHub : {e}")
+        return []
 # =====================================================
 # 🚀 INITIALISATION DE LA SESSION
 # =====================================================
