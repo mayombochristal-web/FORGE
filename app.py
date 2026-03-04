@@ -562,4 +562,89 @@ with tab1:
             st.warning("Aucun contenu à apprendre.")
 
 with tab2:
-    st.subheader("Conversation”
+    st.subheader("Conversation")
+
+    for msg in st.session_state.dialog:
+        st.write(msg)
+
+    user_msg = st.text_input("Votre message", key="user_input")
+    col1, col2 = st.columns([1,5])
+    with col1:
+        send = st.button("Envoyer")
+    if send and user_msg:
+        st.session_state.dialog.append("👤 " + user_msg)
+        excitation = min(1.0, len(user_msg) / 200)
+        st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
+        learn(user_msg, importance=2.0)
+        reply = think()
+        st.session_state.dialog.append("🧠 " + reply)
+
+        st.session_state.last_reply = reply
+        st.session_state.last_reply_words = tokenize(reply)
+
+        st.rerun()
+
+    if "last_reply" in st.session_state:
+        st.markdown("**Cette réponse était-elle pertinente ?**")
+        fb1, fb2 = st.columns(2)
+        with fb1:
+            if st.button("👍 Pertinent"):
+                apply_feedback(st.session_state.last_reply, True)
+                st.success("Feedback enregistré (renforcement).")
+                del st.session_state.last_reply
+                st.rerun()
+        with fb2:
+            if st.button("👎 Non pertinent"):
+                apply_feedback(st.session_state.last_reply, False)
+                st.warning("Feedback enregistré (affaiblissement).")
+                del st.session_state.last_reply
+                st.rerun()
+
+with tab3:
+    st.subheader("Analyse Spectrale d'un Concept")
+    if not SPECTRAL_AVAILABLE:
+        st.error("Analyse spectrale désactivée : installer scipy et matplotlib.")
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT next_word FROM ngrams")
+        words = [row[0] for row in c.fetchall()]
+        conn.close()
+        if words:
+            word = st.selectbox("Choisir un mot", words)
+            nperseg = st.slider("Taille de fenêtre STFT", 64, 512, 256, 32)
+            if st.button("Lancer l'analyse"):
+                with st.spinner("Calcul en cours..."):
+                    signal = np.array([1 if w == word else 0 for w in st.session_state.shadow_cortex.get("timeline", [])])
+                    if len(signal) < nperseg:
+                        st.warning(f"Signal trop court ({len(signal)}). Besoin d'au moins {nperseg} mots.")
+                    else:
+                        fs = 1.0
+                        f, t, Zxx = stft(signal, fs, window='blackmanharris', nperseg=nperseg, noverlap=nperseg//2)
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        ax.pcolormesh(t, f, 20*np.log10(np.abs(Zxx) + 1e-10), shading='gouraud')
+                        ax.set_ylabel('Fréquence [cycles/mot]')
+                        ax.set_xlabel('Temps [mot]')
+                        ax.set_title(f'Spectrogramme du mot "{word}"')
+                        st.pyplot(fig)
+        else:
+            st.info("Aucun mot en mémoire pour l'analyse.")
+
+with tab4:
+    st.subheader("Neuro-imagerie : Carte sémantique 2D")
+    if st.button("Générer la carte"):
+        with st.spinner("Calcul des embeddings et réduction dimensionnelle..."):
+            plot_concepts_2d()
+
+# =========================================================
+# PIED DE PAGE
+# =========================================================
+st.divider()
+conn = sqlite3.connect(DB_PATH)
+c = conn.cursor()
+c.execute("SELECT COUNT(*) FROM ngrams")
+nb_ng = c.fetchone()[0]
+c.execute("SELECT COUNT(DISTINCT next_word) FROM ngrams")
+nb_vocab = c.fetchone()[0]
+conn.close()
+st.caption(f"Mémoire : {nb_ng} n-grammes | {nb_vocab} mots distincts | Φ = {st.session_state.phi}")
