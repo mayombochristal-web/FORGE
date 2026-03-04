@@ -172,9 +172,20 @@ if prompt := st.chat_input("Analysez ce concept..."):
 
 # --- Visualisation (Tableau de bord) ---
 with st.expander("🔍 Analyse des connexions neuronales"):
-    df_lex = []
-    for mot, cibles in brain.lexicon.items():
-        for cible, poids in cibles.items():
-            df_lex.append({"Source": mot, "Cible": cible, "Force": poids})
-    import pandas as pd
-    st.dataframe(pd.DataFrame(df_lex).sort_values(by="Force", ascending=False).head(20), use_container_width=True)
+    # On récupère l'instance depuis la session pour éviter le NameError
+    brain_instance = st.session_state.brain 
+    
+    if brain_instance.lexicon:
+        df_lex = []
+        for mot, cibles in brain_instance.lexicon.items():
+            for cible, poids in cibles.items():
+                df_lex.append({"Source": mot, "Cible": cible, "Force": poids})
+        
+        import pandas as pd
+        df = pd.DataFrame(df_lex)
+        if not df.empty:
+            st.dataframe(df.sort_values(by="Force", ascending=False).head(20), use_container_width=True)
+        else:
+            st.info("Le lexique est encore trop léger pour l'analyse.")
+    else:
+        st.info("L'Oracle n'a pas encore de souvenirs.")
