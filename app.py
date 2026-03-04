@@ -6,7 +6,6 @@ import docx
 import json
 from oracle_core import OracleBrain
 import threading
-import time
 
 # --- CONFIGURATION ---
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
@@ -14,7 +13,7 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 MEM_FILE = "oracle_memory.json"
 
 def github_sync():
-    """Synchronise le fichier mémoire avec GitHub (en arrière-plan)."""
+    """Synchronise le fichier mémoire avec GitHub."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
