@@ -73,6 +73,33 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 BRANCH = "main"
 
 # =========================================================
+# INITIALISATION DES FICHIERS
+# =========================================================
+def init_files():
+    # fragments.csv
+    if not os.path.exists(FILES["fragments"]):
+        pd.DataFrame(columns=["fragment", "count"]).to_csv(FILES["fragments"], index=False)
+    # concepts.csv
+    if not os.path.exists(FILES["concepts"]):
+        pd.DataFrame(columns=["concept", "weight"]).to_csv(FILES["concepts"], index=False)
+    # intentions.csv (optionnel, mais on le crée)
+    if not os.path.exists(FILES["intentions"]):
+        pd.DataFrame(columns=["intent", "count"]).to_csv(FILES["intentions"], index=False)
+    # cortex.json
+    if not os.path.exists(FILES["cortex"]):
+        default_cortex = {
+            "VS": 12,
+            "age": 0,
+            "new_today": 0,
+            "last_day": str(datetime.date.today()),
+            "timeline": []
+        }
+        with open(FILES["cortex"], "w") as f:
+            json.dump(default_cortex, f)
+
+init_files()
+
+# =========================================================
 # INITIALISATION DE LA BASE SQLITE (n-grammes)
 # =========================================================
 def init_db():
