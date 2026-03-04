@@ -38,7 +38,6 @@ except ImportError:
 try:
     from sentence_transformers import SentenceTransformer
     EMBEDDINGS_AVAILABLE = True
-    # Modèle léger pour embeddings de mots (on peut aussi utiliser FastText)
     embed_model = SentenceTransformer('all-MiniLM-L6-v2')
 except ImportError:
     EMBEDDINGS_AVAILABLE = False
@@ -54,13 +53,13 @@ except ImportError:
 # =========================================================
 # CONFIGURATION
 # =========================================================
-st.set_page_config(page_title="ORACLE Ω-TTU V12", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="ORACLE Ω-TTU V13", layout="wide", page_icon="🧠")
 
 MEM_DIR = "oracle_memory"
 os.makedirs(MEM_DIR, exist_ok=True)
 
-# Utilisation de SQLite pour les relations (trigrammes)
 DB_PATH = os.path.join(MEM_DIR, "relations.db")
+MAX_N = 5  # Longueur maximale des n-grammes (contexte de taille MAX_N-1)
 
 FILES = {
     "fragments": f"{MEM_DIR}/fragments.csv",
@@ -74,23 +73,23 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 BRANCH = "main"
 
 # =========================================================
-# INITIALISATION DE LA BASE SQLITE
+# INITIALISATION DE LA BASE SQLITE (n-grammes)
 # =========================================================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Table des trigrammes : (w1, w2) -> w3 avec poids
+    # Supprimer l'ancienne table trigrams si elle existe
+    c.execute("DROP TABLE IF EXISTS trigrams")
+    # Créer la nouvelle table ngrams
     c.execute('''
-        CREATE TABLE IF NOT EXISTS trigrams (
-            w1 TEXT,
-            w2 TEXT,
-            w3 TEXT,
+        CREATE TABLE IF NOT EXISTS ngrams (
+            context TEXT,
+            next_word TEXT,
             weight REAL,
-            PRIMARY KEY (w1, w2, w3)
+            PRIMARY KEY (context, next_word)
         )
     ''')
-    # Index pour accélérer les requêtes
-    c.execute('CREATE INDEX IF NOT EXISTS idx_w1_w2 ON trigrams (w1, w2)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_context ON ngrams (context)')
     conn.commit()
     conn.close()
 
@@ -124,7 +123,6 @@ def sync_shadow():
         st.session_state.shadow_frag = load_frag().copy()
         st.session_state.shadow_concepts = load_concepts().copy()
         st.session_state.shadow_cortex = load_json(FILES["cortex"])
-        # On ne charge pas toutes les relations en mémoire, on utilisera des requêtes SQL
         st.session_state.shadow_loaded = True
 
 sync_shadow()
@@ -172,15 +170,14 @@ def consolidation_gate():
     return abs(st.session_state.green_state) < 0.25
 
 # =========================================================
-# SYNCHRONISATION GITHUB (optionnelle)
+# SYNCHRONISATION GITHUB
 # =========================================================
 def github_sync():
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
-        # On sauvegarde un dump JSON de la base SQLite (version simplifiée)
         conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query("SELECT * FROM trigrams", conn)
+        df = pd.read_sql_query("SELECT * FROM ngrams", conn)
         conn.close()
         data = df.to_dict(orient='records')
         content = base64.b64encode(json.dumps(data).encode()).decode()
@@ -188,14 +185,14 @@ def github_sync():
         headers = {"Authorization": f"token {GITHUB_TOKEN}"}
         r = requests.get(url, headers=headers, timeout=10)
         sha = r.json()["sha"] if r.status_code == 200 else None
-        data = {
+        payload = {
             "message": "🧬 Oracle memory auto-sync",
             "content": content,
             "branch": BRANCH
         }
         if sha:
-            data["sha"] = sha
-        requests.put(url, headers=headers, json=data, timeout=10)
+            payload["sha"] = sha
+        requests.put(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
         st.warning(f"Sync GitHub échoué : {e}")
 
@@ -203,10 +200,9 @@ def github_sync():
 # CYCLE DE SOMMEIL (CONSOLIDATION)
 # =========================================================
 def sleep_cycle():
-    # Nettoyage entropique : on supprime les trigrammes de poids faible
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("DELETE FROM trigrams WHERE weight < 1.2")
+    c.execute("DELETE FROM ngrams WHERE weight < 1.2")
     conn.commit()
     conn.close()
     st.session_state.last_sleep = time.time()
@@ -221,35 +217,11 @@ def tokenize(t):
     return [w for w in clean(t).split() if len(w) > 1]
 
 # =========================================================
-# CALCUL DU IDF (pour pondération TF-IDF)
+# APPRENTISSAGE (n-grammes) avec importance
 # =========================================================
-def compute_idf():
-    df = st.session_state.shadow_frag
-    total_docs = len(df) if len(df) > 0 else 1
-    word_doc_count = {}
-    # Approximation : chaque fragment est un document (chaque ligne de fragments.csv)
-    for idx, row in df.iterrows():
-        words = row['fragment'].split()  # mais ce n'est pas un document complet
-    # On va plutôt utiliser le cortex timeline comme ensemble de documents ?
-    # Simplification : on utilise les bigrammes/trigrammes présents dans la base.
-    # Pour l'instant, on renvoie un dictionnaire vide (pas de TF-IDF).
-    return {}
-
-# =========================================================
-# OBTENIR L'EMBEDDING D'UN MOT (si disponible)
-# =========================================================
-def get_word_embedding(word):
-    if EMBEDDINGS_AVAILABLE:
-        return embed_model.encode(word)
-    else:
-        return None
-
-# =========================================================
-# APPRENTISSAGE (HIPPOCAMPE) avec trigrammes et embeddings
-# =========================================================
-def learn(text):
+def learn(text, importance=1.0):
     words = tokenize(text)
-    if len(words) < 3:  # besoin d'au moins 3 mots pour trigramme
+    if len(words) < 2:  # besoin d'au moins 2 mots pour un bigramme
         return 0
 
     # Mise à jour fragments
@@ -264,20 +236,20 @@ def learn(text):
     save_frag(df)
     st.session_state.shadow_frag = df
 
-    # Mise à jour des trigrammes dans SQLite
+    # Mise à jour des n-grammes dans SQLite
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # On parcourt les séquences de 3 mots
-    for i in range(len(words)-2):
-        a, b, d = words[i], words[i+1], words[i+2]
-        # Incrément du poids (avec Φm)
-        inc = 1.0 + st.session_state.phi["phi_m"]
-        # Vérifier si le triplet existe déjà
-        c.execute('''
-            INSERT INTO trigrams (w1, w2, w3, weight)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(w1, w2, w3) DO UPDATE SET weight = weight + excluded.weight
-        ''', (a, b, d, inc))
+    for n in range(2, MAX_N+1):  # de 2 à MAX_N
+        for i in range(len(words)-n+1):
+            context_words = words[i:i+n-1]
+            next_word = words[i+n-1]
+            context = " ".join(context_words)
+            inc = importance * (1.0 + st.session_state.phi["phi_m"])
+            c.execute('''
+                INSERT INTO ngrams (context, next_word, weight)
+                VALUES (?, ?, ?)
+                ON CONFLICT(context, next_word) DO UPDATE SET weight = weight + excluded.weight
+            ''', (context, next_word, inc))
     conn.commit()
     conn.close()
 
@@ -295,7 +267,6 @@ def learn(text):
     save_json(FILES["cortex"], cortex)
     st.session_state.shadow_cortex = cortex
 
-    # Hippocampe pour consolidation différée (on garde les mots pour renforcement)
     energy = math.sqrt(sum(v*v for v in st.session_state.phi.values()))
     st.session_state.hippocampus.append((words, energy))
     if len(st.session_state.hippocampus) > 5 and consolidation_gate():
@@ -304,19 +275,17 @@ def learn(text):
     return len(words)
 
 def consolidate():
-    """Consolidation depuis l'hippocampe (actuellement inutilisé pour les trigrammes, mais on pourrait renforcer)"""
-    # Ici on pourrait renforcer les trigrammes déjà présents
     st.session_state.hippocampus.clear()
     github_sync()
 
 # =========================================================
-# RECHERCHE DES SUIVANTS POSSIBLES (TRIGRAMMES)
+# RECHERCHE DES SUIVANTS POSSIBLES POUR UN CONTEXTE DONNÉ
 # =========================================================
-def get_next_candidates(w1, w2):
-    """Retourne un dictionnaire {mot3: poids} pour le bigramme (w1, w2)"""
+def get_candidates(context):
+    """Retourne un dictionnaire {mot: poids} pour un contexte exact"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT w3, weight FROM trigrams WHERE w1=? AND w2=?", (w1, w2))
+    c.execute("SELECT next_word, weight FROM ngrams WHERE context=?", (context,))
     rows = c.fetchall()
     conn.close()
     return {row[0]: row[1] for row in rows}
@@ -325,10 +294,6 @@ def get_next_candidates(w1, w2):
 # FONCTIONS D'ANALYSE SPECTRALE (pour l'attention)
 # =========================================================
 def get_spectral_features(word):
-    """
-    Calcule la fréquence dominante et la stabilité de phase pour un mot donné à partir de la timeline.
-    Retourne (freq_dom, phase_stability) où phase_stability est la linéarité de la phase (0-1).
-    """
     if not SPECTRAL_AVAILABLE:
         return 0.0, 0.5
     timeline = st.session_state.shadow_cortex.get("timeline", [])
@@ -340,7 +305,6 @@ def get_spectral_features(word):
     mean_amp = np.mean(np.abs(Zxx), axis=1)
     idx_max = np.argmax(mean_amp[1:]) + 1
     freq_dom = f[idx_max]
-    # Phase à la fréquence dominante
     phase = np.angle(Zxx[idx_max, :])
     phase_unwrapped = np.unwrap(phase)
     if len(t) > 1:
@@ -353,70 +317,61 @@ def get_spectral_features(word):
     return freq_dom, stability
 
 # =========================================================
-# GÉNÉRATION DE PENSÉE AVEC TEMPÉRATURE DYNAMIQUE ET ATTENTION SPECTRALE
+# GÉNÉRATION DE PENSÉE AVEC BACKOFF
 # =========================================================
+def get_best_context(words_list, max_len=MAX_N-1):
+    """Trouve le plus long contexte existant dans la base (backoff)"""
+    for l in range(min(max_len, len(words_list)), 0, -1):
+        context = " ".join(words_list[-l:])
+        cand = get_candidates(context)
+        if cand:
+            return context, cand
+    return None, {}
+
 def contextual_seed():
+    # Cherche un bigramme existant dans la conversation récente
     ctx = " ".join(st.session_state.dialog).split()
-    # On cherche un bigramme connu dans la base
+    for i in range(len(ctx)-1, 0, -1):
+        context = " ".join(ctx[max(0, i-1):i+1])  # bigramme
+        if get_candidates(context):
+            return context.split()  # retourne la liste des mots du contexte
+    # Sinon, prend un contexte aléatoire dans la base
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    for i in range(len(ctx)-1):
-        a, b = ctx[i], ctx[i+1]
-        c.execute("SELECT 1 FROM trigrams WHERE w1=? AND w2=? LIMIT 1", (a, b))
-        if c.fetchone():
-            conn.close()
-            return a, b
-    conn.close()
-    # Sinon on prend un bigramme aléatoire dans la base
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT w1, w2 FROM trigrams ORDER BY RANDOM() LIMIT 1")
+    c.execute("SELECT context FROM ngrams ORDER BY RANDOM() LIMIT 1")
     row = c.fetchone()
     conn.close()
     if row:
-        return row[0], row[1]
-    return None, None
+        return row[0].split()
+    return None
 
 def think():
-    # Récupérer le contexte pour le seed
-    w1, w2 = contextual_seed()
-    if w1 is None:
+    seed_words = contextual_seed()
+    if not seed_words:
         return "Mémoire vide. Nourrissez-moi de textes."
 
-    words = [w1, w2]
+    words = seed_words.copy()
     length = int(10 + st.session_state.phi["phi_m"] * 30)
 
     for _ in range(length):
-        candidates = get_next_candidates(words[-2], words[-1])
+        context, candidates = get_best_context(words)
         if not candidates:
             break
 
-        # Calcul de la température dynamique liée à Φd
         temp = max(0.5, 1.5 * st.session_state.phi["phi_d"])
-
-        # Calcul des scores bruts (poids)
         items = list(candidates.items())
         words_list = [w for w, _ in items]
         weights = np.array([w for _, w in items], dtype=float)
 
-        # Application de l'attention spectrale si disponible
         if SPECTRAL_AVAILABLE:
             for i, w in enumerate(words_list):
                 freq, stab = get_spectral_features(w)
-                # On favorise les mots dont la fréquence dominante est proche de celle du contexte ? (simplification)
-                # Ici on utilise la stabilité comme boost (plus c'est stable, plus on le favorise)
-                weights[i] *= (0.5 + stab)  # stab entre 0 et 1
+                weights[i] *= (0.5 + stab)
 
-        # Normalisation avec température
         weights = weights ** (1.0 / temp)
         probs = weights / weights.sum()
-
-        # Choix du prochain mot
         next_word = np.random.choice(words_list, p=probs)
         words.append(next_word)
-
-        # Mise à jour du bigramme courant
-        w1, w2 = words[-2], words[-1]
 
     return " ".join(words).capitalize() + "."
 
@@ -424,20 +379,20 @@ def think():
 # FEEDBACK UTILISATEUR (ACTIVE LEARNING)
 # =========================================================
 def apply_feedback(reply, is_positive):
-    """
-    reply est la phrase générée (liste de mots). On renforce ou affaiblit les trigrammes utilisés.
-    """
     words = tokenize(reply)
-    if len(words) < 3:
+    if len(words) < 2:
         return
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     delta = 0.5 if is_positive else -0.3
-    for i in range(len(words)-2):
-        a, b, d = words[i], words[i+1], words[i+2]
-        c.execute('''
-            UPDATE trigrams SET weight = weight + ? WHERE w1=? AND w2=? AND w3=?
-        ''', (delta, a, b, d))
+    for n in range(2, min(MAX_N, len(words)+1)):
+        for i in range(len(words)-n+1):
+            context_words = words[i:i+n-1]
+            next_word = words[i+n-1]
+            context = " ".join(context_words)
+            c.execute('''
+                UPDATE ngrams SET weight = weight + ? WHERE context=? AND next_word=?
+            ''', (delta, context, next_word))
     conn.commit()
     conn.close()
 
@@ -475,12 +430,12 @@ def diagnose():
     cortex = st.session_state.shadow_cortex
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM trigrams")
-    nb_trigrams = c.fetchone()[0]
-    c.execute("SELECT COUNT(DISTINCT w1 || w2) FROM trigrams")
-    nb_bigrams = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM ngrams")
+    nb_ngrams = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT context) FROM ngrams")
+    nb_contexts = c.fetchone()[0]
     conn.close()
-    density = round(nb_trigrams / max(nb_bigrams, 1), 2)
+    density = round(nb_ngrams / max(nb_contexts, 1), 2)
 
     if cortex.get("new_today", 0) < 20:
         return "🧠 J'ai besoin de nouvelles connaissances."
@@ -491,17 +446,16 @@ def diagnose():
     return "🧠 Apprentissage actif."
 
 # =========================================================
-# VISUALISATION 2D DES CONCEPTS (T-SNE / PCA)
+# VISUALISATION 2D DES CONCEPTS
 # =========================================================
 def plot_concepts_2d():
     if not VIZ_AVAILABLE or not EMBEDDINGS_AVAILABLE:
         st.warning("Visualisation nécessite scikit-learn, plotly et sentence-transformers.")
         return
 
-    # Récupérer tous les mots distincts de la base
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT DISTINCT w1 FROM trigrams UNION SELECT DISTINCT w2 FROM trigrams UNION SELECT DISTINCT w3 FROM trigrams")
+    c.execute("SELECT DISTINCT next_word FROM ngrams")
     words = [row[0] for row in c.fetchall()]
     conn.close()
 
@@ -509,10 +463,7 @@ def plot_concepts_2d():
         st.info("Pas assez de concepts pour la visualisation.")
         return
 
-    # Calculer les embeddings
     embeddings = embed_model.encode(words)
-
-    # Réduction dimensionnelle (PCA d'abord, puis TSNE pour la visualisation)
     pca = PCA(n_components=min(50, len(embeddings)))
     pca_result = pca.fit_transform(embeddings)
     tsne = TSNE(n_components=2, perplexity=min(30, len(words)-1))
@@ -524,10 +475,21 @@ def plot_concepts_2d():
     st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
+# FONCTION POUR OBTENIR LE NOMBRE DE N-GRAMMES
+# =========================================================
+def get_ngram_count():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM ngrams")
+    count = c.fetchone()[0]
+    conn.close()
+    return count
+
+# =========================================================
 # INTERFACE UTILISATEUR
 # =========================================================
-st.title("🧠 ORACLE Ω-TTU V12 — Agent Cognitif Spectral")
-st.caption("Trigrammes + Embeddings + Température dynamique + Feedback actif")
+st.title("🧠 ORACLE Ω-TTU V13 — n-grammes généralisés")
+st.caption("Contexte variable (jusqu'à 5 mots) + Backoff + Φ dynamique")
 
 # Barre latérale : état cognitif
 with st.sidebar:
@@ -549,15 +511,16 @@ with st.sidebar:
     if st.button("🌙 Cycle de Sommeil"):
         sleep_cycle()
         st.success("Consolidation et entropie réduite.")
-    if st.button("☁️ Sync GitHub"):
-        github_sync()
-        st.success("Mémoire synchronisée.")
-    if st.button("⬇️ Télécharger données (JSON)"):
-        # Export de la base SQLite en CSV
+
+    if st.button("📥 Exporter les n-grammes (CSV)"):
         conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query("SELECT * FROM trigrams", conn)
+        df = pd.read_sql_query("SELECT * FROM ngrams", conn)
         conn.close()
-        st.download_button("trigrams.csv", df.to_csv(index=False), "trigrams.csv")
+        st.download_button("Télécharger ngrams.csv", df.to_csv(index=False), "ngrams.csv")
+
+    if st.button("☁️ Sauvegarder sur GitHub"):
+        github_sync()
+        st.success("Mémoire synchronisée avec GitHub.")
 
     st.divider()
     st.info(diagnose())
@@ -592,99 +555,11 @@ with tab1:
             excitation = min(1.0, len(content) / 200)
             st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
             nb_words = learn(content)
-            st.success(f"Apprentissage effectué ({nb_words} mots).")
+            nb_ng = get_ngram_count()
+            st.success(f"Apprentissage effectué ({nb_words} mots). Nombre de n-grammes maintenant : {nb_ng}.")
             st.rerun()
         else:
             st.warning("Aucun contenu à apprendre.")
 
 with tab2:
-    st.subheader("Conversation")
-
-    # Zone d'affichage des messages
-    for msg in st.session_state.dialog:
-        st.write(msg)
-
-    user_msg = st.text_input("Votre message", key="user_input")
-    col1, col2 = st.columns([1,5])
-    with col1:
-        send = st.button("Envoyer")
-    if send and user_msg:
-        st.session_state.dialog.append("👤 " + user_msg)
-        excitation = min(1.0, len(user_msg) / 200)
-        st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
-        learn(user_msg)
-        reply = think()
-        st.session_state.dialog.append("🧠 " + reply)
-
-        # Stocker la dernière réponse pour le feedback
-        st.session_state.last_reply = reply
-        st.session_state.last_reply_words = tokenize(reply)
-
-        st.rerun()
-
-    # Boutons de feedback (apparaissent après une réponse)
-    if "last_reply" in st.session_state:
-        st.markdown("**Cette réponse était-elle pertinente ?**")
-        fb1, fb2 = st.columns(2)
-        with fb1:
-            if st.button("👍 Pertinent"):
-                apply_feedback(st.session_state.last_reply, True)
-                st.success("Feedback enregistré (renforcement).")
-                del st.session_state.last_reply
-                st.rerun()
-        with fb2:
-            if st.button("👎 Non pertinent"):
-                apply_feedback(st.session_state.last_reply, False)
-                st.warning("Feedback enregistré (affaiblissement).")
-                del st.session_state.last_reply
-                st.rerun()
-
-with tab3:
-    st.subheader("Analyse Spectrale d'un Concept")
-    if not SPECTRAL_AVAILABLE:
-        st.error("Analyse spectrale désactivée : installer scipy et matplotlib.")
-    else:
-        # Récupérer la liste des mots distincts
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT DISTINCT w1 FROM trigrams UNION SELECT DISTINCT w2 FROM trigrams UNION SELECT DISTINCT w3 FROM trigrams")
-        words = [row[0] for row in c.fetchall()]
-        conn.close()
-        if words:
-            word = st.selectbox("Choisir un mot", words)
-            nperseg = st.slider("Taille de fenêtre STFT", 64, 512, 256, 32)
-            if st.button("Lancer l'analyse"):
-                with st.spinner("Calcul en cours..."):
-                    signal = np.array([1 if w == word else 0 for w in st.session_state.shadow_cortex.get("timeline", [])])
-                    if len(signal) < nperseg:
-                        st.warning(f"Signal trop court ({len(signal)}). Besoin d'au moins {nperseg} mots.")
-                    else:
-                        fs = 1.0
-                        f, t, Zxx = stft(signal, fs, window='blackmanharris', nperseg=nperseg, noverlap=nperseg//2)
-                        fig, ax = plt.subplots(figsize=(10, 4))
-                        ax.pcolormesh(t, f, 20*np.log10(np.abs(Zxx) + 1e-10), shading='gouraud')
-                        ax.set_ylabel('Fréquence [cycles/mot]')
-                        ax.set_xlabel('Temps [mot]')
-                        ax.set_title(f'Spectrogramme du mot "{word}"')
-                        st.pyplot(fig)
-        else:
-            st.info("Aucun mot en mémoire pour l'analyse.")
-
-with tab4:
-    st.subheader("Neuro-imagerie : Carte sémantique 2D")
-    if st.button("Générer la carte"):
-        with st.spinner("Calcul des embeddings et réduction dimensionnelle..."):
-            plot_concepts_2d()
-
-# =========================================================
-# PIED DE PAGE
-# =========================================================
-st.divider()
-conn = sqlite3.connect(DB_PATH)
-c = conn.cursor()
-c.execute("SELECT COUNT(*) FROM trigrams")
-nb_tri = c.fetchone()[0]
-c.execute("SELECT COUNT(DISTINCT w1) FROM trigrams")
-nb_vocab = c.fetchone()[0]
-conn.close()
-st.caption(f"Mémoire : {nb_tri} trigrammes | {nb_vocab} mots distincts | Φ = {st.session_state.phi}")
+    st.subheader("Conversation”
