@@ -97,8 +97,11 @@ st.markdown("---")
 # --- INTERFACE DE CONVERSATION ---
 # Affichage de l'historique
 for message in st.session_state.chat:
-    with st.chat_message(message["role"], avatar=message["avatar"]):
-        st.markdown(message["content"])
+    with st.chat_message("assistant", avatar="🧠"):
+    placeholder = st.empty() # On crée un espace vide stable
+    with st.spinner("L'Oracle analyse..."):
+        response = st.session_state.oracle.generate_response(prompt)
+        placeholder.markdown(response) # On remplit l'espace vide une seule fois
 
 # Zone de saisie
 if prompt := st.chat_input("Interroger l'Oracle..."):
