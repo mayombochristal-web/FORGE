@@ -37,28 +37,24 @@ def init_oracle():
 if "oracle" not in st.session_state:
     st.session_state.oracle = init_oracle()
     st.session_state.chat = []          # Historique des messages
-    st.session_state.strict_mode = False # Mode strict par défaut
+    st.session_state.strict_mode = False
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="ORACLE V5.0 Ω", page_icon="🧠", layout="centered")
-st.title("🧠 ORACLE V5.0 Ω — Assistant documentaire")
+st.set_page_config(page_title="ORACLE V5.1 Ω", page_icon="🧠", layout="centered")
+st.title("🧠 ORACLE V5.1 Ω — Assistant documentaire")
 
-# --- SIDEBAR (paramètres utilisateur, sans accès direct à la mémoire) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Paramètres")
     
-    # Nombre de passages récupérés (k)
-    k = st.slider("Nombre de passages analysés", min_value=1, max_value=10, value=4, 
-                  help="Plus de passages apporte plus de contexte, mais peut diluer l'information.")
+    k = st.slider("Nombre de passages analysés", min_value=1, max_value=10, value=4,
+                  help="Plus de passages apporte plus de contexte.")
     
-    # Mode strict
-    st.session_state.strict_mode = st.checkbox("Mode strict (réponse uniquement si documentée)", 
-                                                value=st.session_state.strict_mode,
-                                                help="En mode strict, l'IA refuse de répondre si l'information n'est pas dans les documents.")
+    st.session_state.strict_mode = st.checkbox("Mode strict (réponse uniquement si documentée)",
+                                                value=st.session_state.strict_mode)
     
     st.divider()
     
-    # État interne (lecture seule)
     st.header("🧬 État neuronal")
     for k_, v in st.session_state.oracle.phi.items():
         st.caption(f"{k_.upper()}: {v:.2f}")
@@ -66,19 +62,17 @@ with st.sidebar:
     
     st.divider()
     
-    # Sauvegarde manuelle
     if st.button("💾 Sauvegarder maintenant"):
         st.session_state.oracle.save_all()
         github_sync()
-        st.success("Mémoire sauvegardée et synchronisée.")
+        st.success("Mémoire sauvegardée.")
     
-    # Export de la conversation
     if st.session_state.chat:
         chat_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.chat])
-        st.download_button("📥 Télécharger la conversation", data=chat_text, 
+        st.download_button("📥 Télécharger la conversation", data=chat_text,
                            file_name="oracle_conversation.txt", mime="text/plain")
 
-# --- ZONE D'INJECTION DE DOCUMENTS (expandeur) ---
+# --- INJECTION DE DOCUMENTS ---
 with st.expander("📥 Injecter un document dans la mémoire"):
     uploaded_file = st.file_uploader("Choisir un fichier (PDF, TXT, DOCX)", type=["pdf", "txt", "docx"])
     if uploaded_file is not None:
@@ -95,7 +89,7 @@ with st.expander("📥 Injecter un document dans la mémoire"):
                         text = uploaded_file.read().decode("utf-8", errors="ignore")
                     
                     st.session_state.oracle.add_to_memory(text)
-                    st.success(f"✅ Document assimilé ! Mémoire maintenant composée de {len(st.session_state.oracle.kb_texts)} passages.")
+                    st.success(f"✅ Document assimilé ! Mémoire : {len(st.session_state.oracle.kb_texts)} passages uniques.")
                 except Exception as e:
                     st.error(f"Erreur lors de l'analyse : {e}")
 
@@ -104,52 +98,47 @@ with st.expander("📥 Injecter un document dans la mémoire"):
 for msg in st.session_state.chat:
     with st.chat_message(msg["role"], avatar=msg["avatar"]):
         st.markdown(msg["content"])
-        # Si le message est de l'assistant et contient des sources, on les affiche dans un expandeur
-        if msg["role"] == "assistant" and "sources" in msg:
+        if msg["role"] == "assistant" and "sources" in msg and msg["sources"]:
             with st.expander("📚 Sources consultées"):
                 for i, src in enumerate(msg["sources"]):
                     st.caption(f"**Extrait {i+1}:** {src[:300]}..." if len(src) > 300 else src)
 
 # Champ de saisie
 if prompt := st.chat_input("Posez votre question..."):
-    # Ajout du message utilisateur à l'historique
+    # Ajout du message utilisateur
     st.session_state.chat.append({"role": "user", "content": prompt, "avatar": "👤"})
     with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
     
     # Génération de la réponse
     with st.chat_message("assistant", avatar="🧠"):
-        # Étape 1 : Recherche documentaire
         with st.status("🔍 Recherche dans les documents...", expanded=True) as status:
             context_chunks = st.session_state.oracle.search_memory(prompt, k=k)
             if not context_chunks:
                 st.info("Aucun passage pertinent trouvé dans les documents.")
             status.update(label="✍️ Génération de la réponse...")
             
-            # Étape 2 : Génération
             response, sources = st.session_state.oracle.generate_response(
-                prompt, 
+                prompt,
                 context_chunks=context_chunks,
                 strict_mode=st.session_state.strict_mode
             )
             
-            # Affichage de la réponse
             st.markdown(response)
             
-            # Affichage des sources (dans l'expandeur après le message)
             if sources:
                 with st.expander("📚 Sources consultées"):
                     for i, src in enumerate(sources):
                         st.caption(f"**Extrait {i+1}:** {src[:300]}..." if len(src) > 300 else src)
     
-    # Ajout de la réponse à l'historique (avec les sources)
+    # Sauvegarde dans l'historique
     st.session_state.chat.append({
-        "role": "assistant", 
-        "content": response, 
+        "role": "assistant",
+        "content": response,
         "avatar": "🧠",
         "sources": context_chunks
     })
     
-    # Sauvegarde automatique après chaque interaction
+    # Sauvegarde automatique
     st.session_state.oracle.save_all()
-    github_sync()  # Synchronisation automatique (silencieuse)
+    github_sync()
