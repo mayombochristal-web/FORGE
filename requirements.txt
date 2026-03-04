@@ -1,17 +1,9 @@
-# --- Interface et Web ---
 streamlit
-requests
-
-# --- Intelligence Artificielle et Calcul ---
 torch
-numpy
 transformers
+sentence-transformers
 faiss-cpu
-
-# --- Parsing de fichiers et Data ---
 PyPDF2
 python-docx
-pandas
-
-# --- Audio (Optionnel selon usage) ---
-SpeechRecognition
+requests
+numpy
