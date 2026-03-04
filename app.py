@@ -98,10 +98,11 @@ st.markdown("---")
 # Affichage de l'historique
 for message in st.session_state.chat:
     with st.chat_message("assistant", avatar="🧠"):
-    placeholder = st.empty() # On crée un espace vide stable
-    with st.spinner("L'Oracle analyse..."):
-        response = st.session_state.oracle.generate_response(prompt)
-        placeholder.markdown(response) # On remplit l'espace vide une seule fois
+        placeholder = st.empty()  # <--- Bien indenté (4 espaces)
+        with st.spinner("L'Oracle analyse..."): # <--- Bien indenté (4 espaces)
+            # Tout ce qui suit est indenté de 8 espaces car c'est dans le spinner
+            response = st.session_state.oracle.generate_response(prompt)
+            placeholder.markdown(response)
 
 # Zone de saisie
 if prompt := st.chat_input("Interroger l'Oracle..."):
