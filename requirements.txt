@@ -1,8 +1,7 @@
-streamlit
-pandas
-numpy 
-scipy 
-matplotlib
-PyPDF2
-python-docx
-
+streamlit 
+PyPDF2 
+python-docx 
+pandas 
+openpyxl 
+SpeechRecognition 
+scipy matplotlib
