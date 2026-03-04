@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 import faiss
 import hashlib
+import re
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_NAME = "dbddv01/gpt2-french-small"
@@ -14,10 +15,7 @@ EMBEDDING_DIM = 384
 MAX_CONTEXT_TOKENS = 1024
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
-DEFAULT_TEMPERATURE = 0.5
-REPETITION_PENALTY = 1.8
-TOP_P = 0.9
-MAX_NEW_TOKENS = 250
+MAX_NEW_TOKENS = 150
 
 class OracleBrain:
     def __init__(self, mem_file="oracle_memory.json"):
@@ -56,12 +54,32 @@ class OracleBrain:
         return emb
 
     def evolve_phi(self, excitation):
+        """Met à jour les métaphores en fonction de l'excitation (longueur de la question)."""
         self.phi["phi_m"] = min(0.9, max(0.4, self.phi["phi_m"] + excitation * 0.05))
         self.phi["phi_c"] = min(0.4, max(0.1, self.phi["phi_c"] + 0.01))
         self.phi["phi_d"] = min(0.3, max(0.05, self.phi["phi_d"] - excitation * 0.02))
         s = sum(self.phi.values())
         for k in self.phi:
             self.phi[k] /= s
+
+    def _get_dynamic_params(self):
+        """
+        Calcule les paramètres de génération en fonction des métaphores.
+        - Température : liée à phi_d (bruit). Plus phi_d est faible, moins on veut de bruit.
+          Formule : temp = 0.1 + 0.5 * phi_d   (borne entre 0.1 et 0.6)
+        - repetition_penalty : liée à phi_c (cohérence). Plus phi_c est élevé, plus on pénalise.
+          Formule : rep_penalty = 1.5 + phi_c   (borne entre 1.6 et 1.9)
+        - top_p : lié à phi_m (mémoire). Plus phi_m est élevé, plus on est sélectif (top_p bas).
+          Formule : top_p = 0.9 - 0.2 * phi_m   (borne entre 0.7 et 0.9)
+        """
+        temp = 0.1 + 0.5 * self.phi["phi_d"]
+        rep_penalty = 1.5 + self.phi["phi_c"]
+        top_p = 0.9 - 0.2 * self.phi["phi_m"]
+        # Sécurisation des bornes
+        temp = max(0.1, min(0.8, temp))
+        rep_penalty = max(1.2, min(2.5, rep_penalty))
+        top_p = max(0.6, min(0.95, top_p))
+        return temp, rep_penalty, top_p
 
     def add_to_memory(self, text):
         start = 0
@@ -112,71 +130,64 @@ class OracleBrain:
         if strict_mode and not context_chunks:
             return "Information non trouvée dans les documents.", []
 
+        # Construction du contexte
         max_chars = MAX_CONTEXT_TOKENS * 4
         context = ""
         for chunk in context_chunks:
             if len(context) + len(chunk) < max_chars:
-                context += chunk + "\n---\n"
+                context += chunk + "\n"
             else:
                 break
-        context = context.rstrip("\n---\n")
+        context = context.strip()
 
-        if strict_mode:
-            sys_instruction = (
-                "Tu es un assistant qui répond UNIQUEMENT à partir du contexte fourni. "
-                "Si la réponse ne se trouve pas dans le contexte, réponds exactement : "
-                "'Information non trouvée dans les documents.'"
-            )
+        # Prompt simple
+        if context:
+            prompt = f"Contexte : {context}\n\nQuestion : {user_input}\nRéponse :"
         else:
-            sys_instruction = (
-                "Tu es un assistant documentaire. Réponds de façon précise et concise "
-                "en t'appuyant d'abord sur le contexte. Si le contexte est insuffisant, "
-                "tu peux compléter avec tes connaissances générales, mais reste factuel."
-            )
-
-        prompt = (
-            f"### Instruction :\n{sys_instruction}\n\n"
-            f"### Contexte :\n{context}\n\n"
-            f"### Question :\n{user_input}\n\n"
-            f"### Réponse :\n"
-        )
+            prompt = f"Question : {user_input}\nRéponse :"
 
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_CONTEXT_TOKENS).to(DEVICE)
+
+        # Paramètres dynamiques basés sur les métaphores
+        temp, rep_penalty, top_p = self._get_dynamic_params()
 
         try:
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=MAX_NEW_TOKENS,
-                    temperature=DEFAULT_TEMPERATURE,
+                    temperature=temp,
                     do_sample=True,
-                    top_p=TOP_P,
-                    repetition_penalty=REPETITION_PENALTY,
+                    top_p=top_p,
+                    repetition_penalty=rep_penalty,
                     no_repeat_ngram_size=3,
                     early_stopping=True,
                     pad_token_id=self.tokenizer.eos_token_id
                 )
             full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            if "### Réponse :" in full_response:
-                response = full_response.split("### Réponse :")[-1].strip()
+            if "Réponse :" in full_response:
+                response = full_response.split("Réponse :")[-1].strip()
             else:
                 response = full_response.strip()
             response = self._clean_response(response)
         except Exception as e:
             response = f"Erreur de génération : {str(e)}"
 
+        if not response or len(response) < 5:
+            response = "Je n'ai pas d'information suffisante pour répondre."
+
         self._response_cache[cache_key] = response
         self.evolve_phi(min(1, len(user_input)/400))
         return response, context_chunks
 
     def _clean_response(self, text):
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) > 3:
+            text = ' '.join(sentences[:3]) + '...'
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         if not lines:
             return text
-        cleaned = '\n'.join(lines[:5])
-        if cleaned and cleaned[-1] not in '.!?':
-            cleaned += '...'
-        return cleaned
+        return '\n'.join(lines[:3])
 
     def save_all(self):
         try:
