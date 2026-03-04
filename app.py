@@ -6,16 +6,39 @@ import xml.etree.ElementTree as ET
 from collections import Counter, deque
 import random
 import requests
-import PyPDF2
-import docx
-import speech_recognition as sr
-from scipy.signal import stft
-import matplotlib.pyplot as plt
+
+# =========================================================
+# GESTION DES DÉPENDANCES OPTIONNELLES
+# =========================================================
+try:
+    import PyPDF2
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+try:
+    import docx
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
+try:
+    import speech_recognition as sr
+    SR_AVAILABLE = True
+except ImportError:
+    SR_AVAILABLE = False
+
+try:
+    from scipy.signal import stft
+    import matplotlib.pyplot as plt
+    SPECTRAL_AVAILABLE = True
+except ImportError:
+    SPECTRAL_AVAILABLE = False
 
 # =========================================================
 # CONFIGURATION
 # =========================================================
-st.set_page_config(page_title="ORACLE Ω-TTU V11.0", layout="wide", page_icon="🧠")
+st.set_page_config(page_title="ORACLE Ω-TTU V11.2", layout="wide", page_icon="🧠")
 
 MEM_DIR = "oracle_memory"
 os.makedirs(MEM_DIR, exist_ok=True)
@@ -178,7 +201,7 @@ def tokenize(t):
     return [w for w in clean(t).split() if len(w) > 1]
 
 # =========================================================
-# LECTURE DES FICHIERS UPLOADÉS
+# LECTURE DES FICHIERS UPLOADÉS (MULTIMODAL)
 # =========================================================
 def read_file(file):
     name = file.name.lower()
@@ -189,19 +212,17 @@ def read_file(file):
             return pd.read_csv(file).to_string()
         if name.endswith(".xlsx"):
             return pd.read_excel(file).to_string()
-        if name.endswith(".docx"):
-            doc = zipfile.ZipFile(io.BytesIO(file.read()))
-            xml = doc.read("word/document.xml")
-            tree = ET.fromstring(xml)
-            return " ".join(t.text for t in tree.iter() if t.text)
-        if name.endswith(".pdf"):
-            reader = PyPDF2.PdfReader(file)
+        if name.endswith(".docx") and DOCX_AVAILABLE:
+            doc = docx.Document(io.BytesIO(file.read()))
+            return " ".join(p.text for p in doc.paragraphs)
+        if name.endswith(".pdf") and PDF_AVAILABLE:
+            reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
             return " ".join(p.extract_text() or "" for p in reader.pages)
-        if name.endswith(".wav"):
+        if name.endswith(".wav") and SR_AVAILABLE:
             r = sr.Recognizer()
             with sr.AudioFile(file) as source:
                 audio = r.record(source)
-            return r.recognize_google(audio)
+            return r.recognize_google(audio, language="fr-FR")
     except Exception as e:
         st.error(f"Erreur lecture : {e}")
     return ""
@@ -285,7 +306,7 @@ def associative_layer(word):
         return word
     opts = st.session_state.shadow_rel[word]
     if random.random() < st.session_state.phi["phi_c"]:
-        # Choix probabiliste (bifurcation de Morse-Smale)
+        # Choix probabiliste (bifurcation)
         return random.choices(list(opts.keys()), weights=list(opts.values()))[0]
     else:
         # Chemin le plus probable (cohérence)
@@ -307,7 +328,7 @@ def think():
     return " ".join(words).capitalize() + "."
 
 # =========================================================
-# ANALYSE SPECTRALE
+# ANALYSE SPECTRALE (si disponible)
 # =========================================================
 def build_signal_from_timeline(word):
     cortex = st.session_state.shadow_cortex
@@ -315,13 +336,16 @@ def build_signal_from_timeline(word):
     return np.array([1 if w == word else 0 for w in timeline])
 
 def spectral_analysis(word, nperseg=256):
+    if not SPECTRAL_AVAILABLE:
+        st.error("Les bibliothèques scipy et/ou matplotlib ne sont pas installées.")
+        return None
     signal = build_signal_from_timeline(word)
     if len(signal) < nperseg:
-        return {"error": f"Signal trop court ({len(signal)}). Besoin d'au moins {nperseg} mots."}
+        st.warning(f"Signal trop court ({len(signal)}). Besoin d'au moins {nperseg} mots.")
+        return None
     fs = 1.0
     f, t, Zxx = stft(signal, fs, window='blackmanharris', nperseg=nperseg, noverlap=nperseg//2)
 
-    # Spectrogramme
     fig1, ax1 = plt.subplots(figsize=(10, 4))
     ax1.pcolormesh(t, f, 20*np.log10(np.abs(Zxx) + 1e-10), shading='gouraud')
     ax1.set_ylabel('Fréquence [cycles/mot]')
@@ -384,7 +408,6 @@ def diagnose():
     links = sum(len(v) for v in assoc.values())
     vocab = len(assoc)
     density = round(links / max(vocab, 1), 2)
-    coherence = round(min(100, (links / max(len(st.session_state.shadow_concepts), 1)) * 10), 2)
 
     if cortex.get("new_today", 0) < 20:
         return "🧠 J'ai besoin de nouvelles connaissances."
@@ -392,8 +415,6 @@ def diagnose():
         return "🧠 Donne-moi des textes plus longs."
     if density > 4:
         return "🧠 Mon raisonnement commence à émerger."
-    if coherence > 50:
-        return "🧠 Cohérence sémantique élevée."
     return "🧠 Apprentissage actif."
 
 # =========================================================
@@ -410,7 +431,7 @@ def get_download_data():
 # =========================================================
 # INTERFACE UTILISATEUR
 # =========================================================
-st.title("🧠 ORACLE Ω-TTU V11.0 — Agent Cognitif Spectral")
+st.title("🧠 ORACLE Ω-TTU V11.2 — Agent Cognitif Spectral")
 st.caption("Projection Triadique + Mémoire TST + Analyse Spectrale Temps-Fréquence")
 
 # Barre latérale : état cognitif
@@ -446,65 +467,80 @@ with st.sidebar:
     st.divider()
     st.info(diagnose())
 
-# Zone de dialogue
-chat_container = st.container()
-with chat_container:
-    for msg in st.session_state.dialog:
-        if msg.startswith("👤"):
-            st.markdown(f"**{msg}**")
+# Onglets pour séparer l'apprentissage et la conversation
+tab1, tab2, tab3 = st.tabs(["🌱 Nourrir", "💬 Parler", "📊 Analyse Spectrale"])
+
+with tab1:
+    st.subheader("Apprentissage Multimodal")
+    mode = st.radio("Source", ["Texte", "Document (PDF/DOCX/TXT)", "Excel", "Audio (WAV)"], horizontal=True)
+    content = ""
+    if mode == "Texte":
+        content = st.text_area("Entrez un texte")
+    else:
+        file_types = []
+        if mode == "Document (PDF/DOCX/TXT)":
+            file_types = ["pdf", "docx", "txt"]
+        elif mode == "Excel":
+            file_types = ["xlsx"]
+        elif mode == "Audio (WAV)":
+            file_types = ["wav"]
+        uploaded = st.file_uploader("Charger fichier", type=file_types)
+        if uploaded:
+            content = read_file(uploaded)
+            if content:
+                st.success("Fichier lu avec succès.")
+            else:
+                st.warning("Échec de la lecture (format non supporté ou bibliothèque manquante).")
+
+    if st.button("🌱 Nourrir l'Oracle"):
+        if content:
+            excitation = min(1.0, len(content) / 200)
+            st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
+            learn(content)
+            st.success(f"Apprentissage effectué ({len(tokenize(content))} mots).")
+            st.rerun()
         else:
-            st.markdown(f"🧠 *{msg}*")
+            st.warning("Aucun contenu à apprendre.")
 
-# Saisie utilisateur
-with st.container():
-    st.divider()
-    c1, c2 = st.columns([8, 1])
-    user_input = c1.text_input("Parlez à l'Oracle", placeholder="Saisissez un texte ou posez une question...")
-    send_btn = c2.button("Envoyer")
-
-    uploaded_file = st.file_uploader("📥 Injecter document / audio", type=["txt", "pdf", "docx", "csv", "xlsx", "wav"])
-
-# Traitement de l'entrée
-if send_btn or user_input or uploaded_file:
-    msg = ""
-    if uploaded_file:
-        msg = read_file(uploaded_file)
-    elif user_input:
-        msg = user_input
-
-    if msg:
-        # Excitation
-        excitation = min(1.0, len(msg) / 200)
+with tab2:
+    st.subheader("Conversation")
+    user_msg = st.text_input("Votre message")
+    if st.button("Envoyer") and user_msg:
+        st.session_state.dialog.append("👤 " + user_msg)
+        excitation = min(1.0, len(user_msg) / 200)
         st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
-
-        # Apprentissage
-        st.session_state.dialog.append("👤 " + msg[:200] + ("..." if len(msg) > 200 else ""))
-        learn(msg)
-
-        # Génération de réponse
+        learn(user_msg)
         reply = think()
-        st.session_state.dialog.append(reply)
-
-        # Mise à jour shadow (déjà fait dans learn) et rafraîchissement
+        st.session_state.dialog.append("🧠 " + reply)
         st.rerun()
 
-# Analyse spectrale (optionnel)
-if st.checkbox("📊 Afficher l'analyse spectrale d'un concept"):
-    st.subheader("Analyse Spectrale TST")
-    words = list(st.session_state.shadow_rel.keys())
-    if words:
-        word = st.selectbox("Choisir un mot", words)
-        nperseg = st.slider("Taille de fenêtre STFT", 64, 512, 256, 32)
-        if st.button("Lancer l'analyse"):
-            with st.spinner("Calcul du spectre..."):
-                result = spectral_analysis(word, nperseg)
-                if "error" in result:
-                    st.error(result["error"])
-                else:
-                    st.success("Analyse terminée")
+    # Affichage de la conversation
+    for msg in st.session_state.dialog:
+        st.write(msg)
+
+with tab3:
+    st.subheader("Analyse Spectrale d'un Concept")
+    if not SPECTRAL_AVAILABLE:
+        st.error("Analyse spectrale désactivée : installer scipy et matplotlib.")
+    else:
+        words = list(st.session_state.shadow_rel.keys())
+        if words:
+            word = st.selectbox("Choisir un mot", words)
+            nperseg = st.slider("Taille de fenêtre STFT", 64, 512, 256, 32)
+            if st.button("Lancer l'analyse"):
+                with st.spinner("Calcul en cours..."):
+                    result = spectral_analysis(word, nperseg)
+                if result:
                     st.json(result["results"])
                     fig1, fig2 = result["figures"]
                     st.pyplot(fig1)
                     st.pyplot(fig2)
-    else:
-        st.info("Aucun mot en mémoire pour l'analyse.")
+        else:
+            st.info("Aucun mot en mémoire pour l'analyse.")
+
+# =========================================================
+# PIED DE PAGE (AFFICHAGE DE LA TAILLE DE LA MÉMOIRE)
+# =========================================================
+st.divider()
+mem_size = os.path.getsize(FILES["relations"]) / 1024
+st.caption(f"Mémoire : {mem_size:.2f} Ko | {len(st.session_state.shadow_rel)} concepts")
