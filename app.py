@@ -5,6 +5,8 @@ import PyPDF2
 import docx
 import json
 from oracle_core import OracleBrain
+import threading
+import time
 
 # --- CONFIGURATION ---
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
@@ -12,7 +14,7 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 MEM_FILE = "oracle_memory.json"
 
 def github_sync():
-    """Synchronise le fichier mémoire avec GitHub (si configuré)."""
+    """Synchronise le fichier mémoire avec GitHub (en arrière-plan)."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
@@ -29,6 +31,11 @@ def github_sync():
     except Exception as e:
         st.sidebar.error(f"Erreur GitHub : {e}")
 
+def async_github_sync():
+    """Lance la synchronisation GitHub dans un thread séparé."""
+    thread = threading.Thread(target=github_sync)
+    thread.start()
+
 # --- INITIALISATION DE L'ORACLE (en cache) ---
 @st.cache_resource
 def init_oracle():
@@ -40,8 +47,8 @@ if "oracle" not in st.session_state:
     st.session_state.strict_mode = False
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="ORACLE V5.1 Ω", page_icon="🧠", layout="centered")
-st.title("🧠 ORACLE V5.1 Ω — Assistant documentaire")
+st.set_page_config(page_title="ORACLE V5.2 Ω", page_icon="🧠", layout="centered")
+st.title("🧠 ORACLE V5.2 Ω — Assistant documentaire")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -62,10 +69,16 @@ with st.sidebar:
     
     st.divider()
     
-    if st.button("💾 Sauvegarder maintenant"):
-        st.session_state.oracle.save_all()
-        github_sync()
-        st.success("Mémoire sauvegardée.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Sauvegarder"):
+            st.session_state.oracle.save_all()
+            async_github_sync()
+            st.success("Mémoire sauvegardée (sync en arrière-plan).")
+    with col2:
+        if st.button("🗑️ Effacer chat"):
+            st.session_state.chat = []
+            st.rerun()
     
     if st.session_state.chat:
         chat_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.chat])
@@ -88,8 +101,8 @@ with st.expander("📥 Injecter un document dans la mémoire"):
                     else:  # txt
                         text = uploaded_file.read().decode("utf-8", errors="ignore")
                     
-                    st.session_state.oracle.add_to_memory(text)
-                    st.success(f"✅ Document assimilé ! Mémoire : {len(st.session_state.oracle.kb_texts)} passages uniques.")
+                    added = st.session_state.oracle.add_to_memory(text)
+                    st.success(f"✅ Document assimilé ! {added} nouveaux passages uniques.")
                 except Exception as e:
                     st.error(f"Erreur lors de l'analyse : {e}")
 
@@ -139,6 +152,6 @@ if prompt := st.chat_input("Posez votre question..."):
         "sources": context_chunks
     })
     
-    # Sauvegarde automatique
+    # Sauvegarde automatique asynchrone
     st.session_state.oracle.save_all()
-    github_sync()
+    async_github_sync()
