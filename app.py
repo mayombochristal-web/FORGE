@@ -1,217 +1,384 @@
+
+=====================================================
+
+🧠 ORACLE V4.5 Ω — AGENT COGNITIF COMPLET FINAL
+
+Fusion V2 + V3.1 + V4 + V4.5
+
+=====================================================
+
 import streamlit as st
+import random, json, os, math, time, base64
+import requests
 import pandas as pd
 import PyPDF2
 import docx
 import speech_recognition as sr
-import json
-import os
-import time
-from github import Github, Auth
-from oracle_core import OracleBrain
+from collections import deque, Counter
 
-# =====================================================
-# 🔐 CONFIGURATION GITHUB (avec nouvelle syntaxe Auth)
-# =====================================================
-try:
-    TOKEN = st.secrets["GITHUB_TOKEN"]
-    REPO_NAME = st.secrets["GITHUB_REPO"]
-    FOLDER = st.secrets["GITHUB_MEMORY_DIR"]
-    BRANCH = st.secrets["GITHUB_BRANCH"]
+=====================================================
 
-    # Utilisation de l'authentification par token (supprime le warning)
-    auth = Auth.Token(TOKEN)
-    g = Github(auth=auth)
-    repo = g.get_repo(REPO_NAME)
-except Exception as e:
-    st.error("⚠️ Configuration GitHub manquante dans les Secrets Streamlit.")
-    st.stop()
+CONFIGURATION
 
-# =====================================================
-# 🛠️ FONCTIONS D'EXTRACTION & SYNCHRO
-# =====================================================
+=====================================================
 
-def extract_multimodal(uploaded_file):
-    """Extrait le contenu textuel de divers formats de fichiers."""
-    try:
-        ext = uploaded_file.name.split('.')[-1].lower()
-        if ext == "pdf":
-            reader = PyPDF2.PdfReader(uploaded_file)
-            return " ".join(p.extract_text() or "" for p in reader.pages)
-        elif ext in ["docx", "doc"]:
-            doc = docx.Document(uploaded_file)
-            return " ".join(p.text for p in doc.paragraphs)
-        elif ext in ["xlsx", "xls"]:
-            df = pd.read_excel(uploaded_file)
-            return df.to_string()
-        elif ext == "csv":
-            df = pd.read_csv(uploaded_file)
-            return df.to_string()
-        elif ext == "txt":
-            return uploaded_file.read().decode("utf-8")
-        elif ext in ["wav", "flac"]:
-            r = sr.Recognizer()
-            with sr.AudioFile(uploaded_file) as source:
-                audio = r.record(source)
-            return r.recognize_google(audio, language="fr-FR")
-        return ""
-    except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier : {e}")
-        return ""
+MEM_FILE = "oracle_memory.json"
 
-def charger_memoire_github(nom_fichier):
-    path = f"{FOLDER}/{nom_fichier}"
-    try:
-        content = repo.get_contents(path, ref=BRANCH)
-        data = json.loads(content.decoded_content.decode("utf-8"))
-        with open(nom_fichier, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except:
-        return False
+if not os.path.exists(MEM_FILE):
+json.dump({}, open(MEM_FILE, "w", encoding="utf-8"))
 
-def sauvegarder_memoire_github(nom_fichier, msg="Update"):
-    if not os.path.exists(nom_fichier):
-        return
-    path = f"{FOLDER}/{nom_fichier}"
-    with open(nom_fichier, "r", encoding="utf-8") as f:
-        content = f.read()
-    try:
-        git_file = repo.get_contents(path, ref=BRANCH)
-        repo.update_file(git_file.path, msg, content, git_file.sha, branch=BRANCH)
-    except:
-        repo.create_file(path, msg, content, branch=BRANCH)
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
+BRANCH = "main"
 
-@st.cache_data(ttl=60)
-def lister_fichiers_json_github():
-    """Retourne la liste des fichiers .json présents dans le dossier GitHub FOLDER."""
-    try:
-        contents = repo.get_contents(FOLDER, ref=BRANCH)
-        fichiers = [c.name for c in contents if c.name.endswith('.json')]
-        return fichiers
-    except Exception as e:
-        st.error(f"Impossible de lister les fichiers GitHub : {e}")
-        return []
+=====================================================
 
-# =====================================================
-# 🚀 INITIALISATION DE LA SESSION
-# =====================================================
-st.set_page_config(page_title="ORACLE V6", layout="wide", page_icon="🧠")
+SESSION STATE
 
-if "current_mem" not in st.session_state:
-    st.session_state.current_mem = "oracle_memory.json"
-    charger_memoire_github(st.session_state.current_mem)
-    st.session_state.brain = OracleBrain(st.session_state.current_mem)
+=====================================================
 
-brain = st.session_state.brain
+if "phi" not in st.session_state:
+st.session_state.phi = {"phi_m":0.5,"phi_c":0.5,"phi_d":0.5}
 
-# =====================================================
-# 🎨 INTERFACE UTILISATEUR (ONGLETS)
-# =====================================================
-tab1, tab2, tab3 = st.tabs(["💬 Conversation", "📚 Nourrir (Multimodal)", "🌐 Cloud & Recherche"])
+if "dialog" not in st.session_state:
+st.session_state.dialog = deque(maxlen=60)
 
-# --- ONGLET 1 : CONVERSATION ---
-with tab1:
-    col_h, col_r = st.columns([4, 1])
-    col_h.subheader(f"🧠 Session active : {st.session_state.current_mem}")
+if "hippocampus" not in st.session_state:
+st.session_state.hippocampus = []
 
-    if col_r.button("🔄 Réactiver le fil (Reset)"):
-        brain.dialog_memory.clear()
-        st.rerun()
+if "green_state" not in st.session_state:
+st.session_state.green_state = 0.0
 
-    # Affichage des messages
-    for i, msg in enumerate(brain.dialog_memory):
-        is_oracle = "Oracle:" in msg
-        with st.chat_message("assistant" if is_oracle else "user", avatar="🧠" if is_oracle else "👤"):
-            clean_text = msg.replace("Oracle:", "").replace("User:", "").strip()
-            st.write(clean_text)
-            if is_oracle:
-                st.button("📋 Copier la réponse", key=f"copy_{i}",
-                         on_click=lambda t=clean_text: st.toast(f"Copié : {t[:50]}..."))
+if "last_sleep" not in st.session_state:
+st.session_state.last_sleep = time.time()
 
-    user_msg = st.chat_input("Échangez avec l'Oracle...")
-    if user_msg:
-        with st.spinner("L'Oracle analyse..."):
-            response = brain.process_input(user_msg)
-            sauvegarder_memoire_github(st.session_state.current_mem, f"Échange : {user_msg[:20]}")
-        st.rerun()
+=====================================================
 
-# --- ONGLET 2 : NOURRIR (EXTRACTION COMPLÈTE) ---
-with tab2:
-    st.subheader("📥 Importer des connaissances")
+GREEN NOISE — HOMEOSTASIS
 
-    fichiers_json = lister_fichiers_json_github()
-    if not fichiers_json:
-        st.warning("Aucun fichier JSON trouvé dans le dossier GitHub. Utilisation de la liste par défaut.")
-        fichiers_json = ["oracle_memory.json", "technique.json", "philosophie.json", "projets.json"]
+=====================================================
 
-    target_db = st.selectbox("Sélectionner la base de destination", fichiers_json)
+def green_noise(prev):
+return 0.92 * prev + 0.08 * random.uniform(-1,1)
 
-    media = st.radio(
-        "Format de la source",
-        ["Document (PDF, Word, Excel, CSV, TXT)", "Audio (WAV, FLAC)", "Saisie Manuelle"]
-    )
+def consolidation_gate():
+st.session_state.green_state = green_noise(
+st.session_state.green_state
+)
+return abs(st.session_state.green_state) < 0.25
 
-    input_data = ""
-    if media == "Saisie Manuelle":
-        input_data = st.text_area("Collez votre texte ici")
-    elif media == "Audio (WAV, FLAC)":
-        f = st.file_uploader("Fichier Audio", type=["wav", "flac"])
-        if f:
-            input_data = extract_multimodal(f)
-    else:
-        f = st.file_uploader("Fichier Document", type=["pdf", "docx", "xlsx", "xls", "csv", "txt"])
-        if f:
-            input_data = extract_multimodal(f)
+=====================================================
 
-    if st.button("🧠 Assimiler & Synchroniser"):
-        if input_data:
-            with st.spinner("Assimilation en cours..."):
-                charger_memoire_github(target_db)
-                temp_brain = OracleBrain(target_db)
-                temp_brain.process_input(input_data)
-                sauvegarder_memoire_github(target_db, "Assimilation automatique")
-                st.success(f"Données intégrées avec succès dans {target_db} !")
-        else:
-            st.warning("Veuillez fournir un contenu.")
+MEMORY
 
-# --- ONGLET 3 : CLOUD & RECHERCHE ---
-with tab3:
-    st.subheader("📂 Gestionnaire de Mémoires Cloud")
+=====================================================
 
-    search_query = st.text_input("🔍 Rechercher un fichier mémoire (ex: 'technique', '2024'...)")
+def load_memory():
+with open(MEM_FILE,"r",encoding="utf-8") as f:
+return json.load(f)
 
-    try:
-        all_items = repo.get_contents(FOLDER, ref=BRANCH)
-        filtered_items = [i for i in all_items if search_query.lower() in i.name.lower()]
+def save_memory(M):
+with open(MEM_FILE,"w",encoding="utf-8") as f:
+json.dump(M,f,indent=2,ensure_ascii=False)
 
-        if not filtered_items:
-            st.info("Aucun fichier ne correspond à votre recherche.")
+=====================================================
 
-        for item in filtered_items:
-            c1, c2, c3 = st.columns([3, 1, 1])
-            c1.write(f"📄 `{item.name}`")
-            if c2.button("Charger", key=f"load_{item.name}"):
-                st.session_state.current_mem = item.name
-                charger_memoire_github(item.name)
-                st.session_state.brain = OracleBrain(item.name)
-                st.rerun()
-            if c3.button("🗑️", key=f"del_{item.name}", help="Supprimer du Cloud"):
-                repo.delete_file(item.path, f"Suppression de {item.name}", item.sha, branch=BRANCH)
-                st.rerun()
-    except Exception as e:
-        st.error(f"Accès au dépôt GitHub impossible : {e}")
+GITHUB AUTO SYNC
 
-# --- SIDEBAR ---
+=====================================================
+
+def github_sync():
+
+try:  
+    with open(MEM_FILE,"rb") as f:  
+        content = base64.b64encode(f.read()).decode()  
+
+    url=f"https://api.github.com/repos/{GITHUB_REPO}/contents/{MEM_FILE}"  
+    headers={"Authorization":f"token {GITHUB_TOKEN}"}  
+
+    r=requests.get(url,headers=headers,timeout=10)  
+    sha=r.json()["sha"] if r.status_code==200 else None  
+
+    data={  
+        "message":"🧬 Oracle memory auto-sync",  
+        "content":content,  
+        "branch":BRANCH  
+    }  
+
+    if sha:  
+        data["sha"]=sha  
+
+    requests.put(url,headers=headers,json=data,timeout=10)  
+
+except Exception as e:  
+    st.warning(f"Sync GitHub échoué : {e}")
+
+=====================================================
+
+Φ ENGINE
+
+=====================================================
+
+def evolve_phi(phi,exc):
+
+phi["phi_m"]=min(1,max(0.1,phi["phi_m"]+exc*0.15-0.01))  
+phi["phi_c"]=min(1,max(0.1,phi["phi_c"]+exc*0.3-0.03))  
+phi["phi_d"]=min(1,max(0.1,phi["phi_d"]+0.02-exc*0.05))  
+
+s=sum(phi.values())  
+for k in phi:  
+    phi[k]/=s  
+
+return phi
+
+=====================================================
+
+HIPPOCAMPUS LEARNING
+
+=====================================================
+
+def learn(text,phi):
+
+words=text.lower().split()  
+if len(words)<2:  
+    return  
+
+energy=math.sqrt(sum(v*v for v in phi.values()))  
+st.session_state.hippocampus.append((words,energy))  
+
+if len(st.session_state.hippocampus)>5 and consolidation_gate():  
+    consolidate()
+
+def consolidate():
+
+M=load_memory()  
+
+for words,energy in st.session_state.hippocampus:  
+    for a,b in zip(words,words[1:]):  
+        M.setdefault(a,{})  
+        M[a][b]=M[a].get(b,0)+energy  
+
+save_memory(M)  
+st.session_state.hippocampus.clear()  
+
+github_sync()
+
+=====================================================
+
+SLEEP CYCLE
+
+=====================================================
+
+def sleep_cycle():
+
+M=load_memory()  
+new={}  
+
+for w,con in M.items():  
+    filt={t:v*0.997 for t,v in con.items() if v>1.2}  
+    if filt:  
+        new[w]=filt  
+
+save_memory(new)  
+st.session_state.last_sleep=time.time()
+
+=====================================================
+
+CORTEX
+
+=====================================================
+
+def contextual_seed(M):
+
+ctx=" ".join(st.session_state.dialog).split()  
+valid=[w for w in ctx if w in M]  
+
+if valid:  
+    return Counter(valid).most_common(1)[0][0]  
+
+return random.choice(list(M.keys()))
+
+def associative_layer(word,M,phi):
+
+if word not in M:  
+    return word  
+
+opts=M[word]  
+
+if random.random()<phi["phi_c"]:  
+    return random.choices(  
+        list(opts.keys()),  
+        weights=list(opts.values())  
+    )[0]  
+
+return max(opts,key=opts.get)
+
+def oracle_reply():
+
+M=load_memory()  
+if not M:  
+    return "Mémoire vide."  
+
+seed=contextual_seed(M)  
+words=[seed]  
+
+length=int(10+st.session_state.phi["phi_m"]*30)  
+
+for _ in range(length):  
+    nxt=associative_layer(words[-1],M,st.session_state.phi)  
+    words.append(nxt)  
+
+return " ".join(words).capitalize()+"."
+
+=====================================================
+
+FILE READING
+
+=====================================================
+
+def read_file(upload):
+
+try:  
+    if upload.type=="application/pdf":  
+        reader=PyPDF2.PdfReader(upload)  
+        return " ".join(p.extract_text() or "" for p in reader.pages)  
+
+    if upload.type=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":  
+        d=docx.Document(upload)  
+        return " ".join(p.text for p in d.paragraphs)  
+
+    if upload.type=="text/plain":  
+        return upload.read().decode("utf-8",errors="ignore")  
+
+    if upload.type=="text/csv":  
+        return pd.read_csv(upload).to_string()  
+
+except Exception as e:  
+    st.error(f"Erreur lecture fichier : {e}")  
+
+return ""
+
+=====================================================
+
+AUDIO INPUT
+
+=====================================================
+
+def speech_to_text(audio):
+
+try:  
+    r=sr.Recognizer()  
+    with sr.AudioFile(audio) as source:  
+        data=r.record(source)  
+    return r.recognize_google(data)  
+except:  
+    return ""
+
+=====================================================
+
+UI
+
+=====================================================
+
+st.set_page_config(page_title="ORACLE V4.5 Ω",page_icon="🧠")
+st.title("🧠 ORACLE V4.5 Ω — Agent Cognitif Total")
+
+msg_input=st.text_input("Parlez à l'Oracle")
+
+file=st.file_uploader(
+"Insérer fichier / audio",
+type=["pdf","docx","txt","csv","wav"]
+)
+
+=====================================================
+
+PIPELINE COGNITIF
+
+=====================================================
+
+if st.button("Envoyer"):
+
+progress=st.progress(0,text="🧠 Activation corticale...")  
+status=st.empty()  
+
+msg=""  
+
+# PHASE 1 — INPUT  
+if file:  
+    status.info("📂 Lecture du fichier...")  
+    progress.progress(20)  
+
+    if file.type=="audio/wav":  
+        msg=speech_to_text(file)  
+    else:  
+        msg=read_file(file)  
+else:  
+    msg=msg_input  
+
+progress.progress(40)  
+
+# PHASE 2 — ANALYSE  
+status.info("🔎 Analyse cognitive...")  
+time.sleep(0.2)  
+progress.progress(60)  
+
+# PHASE 3 — LEARNING  
+if msg:  
+    st.session_state.dialog.append(msg)  
+
+    excitation=min(1,len(msg)/200)  
+    st.session_state.phi=evolve_phi(  
+        st.session_state.phi,excitation  
+    )  
+
+    learn(msg,st.session_state.phi)  
+
+progress.progress(75)  
+
+# PHASE 4 — RESPONSE  
+status.info("💭 Génération pensée...")  
+reply=oracle_reply()  
+st.session_state.dialog.append(reply)  
+
+progress.progress(90)  
+
+# PHASE 5 — SYNC  
+status.info("☁️ Synchronisation mémoire...")  
+github_sync()  
+
+progress.progress(100)  
+status.success("✅ Oracle mis à jour")  
+time.sleep(1)  
+progress.empty()
+
+=====================================================
+
+CONVERSATION DISPLAY
+
+=====================================================
+
+for m in st.session_state.dialog:
+st.write(m)
+
+=====================================================
+
+SIDEBAR
+
+=====================================================
+
 with st.sidebar:
-    st.header("📊 État de l'Oracle")
-    st.write(f"Base : **{st.session_state.current_mem}**")
 
-    for k, v in brain.phi.items():
-        st.progress(v, text=f"{k} : {v:.2f}")
+st.header("🧠 État Cognitif")  
 
-    st.divider()
-    if st.button("🌙 Sommeil Profond"):
-        brain.sleep_cycle()
-        sauvegarder_memoire_github(st.session_state.current_mem, "Cycle de sommeil")
-        st.success("Mémoire nettoyée.")
-        st.rerun()
+for k,v in st.session_state.phi.items():  
+    st.progress(v,text=f"{k}:{v:.2f}")  
+
+if st.button("🌙 Sommeil forcé"):  
+    sleep_cycle()  
+    st.success("Consolidation terminée")  
+
+if st.button("🧬 Sync GitHub"):  
+    github_sync()  
+    st.success("Mémoire synchronisée")
+
+Ne change ni les fonctionnalités ni la structure du code mais implémente le fantôme et les atouts de v5 voir v5.5 mais garde tout ajoute juste des qualités au bon endroit
