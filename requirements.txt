@@ -6,3 +6,6 @@ openpyxl
 SpeechRecognition 
 scipy
 matplotlib
+scikit-learn
+plotly
+sentence-transformers.
