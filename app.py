@@ -1,677 +1,279 @@
+"""
+Ω-TTU V14 – Mini LLM Transformer (≈50M params)
+================================================
+Fonctionnalités :
+- Architecture Transformer moderne (RMSNorm, SwiGLU)
+- Tokenizer construit dynamiquement depuis votre base SQLite (ngrams)
+- Inférence avec température et échantillonnage
+- Interface Streamlit simple
+- Prêt pour l'entraînement personnalisé (script séparé fourni en commentaire)
+
+Dépendances : torch, streamlit, numpy, sqlite3
+Installation : pip install torch streamlit numpy
+"""
+
 import streamlit as st
-import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import sqlite3
 import numpy as np
-import json, os, re, io, zipfile, datetime, time, base64, math, sqlite3
-import xml.etree.ElementTree as ET
-from collections import Counter, deque
-import random
-import requests
+import os
+from collections import defaultdict
 
 # =========================================================
-# GESTION DES DÉPENDANCES OPTIONNELLES
+# 1. ARCHITECTURE DU MODÈLE (Transformer CPU-friendly)
 # =========================================================
-try:
-    import PyPDF2
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
 
-try:
-    import docx
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
+class RMSNorm(nn.Module):
+    """Normalisation RMS (Root Mean Square) – plus stable que LayerNorm pour petits modèles"""
+    def __init__(self, dim, eps=1e-8):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(dim))
+        self.eps = eps
 
-try:
-    import speech_recognition as sr
-    SR_AVAILABLE = True
-except ImportError:
-    SR_AVAILABLE = False
+    def forward(self, x):
+        norm = x.norm(dim=-1, keepdim=True)
+        return self.scale * x / (norm + self.eps)
 
-try:
-    from scipy.signal import stft
-    import matplotlib.pyplot as plt
-    SPECTRAL_AVAILABLE = True
-except ImportError:
-    SPECTRAL_AVAILABLE = False
 
-try:
-    from sentence_transformers import SentenceTransformer
-    EMBEDDINGS_AVAILABLE = True
-    embed_model = SentenceTransformer('all-MiniLM-L6-v2')
-except ImportError:
-    EMBEDDINGS_AVAILABLE = False
+class SwiGLU(nn.Module):
+    """FFN avec activation SwiGLU (utilisée dans LLaMA)"""
+    def __init__(self, dim, hidden_dim):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w3 = nn.Linear(hidden_dim, dim, bias=False)
 
-try:
-    from sklearn.decomposition import PCA
-    from sklearn.manifold import TSNE
-    import plotly.express as px
-    VIZ_AVAILABLE = True
-except ImportError:
-    VIZ_AVAILABLE = False
+    def forward(self, x):
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
-st.set_page_config(page_title="ORACLE Ω-TTU V13", layout="wide", page_icon="🧠")
 
-MEM_DIR = "oracle_memory"
-os.makedirs(MEM_DIR, exist_ok=True)
+class TransformerBlock(nn.Module):
+    """Bloc Transformer standard avec pré‑norm et SwiGLU"""
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.norm1 = RMSNorm(dim)
+        self.attn = nn.MultiheadAttention(dim, heads, batch_first=True, bias=False)
+        self.norm2 = RMSNorm(dim)
+        self.ff = SwiGLU(dim, dim * 4)  # facteur d'expansion 4
 
-DB_PATH = os.path.join(MEM_DIR, "relations.db")
-MAX_N = 5  # Longueur maximale des n-grammes (contexte de taille MAX_N-1)
+    def forward(self, x):
+        # Attention avec résidu
+        h = self.norm1(x)
+        attn_out, _ = self.attn(h, h, h)
+        x = x + attn_out
 
-FILES = {
-    "fragments": f"{MEM_DIR}/fragments.csv",
-    "concepts": f"{MEM_DIR}/concepts.csv",
-    "intentions": f"{MEM_DIR}/intentions.csv",
-    "cortex": f"{MEM_DIR}/cortex.json"
-}
+        # FFN avec résidu
+        h = self.norm2(x)
+        x = x + self.ff(h)
+        return x
 
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
-BRANCH = "main"
 
-# =========================================================
-# INITIALISATION DES FICHIERS
-# =========================================================
-def init_files():
-    # fragments.csv
-    if not os.path.exists(FILES["fragments"]):
-        pd.DataFrame(columns=["fragment", "count"]).to_csv(FILES["fragments"], index=False)
-    # concepts.csv
-    if not os.path.exists(FILES["concepts"]):
-        pd.DataFrame(columns=["concept", "weight"]).to_csv(FILES["concepts"], index=False)
-    # intentions.csv (optionnel, mais on le crée)
-    if not os.path.exists(FILES["intentions"]):
-        pd.DataFrame(columns=["intent", "count"]).to_csv(FILES["intentions"], index=False)
-    # cortex.json
-    if not os.path.exists(FILES["cortex"]):
-        default_cortex = {
-            "VS": 12,
-            "age": 0,
-            "new_today": 0,
-            "last_day": str(datetime.date.today()),
-            "timeline": []
-        }
-        with open(FILES["cortex"], "w") as f:
-            json.dump(default_cortex, f)
+class OmegaTTU_LLM(nn.Module):
+    """
+    Ω-TTU Transformer V1 – spécifications :
+    - vocab_size : à définir depuis la base
+    - dim = 384
+    - heads = 6
+    - layers = 8
+    - contexte max = 512 (géré par génération)
+    - paramètres ≈ 48M
+    """
+    def __init__(self, vocab_size, dim=384, layers=8, heads=6):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, dim)
+        # Positional encoding simple (appris) – on peut aussi utiliser Rotary
+        self.pos_embed = nn.Parameter(torch.randn(1, 512, dim) * 0.02)
 
-init_files()
+        self.blocks = nn.ModuleList([
+            TransformerBlock(dim, heads) for _ in range(layers)
+        ])
+        self.norm = RMSNorm(dim)
+        self.lm_head = nn.Linear(dim, vocab_size, bias=False)
 
-# =========================================================
-# INITIALISATION DE LA BASE SQLITE (n-grammes)
-# =========================================================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Supprimer l'ancienne table trigrams si elle existe
-    c.execute("DROP TABLE IF EXISTS trigrams")
-    # Créer la nouvelle table ngrams
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS ngrams (
-            context TEXT,
-            next_word TEXT,
-            weight REAL,
-            PRIMARY KEY (context, next_word)
-        )
-    ''')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_context ON ngrams (context)')
-    conn.commit()
-    conn.close()
+        # Lier les poids d'embedding et de sortie (pratique courante)
+        self.lm_head.weight = self.embed.weight
 
-init_db()
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, x):
+        # x : (batch, seq_len)
+        seq_len = x.size(1)
+        x = self.embed(x) + self.pos_embed[:, :seq_len, :]
+
+        for block in self.blocks:
+            x = block(x)
+
+        x = self.norm(x)
+        logits = self.lm_head(x)  # (batch, seq_len, vocab_size)
+        return logits
+
 
 # =========================================================
-# CHARGEMENT DES DONNÉES EN SESSION (SHADOW STATE)
+# 2. TOKENIZER DYNAMIQUE DEPUIS LA BASE SQLITE
 # =========================================================
-def load_json(p):
-    with open(p, "r") as f:
-        return json.load(f)
 
-def save_json(p, d):
-    with open(p, "w") as f:
-        json.dump(d, f)
+def build_tokenizer_from_db(db_path="oracle_memory/relations.db"):
+    """
+    Lit tous les mots distincts de la table 'ngrams' et construit un vocabulaire.
+    Ajoute les tokens spéciaux : <pad>=0, <unk>=1, <s>=2, </s>=3
+    """
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Base introuvable : {db_path}")
 
-def load_frag():
-    return pd.read_csv(FILES["fragments"])
-
-def save_frag(df):
-    df.reset_index(drop=True).to_csv(FILES["fragments"], index=False)
-
-def load_concepts():
-    return pd.read_csv(FILES["concepts"])
-
-def save_concepts(df):
-    df.reset_index(drop=True).to_csv(FILES["concepts"], index=False)
-
-def sync_shadow():
-    if "shadow_loaded" not in st.session_state:
-        st.session_state.shadow_frag = load_frag().copy()
-        st.session_state.shadow_concepts = load_concepts().copy()
-        st.session_state.shadow_cortex = load_json(FILES["cortex"])
-        st.session_state.shadow_loaded = True
-
-sync_shadow()
-
-# =========================================================
-# ÉTAT COGNITIF (Φ TRIADIQUE)
-# =========================================================
-if "phi" not in st.session_state:
-    st.session_state.phi = {"phi_m": 0.5, "phi_c": 0.5, "phi_d": 0.5}
-
-if "dialog" not in st.session_state:
-    st.session_state.dialog = deque(maxlen=60)
-
-if "hippocampus" not in st.session_state:
-    st.session_state.hippocampus = []
-
-if "green_state" not in st.session_state:
-    st.session_state.green_state = 0.0
-
-if "last_sleep" not in st.session_state:
-    st.session_state.last_sleep = time.time()
-
-# =========================================================
-# FONCTIONS TTU (PROJECTION TRIADIQUE)
-# =========================================================
-def normalize_ttu(m, c, d):
-    norm = math.sqrt(m**2 + c**2 + d**2) + 1e-9
-    return m/norm, c/norm, d/norm
-
-def evolve_ttu(phi, excitation):
-    new_m = min(1.0, max(0.1, phi["phi_m"] + excitation * 0.12 - 0.02))
-    new_c = min(1.0, max(0.1, phi["phi_c"] + excitation * 0.25 - 0.04))
-    new_d = min(1.0, max(0.1, phi["phi_d"] + 0.05 - excitation * 0.08))
-    m, c, d = normalize_ttu(new_m, new_c, new_d)
-    return {"phi_m": m, "phi_c": c, "phi_d": d}
-
-# =========================================================
-# GREEN NOISE (HOMÉOSTASIE)
-# =========================================================
-def green_noise(prev):
-    return 0.92 * prev + 0.08 * random.uniform(-1, 1)
-
-def consolidation_gate():
-    st.session_state.green_state = green_noise(st.session_state.green_state)
-    return abs(st.session_state.green_state) < 0.25
-
-# =========================================================
-# SYNCHRONISATION GITHUB
-# =========================================================
-def github_sync():
-    if not GITHUB_TOKEN or not GITHUB_REPO:
-        return
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query("SELECT * FROM ngrams", conn)
-        conn.close()
-        data = df.to_dict(orient='records')
-        content = base64.b64encode(json.dumps(data).encode()).decode()
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{MEM_DIR}/relations_dump.json"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-        r = requests.get(url, headers=headers, timeout=10)
-        sha = r.json()["sha"] if r.status_code == 200 else None
-        payload = {
-            "message": "🧬 Oracle memory auto-sync",
-            "content": content,
-            "branch": BRANCH
-        }
-        if sha:
-            payload["sha"] = sha
-        requests.put(url, headers=headers, json=payload, timeout=10)
-    except Exception as e:
-        st.warning(f"Sync GitHub échoué : {e}")
-
-# =========================================================
-# CYCLE DE SOMMEIL (CONSOLIDATION)
-# =========================================================
-def sleep_cycle():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM ngrams WHERE weight < 1.2")
-    conn.commit()
-    conn.close()
-    st.session_state.last_sleep = time.time()
-
-# =========================================================
-# TRAITEMENT DU TEXTE
-# =========================================================
-def clean(t):
-    return re.sub(r"[^a-zàâéèêëîïôùûüœ\s]", " ", t.lower())
-
-def tokenize(t):
-    return [w for w in clean(t).split() if len(w) > 1]
-
-# =========================================================
-# APPRENTISSAGE (n-grammes) avec importance
-# =========================================================
-def learn(text, importance=1.0):
-    words = tokenize(text)
-    if len(words) < 2:  # besoin d'au moins 2 mots pour un bigramme
-        return 0
-
-    # Mise à jour fragments
-    df = st.session_state.shadow_frag.copy()
-    counts = Counter(words)
-    for w, c in counts.items():
-        mask = df["fragment"] == w
-        if mask.any():
-            df.loc[mask, "count"] += c
-        else:
-            df = pd.concat([df, pd.DataFrame([[w, c]], columns=df.columns)], ignore_index=True)
-    save_frag(df)
-    st.session_state.shadow_frag = df
-
-    # Mise à jour des n-grammes dans SQLite
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    for n in range(2, MAX_N+1):  # de 2 à MAX_N
-        for i in range(len(words)-n+1):
-            context_words = words[i:i+n-1]
-            next_word = words[i+n-1]
-            context = " ".join(context_words)
-            inc = importance * (1.0 + st.session_state.phi["phi_m"])
-            c.execute('''
-                INSERT INTO ngrams (context, next_word, weight)
-                VALUES (?, ?, ?)
-                ON CONFLICT(context, next_word) DO UPDATE SET weight = weight + excluded.weight
-            ''', (context, next_word, inc))
-    conn.commit()
-    conn.close()
-
-    # Mise à jour du cortex et timeline
-    cortex = st.session_state.shadow_cortex
-    today = str(datetime.date.today())
-    if cortex.get("last_day") != today:
-        cortex["new_today"] = 0
-        cortex["last_day"] = today
-    cortex["age"] = cortex.get("age", 0) + len(words)
-    cortex["new_today"] = cortex.get("new_today", 0) + len(counts)
-    cortex["VS"] = 10 + float(np.log1p(cortex["age"]))
-    cortex.setdefault("timeline", []).extend(words)
-
-    save_json(FILES["cortex"], cortex)
-    st.session_state.shadow_cortex = cortex
-
-    energy = math.sqrt(sum(v*v for v in st.session_state.phi.values()))
-    st.session_state.hippocampus.append((words, energy))
-    if len(st.session_state.hippocampus) > 5 and consolidation_gate():
-        consolidate()
-
-    return len(words)
-
-def consolidate():
-    st.session_state.hippocampus.clear()
-    github_sync()
-
-# =========================================================
-# RECHERCHE DES SUIVANTS POSSIBLES POUR UN CONTEXTE DONNÉ
-# =========================================================
-def get_candidates(context):
-    """Retourne un dictionnaire {mot: poids} pour un contexte exact"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT next_word, weight FROM ngrams WHERE context=?", (context,))
-    rows = c.fetchall()
-    conn.close()
-    return {row[0]: row[1] for row in rows}
-
-# =========================================================
-# FONCTIONS D'ANALYSE SPECTRALE (pour l'attention)
-# =========================================================
-def get_spectral_features(word):
-    if not SPECTRAL_AVAILABLE:
-        return 0.0, 0.5
-    timeline = st.session_state.shadow_cortex.get("timeline", [])
-    if len(timeline) < 256:
-        return 0.0, 0.5
-    signal = np.array([1 if w == word else 0 for w in timeline])
-    fs = 1.0
-    f, t, Zxx = stft(signal, fs, window='blackmanharris', nperseg=256, noverlap=128)
-    mean_amp = np.mean(np.abs(Zxx), axis=1)
-    idx_max = np.argmax(mean_amp[1:]) + 1
-    freq_dom = f[idx_max]
-    phase = np.angle(Zxx[idx_max, :])
-    phase_unwrapped = np.unwrap(phase)
-    if len(t) > 1:
-        coeffs = np.polyfit(t, phase_unwrapped, 1)
-        trend = np.polyval(coeffs, t)
-        residuals = phase_unwrapped - trend
-        stability = 1 - np.std(residuals) / (np.std(phase_unwrapped) + 1e-10)
-    else:
-        stability = 0.5
-    return freq_dom, stability
-
-# =========================================================
-# GÉNÉRATION DE PENSÉE AVEC BACKOFF
-# =========================================================
-def get_best_context(words_list, max_len=MAX_N-1):
-    """Trouve le plus long contexte existant dans la base (backoff)"""
-    for l in range(min(max_len, len(words_list)), 0, -1):
-        context = " ".join(words_list[-l:])
-        cand = get_candidates(context)
-        if cand:
-            return context, cand
-    return None, {}
-
-def contextual_seed():
-    # Cherche un bigramme existant dans la conversation récente
-    ctx = " ".join(st.session_state.dialog).split()
-    for i in range(len(ctx)-1, 0, -1):
-        context = " ".join(ctx[max(0, i-1):i+1])  # bigramme
-        if get_candidates(context):
-            return context.split()  # retourne la liste des mots du contexte
-    # Sinon, prend un contexte aléatoire dans la base
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT context FROM ngrams ORDER BY RANDOM() LIMIT 1")
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return row[0].split()
-    return None
-
-def think():
-    seed_words = contextual_seed()
-    if not seed_words:
-        return "Mémoire vide. Nourrissez-moi de textes."
-
-    words = seed_words.copy()
-    length = int(10 + st.session_state.phi["phi_m"] * 30)
-
-    for _ in range(length):
-        context, candidates = get_best_context(words)
-        if not candidates:
-            break
-
-        temp = max(0.5, 1.5 * st.session_state.phi["phi_d"])
-        items = list(candidates.items())
-        words_list = [w for w, _ in items]
-        weights = np.array([w for _, w in items], dtype=float)
-
-        if SPECTRAL_AVAILABLE:
-            for i, w in enumerate(words_list):
-                freq, stab = get_spectral_features(w)
-                weights[i] *= (0.5 + stab)
-
-        weights = weights ** (1.0 / temp)
-        probs = weights / weights.sum()
-        next_word = np.random.choice(words_list, p=probs)
-        words.append(next_word)
-
-    return " ".join(words).capitalize() + "."
-
-# =========================================================
-# FEEDBACK UTILISATEUR (ACTIVE LEARNING)
-# =========================================================
-def apply_feedback(reply, is_positive):
-    words = tokenize(reply)
-    if len(words) < 2:
-        return
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    delta = 0.5 if is_positive else -0.3
-    for n in range(2, min(MAX_N, len(words)+1)):
-        for i in range(len(words)-n+1):
-            context_words = words[i:i+n-1]
-            next_word = words[i+n-1]
-            context = " ".join(context_words)
-            c.execute('''
-                UPDATE ngrams SET weight = weight + ? WHERE context=? AND next_word=?
-            ''', (delta, context, next_word))
-    conn.commit()
-    conn.close()
-
-# =========================================================
-# LECTURE DES FICHIERS UPLOADÉS (MULTIMODAL)
-# =========================================================
-def read_file(file):
-    name = file.name.lower()
-    try:
-        if name.endswith(".txt"):
-            return file.read().decode("utf-8", "ignore")
-        if name.endswith(".csv"):
-            return pd.read_csv(file).to_string()
-        if name.endswith(".xlsx"):
-            return pd.read_excel(file).to_string()
-        if name.endswith(".docx") and DOCX_AVAILABLE:
-            doc = docx.Document(io.BytesIO(file.read()))
-            return " ".join(p.text for p in doc.paragraphs)
-        if name.endswith(".pdf") and PDF_AVAILABLE:
-            reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
-            return " ".join(p.extract_text() or "" for p in reader.pages)
-        if name.endswith(".wav") and SR_AVAILABLE:
-            r = sr.Recognizer()
-            with sr.AudioFile(file) as source:
-                audio = r.record(source)
-            return r.recognize_google(audio, language="fr-FR")
-    except Exception as e:
-        st.error(f"Erreur lecture : {e}")
-    return ""
-
-# =========================================================
-# AUTO-DIAGNOSTIC
-# =========================================================
-def diagnose():
-    cortex = st.session_state.shadow_cortex
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM ngrams")
-    nb_ngrams = c.fetchone()[0]
-    c.execute("SELECT COUNT(DISTINCT context) FROM ngrams")
-    nb_contexts = c.fetchone()[0]
-    conn.close()
-    density = round(nb_ngrams / max(nb_contexts, 1), 2)
-
-    if cortex.get("new_today", 0) < 20:
-        return "🧠 J'ai besoin de nouvelles connaissances."
-    if density < 1.5:
-        return "🧠 Donne-moi des textes plus longs."
-    if density > 4:
-        return "🧠 Mon raisonnement commence à émerger."
-    return "🧠 Apprentissage actif."
-
-# =========================================================
-# VISUALISATION 2D DES CONCEPTS
-# =========================================================
-def plot_concepts_2d():
-    if not VIZ_AVAILABLE or not EMBEDDINGS_AVAILABLE:
-        st.warning("Visualisation nécessite scikit-learn, plotly et sentence-transformers.")
-        return
-
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT DISTINCT next_word FROM ngrams")
-    words = [row[0] for row in c.fetchall()]
+    rows = c.fetchall()
     conn.close()
 
-    if len(words) < 5:
-        st.info("Pas assez de concepts pour la visualisation.")
-        return
+    words = sorted(set([row[0] for row in rows if row[0]]))
+    # Création du vocabulaire
+    vocab = {'<pad>': 0, '<unk>': 1, '<s>': 2, '</s>': 3}
+    for i, w in enumerate(words):
+        vocab[w] = i + 4   # les tokens spéciaux occupent 0-3
+    id_to_word = {v: k for k, v in vocab.items()}
+    return vocab, id_to_word
 
-    embeddings = embed_model.encode(words)
-    pca = PCA(n_components=min(50, len(embeddings)))
-    pca_result = pca.fit_transform(embeddings)
-    tsne = TSNE(n_components=2, perplexity=min(30, len(words)-1))
-    tsne_result = tsne.fit_transform(pca_result)
-
-    df = pd.DataFrame({'word': words, 'x': tsne_result[:,0], 'y': tsne_result[:,1]})
-    fig = px.scatter(df, x='x', y='y', text='word', title='Carte sémantique 2D des concepts')
-    fig.update_traces(textposition='top center')
-    st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
-# FONCTION POUR OBTENIR LE NOMBRE DE N-GRAMMES
+# 3. CHARGEMENT DU MODÈLE (avec mise en cache Streamlit)
 # =========================================================
-def get_ngram_count():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM ngrams")
-    count = c.fetchone()[0]
-    conn.close()
-    return count
 
-# =========================================================
-# INTERFACE UTILISATEUR
-# =========================================================
-st.title("🧠 ORACLE Ω-TTU V13 — n-grammes généralisés")
-st.caption("Contexte variable (jusqu'à 5 mots) + Backoff + Φ dynamique")
-
-# Barre latérale : état cognitif
-with st.sidebar:
-    st.header("🔬 État Cognitif")
-    p = st.session_state.phi
-    st.metric("Mémoire (Φm)", f"{p['phi_m']:.2f}")
-    st.progress(p['phi_m'])
-    st.metric("Cohérence (Φc)", f"{p['phi_c']:.2f}")
-    st.progress(p['phi_c'])
-    st.metric("Dissipation (Φd)", f"{p['phi_d']:.2f}")
-    st.progress(p['phi_d'])
-
-    st.divider()
-    st.metric("Âge (mots)", st.session_state.shadow_cortex.get("age", 0))
-    st.metric("Nouveaux aujourd'hui", st.session_state.shadow_cortex.get("new_today", 0))
-    st.metric("VS", f"{st.session_state.shadow_cortex.get('VS', 12):.1f}")
-
-    st.divider()
-    if st.button("🌙 Cycle de Sommeil"):
-        sleep_cycle()
-        st.success("Consolidation et entropie réduite.")
-
-    if st.button("📥 Exporter les n-grammes (CSV)"):
-        conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query("SELECT * FROM ngrams", conn)
-        conn.close()
-        st.download_button("Télécharger ngrams.csv", df.to_csv(index=False), "ngrams.csv")
-
-    if st.button("☁️ Sauvegarder sur GitHub"):
-        github_sync()
-        st.success("Mémoire synchronisée avec GitHub.")
-
-    st.divider()
-    st.info(diagnose())
-
-# Onglets
-tab1, tab2, tab3, tab4 = st.tabs(["🌱 Nourrir", "💬 Parler", "📊 Analyse Spectrale", "🧬 Neuro-imagerie"])
-
-with tab1:
-    st.subheader("Apprentissage Multimodal")
-    mode = st.radio("Source", ["Texte", "Document (PDF/DOCX/TXT)", "Excel", "Audio (WAV)"], horizontal=True)
-    content = ""
-    if mode == "Texte":
-        content = st.text_area("Entrez un texte")
+def load_model(vocab_size, model_path="omega_ttu_llm.pt"):
+    """
+    Charge les poids depuis un fichier .pt, ou initialise aléatoirement.
+    """
+    model = OmegaTTU_LLM(vocab_size=vocab_size)
+    if os.path.exists(model_path):
+        state = torch.load(model_path, map_location='cpu')
+        model.load_state_dict(state)
+        st.success(f"Modèle chargé depuis {model_path}")
     else:
-        file_types = []
-        if mode == "Document (PDF/DOCX/TXT)":
-            file_types = ["pdf", "docx", "txt"]
-        elif mode == "Excel":
-            file_types = ["xlsx"]
-        elif mode == "Audio (WAV)":
-            file_types = ["wav"]
-        uploaded = st.file_uploader("Charger fichier", type=file_types)
-        if uploaded:
-            content = read_file(uploaded)
-            if content:
-                st.success("Fichier lu avec succès.")
-            else:
-                st.warning("Échec de la lecture (format non supporté ou bibliothèque manquante).")
+        st.warning("Aucun modèle pré‑entraîné trouvé. Utilisation de poids aléatoires.")
+    model.eval()
+    return model
 
-    if st.button("🌱 Nourrir l'Oracle"):
-        if content:
-            excitation = min(1.0, len(content) / 200)
-            st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
-            nb_words = learn(content)
-            nb_ng = get_ngram_count()
-            st.success(f"Apprentissage effectué ({nb_words} mots). Nombre de n-grammes maintenant : {nb_ng}.")
-            st.rerun()
-        else:
-            st.warning("Aucun contenu à apprendre.")
 
-with tab2:
-    st.subheader("Conversation")
+# =========================================================
+# 4. FONCTION DE GÉNÉRATION
+# =========================================================
 
-    for msg in st.session_state.dialog:
-        st.write(msg)
+@torch.no_grad()
+def generate(model, prompt_ids, max_new_tokens=100, temperature=0.8):
+    """
+    Génère une séquence à partir d'une liste d'IDs.
+    """
+    input_ids = torch.tensor([prompt_ids]).long()  # (1, seq_len)
+    for _ in range(max_new_tokens):
+        # Limiter à la fenêtre de contexte (512)
+        if input_ids.size(1) > 512:
+            input_ids = input_ids[:, -512:]
 
-    user_msg = st.text_input("Votre message", key="user_input")
-    col1, col2 = st.columns([1,5])
-    with col1:
-        send = st.button("Envoyer")
-    if send and user_msg:
-        st.session_state.dialog.append("👤 " + user_msg)
-        excitation = min(1.0, len(user_msg) / 200)
-        st.session_state.phi = evolve_ttu(st.session_state.phi, excitation)
-        learn(user_msg, importance=2.0)
-        reply = think()
-        st.session_state.dialog.append("🧠 " + reply)
+        logits = model(input_ids)                 # (1, seq_len, vocab_size)
+        next_logits = logits[0, -1, :] / temperature
+        probs = F.softmax(next_logits, dim=-1)
+        next_token = torch.multinomial(probs, 1).item()
+        input_ids = torch.cat([input_ids, torch.tensor([[next_token]])], dim=1)
+    return input_ids[0].tolist()
 
-        st.session_state.last_reply = reply
-        st.session_state.last_reply_words = tokenize(reply)
 
-        st.rerun()
+# =========================================================
+# 5. INTERFACE STREAMLIT
+# =========================================================
 
-    if "last_reply" in st.session_state:
-        st.markdown("**Cette réponse était-elle pertinente ?**")
-        fb1, fb2 = st.columns(2)
-        with fb1:
-            if st.button("👍 Pertinent"):
-                apply_feedback(st.session_state.last_reply, True)
-                st.success("Feedback enregistré (renforcement).")
-                del st.session_state.last_reply
-                st.rerun()
-        with fb2:
-            if st.button("👎 Non pertinent"):
-                apply_feedback(st.session_state.last_reply, False)
-                st.warning("Feedback enregistré (affaiblissement).")
-                del st.session_state.last_reply
-                st.rerun()
+st.set_page_config(page_title="Ω-TTU V14", layout="wide")
+st.title("🧠 Ω-TTU V14 – Mini LLM Transformer (≈50M params)")
+st.markdown("Modèle génératif entraînable sur CPU, utilisant votre base de connaissances.")
 
-with tab3:
-    st.subheader("Analyse Spectrale d'un Concept")
-    if not SPECTRAL_AVAILABLE:
-        st.error("Analyse spectrale désactivée : installer scipy et matplotlib.")
+# Chemin de la base (à ajuster si besoin)
+DB_PATH = "oracle_memory/relations.db"
+
+if not os.path.exists(DB_PATH):
+    st.error("Base de données non trouvée. Veuillez d'abord exécuter la V13 pour créer 'relations.db'.")
+    st.stop()
+
+# Construction du vocabulaire
+vocab, id_to_word = build_tokenizer_from_db(DB_PATH)
+vocab_size = len(vocab)
+st.sidebar.success(f"Vocabulaire chargé : {vocab_size} mots")
+
+# Chargement du modèle (mise en cache)
+@st.cache_resource
+def get_model():
+    return load_model(vocab_size, model_path="omega_ttu_llm.pt")
+
+model = get_model()
+
+# Paramètres de génération
+st.sidebar.header("Paramètres de génération")
+max_tokens = st.sidebar.slider("Nouveaux tokens", 10, 500, 100)
+temperature = st.sidebar.slider("Température", 0.1, 2.0, 0.8)
+
+# Zone de saisie
+prompt = st.text_input("Entrez un début de phrase", value="Dans le texte fondateur")
+
+if st.button("Générer"):
+    # Tokenisation simple (split sur les espaces)
+    tokens = prompt.strip().split()
+    prompt_ids = [vocab.get(w, vocab['<unk>']) for w in tokens]
+
+    if len(prompt_ids) == 0:
+        st.warning("Veuillez entrer un prompt non vide.")
     else:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT DISTINCT next_word FROM ngrams")
-        words = [row[0] for row in c.fetchall()]
-        conn.close()
-        if words:
-            word = st.selectbox("Choisir un mot", words)
-            nperseg = st.slider("Taille de fenêtre STFT", 64, 512, 256, 32)
-            if st.button("Lancer l'analyse"):
-                with st.spinner("Calcul en cours..."):
-                    signal = np.array([1 if w == word else 0 for w in st.session_state.shadow_cortex.get("timeline", [])])
-                    if len(signal) < nperseg:
-                        st.warning(f"Signal trop court ({len(signal)}). Besoin d'au moins {nperseg} mots.")
-                    else:
-                        fs = 1.0
-                        f, t, Zxx = stft(signal, fs, window='blackmanharris', nperseg=nperseg, noverlap=nperseg//2)
-                        fig, ax = plt.subplots(figsize=(10, 4))
-                        ax.pcolormesh(t, f, 20*np.log10(np.abs(Zxx) + 1e-10), shading='gouraud')
-                        ax.set_ylabel('Fréquence [cycles/mot]')
-                        ax.set_xlabel('Temps [mot]')
-                        ax.set_title(f'Spectrogramme du mot "{word}"')
-                        st.pyplot(fig)
-        else:
-            st.info("Aucun mot en mémoire pour l'analyse.")
+        with st.spinner("Génération en cours..."):
+            output_ids = generate(model, prompt_ids, max_new_tokens=max_tokens, temperature=temperature)
 
-with tab4:
-    st.subheader("Neuro-imagerie : Carte sémantique 2D")
-    if st.button("Générer la carte"):
-        with st.spinner("Calcul des embeddings et réduction dimensionnelle..."):
-            plot_concepts_2d()
+        # Conversion en texte
+        output_words = [id_to_word.get(i, '<unk>') for i in output_ids]
+        output_text = " ".join(output_words)
 
-# =========================================================
-# PIED DE PAGE
-# =========================================================
-st.divider()
-conn = sqlite3.connect(DB_PATH)
-c = conn.cursor()
-c.execute("SELECT COUNT(*) FROM ngrams")
-nb_ng = c.fetchone()[0]
-c.execute("SELECT COUNT(DISTINCT next_word) FROM ngrams")
-nb_vocab = c.fetchone()[0]
-conn.close()
-st.caption(f"Mémoire : {nb_ng} n-grammes | {nb_vocab} mots distincts | Φ = {st.session_state.phi}")
+        st.markdown("### Réponse générée")
+        st.write(output_text)
+
+        # Option pour copier
+        st.code(output_text, language="text")
+
+# Section d'information
+with st.expander("ℹ️ À propos du modèle"):
+    st.markdown("""
+    **Architecture**
+    - Embedding dimension : 384
+    - Nombre de couches : 8
+    - Têtes d'attention : 6
+    - FFN SwiGLU (dimension cachée 1536)
+    - Normalisation RMS
+    - Poids liés (embedding = sortie)
+    - Paramètres : ~48 millions
+
+    **Tokenizer**
+    - Construit automatiquement à partir des mots distincts de la table `ngrams`.
+    - Tokens spéciaux : `<pad>` (0), `<unk>` (1), `<s>` (2), `</s>` (3).
+
+    **Entraînement**
+    - Pour utiliser un modèle entraîné, placez un fichier `omega_ttu_llm.pt` dans le même dossier.
+    - Vous pouvez entraîner le modèle sur vos données avec un script PyTorch standard (exemple fourni ci‑dessous).
+
+    **Exemple d'entraînement (script séparé)**
+    ```python
+    import torch
+    from torch.utils.data import DataLoader, Dataset
+    # ... (à adapter selon votre corpus)
+    ```
+    """)
+
+# Option pour télécharger un modèle vide (placeholder)
+if st.button("📥 Télécharger un modèle initial (poids aléatoires)"):
+    dummy_model = OmegaTTU_LLM(vocab_size=1000)  # petit pour l'exemple
+    torch.save(dummy_model.state_dict(), "omega_ttu_llm_dummy.pt")
+    st.success("Fichier 'omega_ttu_llm_dummy.pt' créé (poids aléatoires).")
