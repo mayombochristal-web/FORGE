@@ -8,76 +8,51 @@ import faiss
 import hashlib
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_NAME = "dbddv01/gpt2-french-small"          # Modèle génératif français
-EMBED_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"  # Embedding multilingue
-EMBEDDING_DIM = 384                               # Dimension des embeddings
-MAX_CONTEXT_TOKENS = 1024                          # Augmenté pour plus de contexte (GPT‑2 supporte 1024)
-CHUNK_SIZE = 800                                   # Taille des chunks (caractères)
-CHUNK_OVERLAP = 100                                # Chevauchement
-DEFAULT_TEMPERATURE = 0.5                          # Légèrement plus élevé pour plus de diversité
-REPETITION_PENALTY = 1.8
+MODEL_NAME = "dbddv01/gpt2-french-small"          
+EMBED_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"  
+EMBEDDING_DIM = 384                               
+MAX_CONTEXT_TOKENS = 700                           # Réduit pour éviter la confusion du modèle
+CHUNK_SIZE = 500                                   # Chunks plus petits pour plus de précision
+CHUNK_OVERLAP = 50                                
+DEFAULT_TEMPERATURE = 0.2                          # BAISSÉE pour éviter les inventions (Hallucinations)
+REPETITION_PENALTY = 2.0                           # AUGMENTÉE pour casser les boucles de texte
 TOP_P = 0.9
-MAX_NEW_TOKENS = 250
+MAX_NEW_TOKENS = 150                               # Plus court pour être plus percutant
 
 class OracleBrain:
     def __init__(self, mem_file="oracle_memory.json"):
         self.mem_file = mem_file
-        self.phi = {"phi_m": 0.6, "phi_c": 0.2, "phi_d": 0.2}  # Métaphores internes
+        self.phi = {"phi_m": 0.5, "phi_c": 0.25, "phi_d": 0.25} 
         
-        # Modèle de génération
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(DEVICE)
-        
-        # Modèle d'embedding
         self.embed_model = SentenceTransformer(EMBED_MODEL_NAME, device=str(DEVICE))
         
-        # Index FAISS
+        # Reset de l'index
         self.index = faiss.IndexFlatIP(EMBEDDING_DIM)
-        self.kb_texts = []          # Stockage des chunks
-        self.text_hashes = set()     # Ensemble des hash pour déduplication
-        
-        # Cache pour les embeddings
+        self.kb_texts = []          
+        self.text_hashes = set()     
         self._emb_cache = {}
-        
-        # Cache pour les réponses (évite de regénérer la même question)
         self._response_cache = {}
         
-        self.load_all()
+        # Chargement uniquement si le fichier existe
+        if os.path.exists(self.mem_file):
+            self.load_all()
+        else:
+            print("INFO: Aucun fichier mémoire trouvé. L'Oracle démarre à zéro.")
 
     def _normalize_text(self, text):
-        """Normalise un texte pour la déduplication."""
         return " ".join(text.split())
 
     def _hash_text(self, text):
-        """Hash rapide pour le cache des réponses."""
         return hashlib.md5(text.encode()).hexdigest()
 
-    def get_embedding(self, text, use_cache=True):
-        """Calcule l'embedding normalisé, avec cache."""
-        if use_cache:
-            key = hash(text)
-            if key in self._emb_cache:
-                return self._emb_cache[key]
+    def get_embedding(self, text):
         emb = self.embed_model.encode(text, normalize_embeddings=True)
-        if use_cache:
-            self._emb_cache[key] = emb
         return emb
 
-    def evolve_phi(self, excitation):
-        """Évolution des métaphores internes."""
-        self.phi["phi_m"] = min(0.9, max(0.4, self.phi["phi_m"] + excitation * 0.05))
-        self.phi["phi_c"] = min(0.4, max(0.1, self.phi["phi_c"] + 0.01))
-        self.phi["phi_d"] = min(0.3, max(0.05, self.phi["phi_d"] - excitation * 0.02))
-        s = sum(self.phi.values())
-        for k in self.phi:
-            self.phi[k] /= s
-
     def add_to_memory(self, text):
-        """
-        Découpe le texte en chunks, évite les doublons, calcule les embeddings
-        et les ajoute à l'index FAISS.
-        """
         start = 0
         text_len = len(text)
         added = 0
@@ -96,16 +71,69 @@ class OracleBrain:
             self.save_all()
         return added
 
-    def search_memory(self, query, k=4):
-        """
-        Recherche les k chunks les plus pertinents, sans doublons.
-        """
+    def search_memory(self, query, k=3): # k réduit pour moins de bruit
         if self.index.ntotal == 0:
             return []
         emb = self.get_embedding(query)
-        scores, indices = self.index.search(np.array([emb], dtype=np.float32), k * 2)
+        scores, indices = self.index.search(np.array([emb], dtype=np.float32), k)
+        return [self.kb_texts[idx] for idx in indices[0] if idx != -1 and idx < len(self.kb_texts)]
+
+    def generate_response(self, user_input, context_chunks=None, strict_mode=False):
+        if context_chunks is None:
+            context_chunks = self.search_memory(user_input)
         
-        results = []
+        if strict_mode and not context_chunks:
+            return "Information non trouvée dans les documents.", []
+
+        context = "\n---\n".join(list(dict.fromkeys(context_chunks))) # Déduplication contexte
+
+        prompt = (
+            f"### Système : Réponds uniquement via le contexte.\n"
+            f"### Contexte :\n{context}\n\n"
+            f"### Question :\n{user_input}\n\n"
+            f"### Réponse :\n"
+        )
+
+        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_CONTEXT_TOKENS).to(DEVICE)
+
+        try:
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=MAX_NEW_TOKENS,
+                    temperature=DEFAULT_TEMPERATURE,
+                    do_sample=True,
+                    top_p=TOP_P,
+                    repetition_penalty=REPETITION_PENALTY,
+                    no_repeat_ngram_size=4, # Plus strict contre les bégaiements
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            response = full_response.split("### Réponse :")[-1].strip()
+            # Nettoyage de sécurité
+            response = response.split("###")[0].strip() 
+        except Exception as e:
+            response = f"Erreur de génération : {str(e)}"
+
+        return response, context_chunks
+
+    def save_all(self):
+        data = {"phi": self.phi, "kb": self.kb_texts, "hashes": list(self.text_hashes)}
+        with open(self.mem_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load_all(self):
+        try:
+            with open(self.mem_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.kb_texts = data.get("kb", [])
+                self.text_hashes = set(data.get("hashes", []))
+                if self.kb_texts:
+                    embs = self.embed_model.encode(self.kb_texts, normalize_embeddings=True)
+                    self.index = faiss.IndexFlatIP(EMBEDDING_DIM) # Re-init clean
+                    self.index.add(np.array(embs, dtype=np.float32))
+        except:
+            pass
         seen = set()
         for idx in indices[0]:
             if idx != -1 and idx < len(self.kb_texts):
