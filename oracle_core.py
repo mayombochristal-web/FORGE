@@ -73,14 +73,54 @@ class OracleBrain:
         return " ".join(results)
 
     def generate_response(self, user_input):
-        """Génère une réponse argumentée en évitant les crashs et les répétitions."""
-        # 1. Recherche et nettoyage du contexte
-        raw_context = self.search_memory(user_input)
-        
-        # Troncature stricte du contexte pour ne pas dépasser la mémoire de GPT2
-        ctx_ids = self.tokenizer.encode(raw_context, truncation=True, max_length=400, add_special_tokens=False)
+        """Génère une réponse fidèle avec une dimension de réflexion cognitive."""
+        # 1. Extraction du contexte (Fidélité)
+        raw_context = self.search_memory(user_input, k=3)
+        ctx_ids = self.tokenizer.encode(raw_context, truncation=True, max_length=450, add_special_tokens=False)
         context = self.tokenizer.decode(ctx_ids)
         
+        # 2. Construction du prompt "Cognitif"
+        # On oriente l'IA pour qu'elle compare le contexte avec sa propre analyse
+        prompt = (
+            f"Source Documentaire: {context}\n"
+            f"Analyse Utilisateur: {user_input}\n"
+            f"Oracle (Réflexion et Synthèse):"
+        )
+        
+        # 3. Paramétrage des Phis pour l'équilibre Humain/Machine
+        # On utilise phi_c (Cohérence) pour la fidélité et phi_d (Divergence) pour la remise en question
+        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_CONTEXT_TOKENS).to(DEVICE)
+        
+        # Température adaptative : plus phi_d est haut, plus l'IA "réfléchit" de manière originale
+        dynamic_temp = 0.3 + (self.phi["phi_d"] * 0.5) 
+        
+        try:
+            outputs = self.model.generate(
+                **inputs, 
+                max_new_tokens=int(150 + self.phi["phi_m"] * 350), 
+                temperature=dynamic_temp, 
+                do_sample=True,
+                top_p=0.92, # Filtre les réponses trop absurdes
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=3,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+            
+            full_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            response = full_text.split("Oracle (Réflexion et Synthèse):")[-1].strip()
+            
+            # 4. Auto-Correction / Remise en question (Effet Cognitif)
+            # Si l'IA est trop sûre d'elle (phi_c élevé), on ajoute une nuance
+            if self.phi["phi_c"] > 0.7 and "Cependant" not in response:
+                response += "\n\nNote : Cette analyse se base strictement sur les fragments identifiés, mais l'interprétation globale pourrait varier selon le prisme sociolinguistique adopté."
+
+        except Exception as e:
+            response = f"[Alerte de saturation] : Mon architecture peine à lier ces concepts. Détail : {str(e)}"
+        
+        # Mise à jour de l'excitation pour le prochain tour
+        self.evolve_phi(min(1, len(user_input)/350))
+        return response
+
         prompt = f"Context: {context}\nUser: {user_input}\nOracle:"
         
         # 2. Encodage avec sécurité
