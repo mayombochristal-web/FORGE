@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+model_weights/
+*.pt
+*.pth
+.DS_Store
