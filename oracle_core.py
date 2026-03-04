@@ -179,7 +179,6 @@ class OracleBrain:
         return cleaned
 
     def save_all(self):
-        """Sauvegarde l'état dans le fichier JSON."""
         try:
             data = {
                 "phi": self.phi,
@@ -192,7 +191,6 @@ class OracleBrain:
             raise RuntimeError(f"Erreur sauvegarde mémoire : {e}")
 
     def load_all(self):
-        """Charge l'état depuis le fichier JSON et reconstruit l'index FAISS."""
         if os.path.exists(self.mem_file):
             try:
                 with open(self.mem_file, "r", encoding="utf-8") as f:
