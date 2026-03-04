@@ -6,4 +6,3 @@ faiss-cpu
 PyPDF2
 python-docx
 requests
-numpy
