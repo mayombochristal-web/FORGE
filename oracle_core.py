@@ -13,7 +13,7 @@ import faiss
 
 # --- CONFIGURATION TECHNIQUE ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_NAME = "distilgpt2" 
+MODEL_NAME = "asi/gpt-fr-cased-small" 
 EMBEDDING_DIM = 768        
 MAX_CONTEXT_TOKENS = 700 # Limite de sécurité pour éviter IndexError
 
