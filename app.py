@@ -5,7 +5,6 @@ import PyPDF2
 import docx
 import json
 from oracle_core import OracleBrain
-import threading
 
 # --- CONFIGURATION ---
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
@@ -13,7 +12,7 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 MEM_FILE = "oracle_memory.json"
 
 def github_sync():
-    """Synchronise le fichier mémoire avec GitHub."""
+    """Synchronise le fichier mémoire avec GitHub (synchrone)."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
     try:
@@ -29,11 +28,6 @@ def github_sync():
         requests.put(url, headers=headers, json=data, timeout=10)
     except Exception as e:
         st.sidebar.error(f"Erreur GitHub : {e}")
-
-def async_github_sync():
-    """Lance la synchronisation GitHub dans un thread séparé."""
-    thread = threading.Thread(target=github_sync)
-    thread.start()
 
 # --- INITIALISATION DE L'ORACLE (en cache) ---
 @st.cache_resource
@@ -71,9 +65,12 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("💾 Sauvegarder"):
-            st.session_state.oracle.save_all()
-            async_github_sync()
-            st.success("Mémoire sauvegardée (sync en arrière-plan).")
+            try:
+                st.session_state.oracle.save_all()
+                github_sync()
+                st.success("Mémoire sauvegardée et synchronisée.")
+            except Exception as e:
+                st.error(f"Erreur sauvegarde : {e}")
     with col2:
         if st.button("🗑️ Effacer chat"):
             st.session_state.chat = []
@@ -108,7 +105,7 @@ with st.expander("📥 Injecter un document dans la mémoire"):
 # --- ZONE DE CHAT ---
 # Affichage des messages précédents
 for msg in st.session_state.chat:
-    with st.chat_message(msg["role"], avatar=msg["avatar"]):
+    with st.chat_message(msg["role"], avatar=msg.get("avatar", "🧠")):
         st.markdown(msg["content"])
         if msg["role"] == "assistant" and "sources" in msg and msg["sources"]:
             with st.expander("📚 Sources consultées"):
@@ -130,27 +127,34 @@ if prompt := st.chat_input("Posez votre question..."):
                 st.info("Aucun passage pertinent trouvé dans les documents.")
             status.update(label="✍️ Génération de la réponse...")
             
-            response, sources = st.session_state.oracle.generate_response(
-                prompt,
-                context_chunks=context_chunks,
-                strict_mode=st.session_state.strict_mode
-            )
-            
-            st.markdown(response)
-            
-            if sources:
-                with st.expander("📚 Sources consultées"):
-                    for i, src in enumerate(sources):
-                        st.caption(f"**Extrait {i+1}:** {src[:300]}..." if len(src) > 300 else src)
+            try:
+                response, sources = st.session_state.oracle.generate_response(
+                    prompt,
+                    context_chunks=context_chunks,
+                    strict_mode=st.session_state.strict_mode
+                )
+                st.markdown(response)
+                
+                if sources:
+                    with st.expander("📚 Sources consultées"):
+                        for i, src in enumerate(sources):
+                            st.caption(f"**Extrait {i+1}:** {src[:300]}..." if len(src) > 300 else src)
+            except Exception as e:
+                st.error(f"Erreur lors de la génération : {e}")
+                response = "Désolé, une erreur technique est survenue."
+                sources = []
     
     # Sauvegarde dans l'historique
     st.session_state.chat.append({
         "role": "assistant",
         "content": response,
         "avatar": "🧠",
-        "sources": context_chunks
+        "sources": context_chunks if 'context_chunks' in locals() else []
     })
     
-    # Sauvegarde automatique asynchrone
-    st.session_state.oracle.save_all()
-    async_github_sync()
+    # Sauvegarde automatique silencieuse (on ignore les erreurs pour ne pas gêner l'utilisateur)
+    try:
+        st.session_state.oracle.save_all()
+        github_sync()
+    except:
+        pass
