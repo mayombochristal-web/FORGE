@@ -449,6 +449,11 @@ def send_message():
         # Effacer l'input
         st.session_state.user_input = ""
 
+def reset_conversation():
+    """Réinitialise le fil de conversation."""
+    st.session_state.messages = []
+    st.rerun()
+
 # --------------------------------------------------
 # FONCTION DE TÉLÉCHARGEMENT DES DONNÉES
 # --------------------------------------------------
@@ -497,9 +502,15 @@ if file:
     st.success(f"{n} unités cognitives assimilées")
 
 # --------------------------------------------------
-# SECTION DE CONVERSATION (remplace l'ancien dialogue)
+# SECTION DE CONVERSATION
 # --------------------------------------------------
 st.subheader("💬 Conversation avec l'IA")
+
+# Bouton pour réinitialiser la conversation
+col_reset, _ = st.columns([1, 5])
+with col_reset:
+    if st.button("🗑️ Réinitialiser la conversation"):
+        reset_conversation()
 
 # Afficher l'historique des messages
 for i, msg in enumerate(st.session_state.messages):
