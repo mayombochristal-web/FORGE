@@ -105,6 +105,45 @@ def sync_shadow():
 sync_shadow()
 
 # --------------------------------------------------
+# FILTRAGE DES ARTEFACTS ET STOP WORDS
+# --------------------------------------------------
+# Liste de mots de transition français (stop words)
+STOP_WORDS_FR = {
+    'de', 'le', 'la', 'les', 'un', 'une', 'des', 'du', 'et', 'ou', 'mais', 'donc',
+    'car', 'ni', 'or', 'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'notre',
+    'votre', 'leur', 'mes', 'tes', 'ses', 'nos', 'vos', 'leurs', 'je', 'tu', 'il',
+    'elle', 'nous', 'vous', 'ils', 'elles', 'me', 'te', 'se', 'lui', 'eux', 'y',
+    'en', 'dans', 'sur', 'sous', 'avec', 'sans', 'par', 'pour', 'vers', 'chez',
+    'entre', 'depuis', 'pendant', 'avant', 'après', 'dès', 'jusque', 'malgré',
+    'selon', 'comme', 'quand', 'lorsque', 'que', 'qui', 'quoi', 'dont', 'où',
+    'au', 'aux', 'auquel', 'duquel', 'lequel', 'laquelle', 'lesquels', 'lesquelles',
+    'à', 'c', 'd', 'j', 'l', 'm', 'n', 's', 't', 'y', 'ça', 'là', 'très', 'plus',
+    'moins', 'aussi', 'autant', 'peu', 'beaucoup', 'trop', 'si', 'oui', 'non',
+    'peut-être', 'voilà', 'voici', 'etc'
+}
+
+def is_artifact(word):
+    """
+    Détecte les artefacts techniques :
+    - mots trop courts (longueur < 2)
+    - mots contenant des chiffres ou des symboles (hors lettres accentuées)
+    - mots dans une liste noire (ex: fragments techniques comme 'âk', 'uwwm')
+    On peut aussi exclure les mots sans voyelle (pour éliminer le bruit).
+    """
+    if len(word) < 2:
+        return True
+    # Vérifie que le mot ne contient que des lettres (y compris accentuées)
+    if not re.match(r'^[a-zàâäéèêëïîôöùûüÿœ]+$', word):
+        return True
+    # Option : exclure les mots sans voyelle (souvent du bruit)
+    if not re.search(r'[aeiouyàâäéèêëïîôöùûüÿœ]', word):
+        return True
+    # Liste noire (optionnelle, on peut ajouter des motifs)
+    # Exemple : si le mot est dans une liste d'artefacts connus
+    # (à compléter si nécessaire)
+    return False
+
+# --------------------------------------------------
 # MÉTRIQUES RAPIDES
 # --------------------------------------------------
 def association_density_fast():
@@ -151,10 +190,17 @@ def read_file(file):
     return ""
 
 # --------------------------------------------------
-# APPRENTISSAGE (avec timeline pour l'analyse spectrale)
+# APPRENTISSAGE (avec filtre des artefacts)
 # --------------------------------------------------
-def learn(text):
+def learn(text, filter_artifacts=True):
     words = tokenize(text)
+    if not words:
+        return 0
+
+    if filter_artifacts:
+        # On ne garde que les mots qui ne sont pas des artefacts
+        words = [w for w in words if not is_artifact(w)]
+
     if not words:
         return 0
 
@@ -198,7 +244,7 @@ def learn(text):
     return len(words)
 
 # --------------------------------------------------
-# GÉNÉRATION DE TEXTE (pensée)
+# GÉNÉRATION DE TEXTE (pensée) avec améliorations
 # --------------------------------------------------
 def think(seed, steps=30):
     assoc = st.session_state.shadow_rel
@@ -219,7 +265,17 @@ def think(seed, steps=30):
         p = p / s
         cur = np.random.choice(w, p=p)
         sent.append(cur)
-    return " ".join(sent).capitalize() + "."
+
+    # Éviter que le dernier mot soit un stop word
+    while sent and sent[-1] in STOP_WORDS_FR:
+        sent.pop()
+    if not sent:
+        return "..."
+
+    # Mettre une majuscule au début et un point à la fin
+    phrase = " ".join(sent)
+    phrase = phrase[0].upper() + phrase[1:] + "."
+    return phrase
 
 # --------------------------------------------------
 # AUTO-DIAGNOSTIC
@@ -356,10 +412,15 @@ st.info(diagnose())
 # SECTION D'APPRENTISSAGE
 # --------------------------------------------------
 st.subheader("📥 Nourrir l'IA")
-file = st.file_uploader("Nourriture cognitive", type=["txt", "csv", "pdf", "docx", "xlsx"])
+col1, col2 = st.columns([3, 1])
+with col1:
+    file = st.file_uploader("Nourriture cognitive", type=["txt", "csv", "pdf", "docx", "xlsx"])
+with col2:
+    filter_artifacts = st.checkbox("Filtrer les artefacts", value=True, help="Exclure les fragments techniques (bruit) de l'apprentissage")
+
 if file:
     text = read_file(file)
-    n = learn(text)
+    n = learn(text, filter_artifacts=filter_artifacts)
     st.success(f"{n} unités cognitives assimilées")
 
 # --------------------------------------------------
@@ -372,8 +433,15 @@ if st.button("Penser"):
     if not tokens:
         st.warning("Entre une phrase valide.")
     else:
+        # On utilise le premier mot significatif (pas un artefact ni stop word)
+        seed = tokens[0]
+        # Option : on pourrait chercher un mot non stop word
+        for t in tokens:
+            if not is_artifact(t) and t not in STOP_WORDS_FR:
+                seed = t
+                break
         st.write("### Réponse")
-        st.write(think(tokens[0]))
+        st.write(think(seed))
 
 # --------------------------------------------------
 # SECTION D'ANALYSE SPECTRALE (modifiée pour saisie libre)
