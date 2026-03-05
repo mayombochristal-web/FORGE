@@ -41,7 +41,8 @@ FILES = {
     "concepts": f"{MEM}/concepts.csv",
     "relations": f"{MEM}/relations.json",
     "intentions": f"{MEM}/intentions.csv",
-    "cortex": f"{MEM}/cortex.json"
+    "cortex": f"{MEM}/cortex.json",
+    "feedback": f"{MEM}/feedback.json"  # Pour stocker les feedbacks
 }
 
 # --------------------------------------------------
@@ -56,6 +57,8 @@ def init():
         pd.DataFrame(columns=["intent", "count"]).to_csv(FILES["intentions"], index=False)
     if not os.path.exists(FILES["relations"]):
         json.dump({}, open(FILES["relations"], "w"))
+    if not os.path.exists(FILES["feedback"]):
+        json.dump([], open(FILES["feedback"], "w"))
     if not os.path.exists(FILES["cortex"]):
         # On initialise cortex avec une timeline vide
         json.dump({
@@ -100,6 +103,8 @@ def sync_shadow():
         st.session_state.shadow_concepts = load_concepts().copy()
         st.session_state.shadow_rel = load_json(FILES["relations"])
         st.session_state.shadow_cortex = load_json(FILES["cortex"])
+        st.session_state.feedback_log = load_json(FILES["feedback"])
+        st.session_state.messages = []  # Historique de la conversation
         st.session_state.shadow_loaded = True
 
 sync_shadow()
@@ -138,9 +143,6 @@ def is_artifact(word):
     # Option : exclure les mots sans voyelle (souvent du bruit)
     if not re.search(r'[aeiouyàâäéèêëïîôöùûüÿœ]', word):
         return True
-    # Liste noire (optionnelle, on peut ajouter des motifs)
-    # Exemple : si le mot est dans une liste d'artefacts connus
-    # (à compléter si nécessaire)
     return False
 
 # --------------------------------------------------
@@ -378,6 +380,76 @@ def spectral_analysis(word, nperseg=256):
     return {"results": results, "figures": (fig1, fig2)}
 
 # --------------------------------------------------
+# FONCTIONS DE FEEDBACK
+# --------------------------------------------------
+def apply_feedback(message_index, is_positive):
+    """
+    Applique le feedback sur la réponse correspondant à message_index.
+    On renforce ou affaiblit les bigrammes de la réponse.
+    """
+    if message_index < 0 or message_index >= len(st.session_state.messages):
+        return
+    msg = st.session_state.messages[message_index]
+    if msg["role"] != "assistant":
+        return
+    response_text = msg["content"]
+    words = tokenize(response_text)
+    if len(words) < 2:
+        return
+
+    assoc = st.session_state.shadow_rel
+    delta = 1 if is_positive else -1
+
+    for i in range(len(words)-1):
+        a, b = words[i], words[i+1]
+        if a in assoc and b in assoc[a]:
+            new_val = assoc[a][b] + delta
+            if new_val <= 0:
+                # Si ça devient nul ou négatif, on supprime l'entrée
+                del assoc[a][b]
+                if not assoc[a]:
+                    del assoc[a]
+            else:
+                assoc[a][b] = new_val
+    save_json(FILES["relations"], assoc)
+
+    # Enregistrer le feedback dans le journal
+    feedback_entry = {
+        "timestamp": str(datetime.datetime.now()),
+        "message": response_text,
+        "feedback": "pertinent" if is_positive else "non pertinent"
+    }
+    st.session_state.feedback_log.append(feedback_entry)
+    save_json(FILES["feedback"], st.session_state.feedback_log)
+
+    # Mettre à jour l'état de la session pour indiquer que le feedback a été donné
+    msg["feedback_given"] = True
+
+# --------------------------------------------------
+# GESTION DE LA CONVERSATION
+# --------------------------------------------------
+def send_message():
+    user_input = st.session_state.user_input
+    if user_input.strip():
+        # Ajouter le message de l'utilisateur à l'historique
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        # Apprendre du message utilisateur
+        learn(user_input, filter_artifacts=True)
+        # Générer une réponse
+        tokens = tokenize(user_input)
+        seed = tokens[0] if tokens else "je"
+        # Trouver un seed significatif
+        for t in tokens:
+            if not is_artifact(t) and t not in STOP_WORDS_FR:
+                seed = t
+                break
+        response = think(seed, steps=20)
+        # Ajouter la réponse à l'historique
+        st.session_state.messages.append({"role": "assistant", "content": response, "feedback_given": False})
+        # Effacer l'input
+        st.session_state.user_input = ""
+
+# --------------------------------------------------
 # FONCTION DE TÉLÉCHARGEMENT DES DONNÉES
 # --------------------------------------------------
 def get_download_data():
@@ -388,7 +460,8 @@ def get_download_data():
         "fragments": st.session_state.shadow_frag.to_dict(orient="records"),
         "concepts": st.session_state.shadow_concepts.to_dict(orient="records"),
         "relations": st.session_state.shadow_rel,
-        "cortex": st.session_state.shadow_cortex
+        "cortex": st.session_state.shadow_cortex,
+        "feedback_log": st.session_state.feedback_log
     }
     return json.dumps(data, indent=2, ensure_ascii=False)
 
@@ -409,7 +482,7 @@ c4.metric("Cohérence %", semantic_coherence_fast())
 st.info(diagnose())
 
 # --------------------------------------------------
-# SECTION D'APPRENTISSAGE
+# SECTION D'APPRENTISSAGE (upload de fichiers)
 # --------------------------------------------------
 st.subheader("📥 Nourrir l'IA")
 col1, col2 = st.columns([3, 1])
@@ -424,27 +497,38 @@ if file:
     st.success(f"{n} unités cognitives assimilées")
 
 # --------------------------------------------------
-# SECTION DE CHAT (pensée)
+# SECTION DE CONVERSATION (remplace l'ancien dialogue)
 # --------------------------------------------------
-st.subheader("💬 Dialogue cognitif")
-prompt = st.text_input("Intention")
-if st.button("Penser"):
-    tokens = tokenize(prompt)
-    if not tokens:
-        st.warning("Entre une phrase valide.")
+st.subheader("💬 Conversation avec l'IA")
+
+# Afficher l'historique des messages
+for i, msg in enumerate(st.session_state.messages):
+    if msg["role"] == "user":
+        st.markdown(f"👤 **Vous :** {msg['content']}")
     else:
-        # On utilise le premier mot significatif (pas un artefact ni stop word)
-        seed = tokens[0]
-        # Option : on pourrait chercher un mot non stop word
-        for t in tokens:
-            if not is_artifact(t) and t not in STOP_WORDS_FR:
-                seed = t
-                break
-        st.write("### Réponse")
-        st.write(think(seed))
+        col_msg, col_fb = st.columns([5, 1])
+        with col_msg:
+            st.markdown(f"🤖 **IA :** {msg['content']}")
+        with col_fb:
+            # Afficher les boutons de feedback seulement si pas déjà donné
+            if not msg.get("feedback_given", False):
+                col_fb1, col_fb2 = st.columns(2)
+                with col_fb1:
+                    if st.button("👍", key=f"up_{i}"):
+                        apply_feedback(i, True)
+                        st.rerun()
+                with col_fb2:
+                    if st.button("👎", key=f"down_{i}"):
+                        apply_feedback(i, False)
+                        st.rerun()
+            else:
+                st.write("✅")  # Feedback déjà donné
+
+# Input utilisateur
+st.text_input("Votre message :", key="user_input", on_change=send_message)
 
 # --------------------------------------------------
-# SECTION D'ANALYSE SPECTRALE (modifiée pour saisie libre)
+# SECTION D'ANALYSE SPECTRALE
 # --------------------------------------------------
 st.subheader("🔬 Analyse Spectrale")
 
@@ -503,7 +587,7 @@ else:
 # SECTION DE TÉLÉCHARGEMENT DES DONNÉES
 # --------------------------------------------------
 st.subheader("📤 Télécharger les données de l'IA")
-st.markdown("Exportez toutes les données (fragments, concepts, relations, cortex) au format JSON pour une contre-expertise externe.")
+st.markdown("Exportez toutes les données (fragments, concepts, relations, cortex, feedback) au format JSON pour une contre-expertise externe.")
 
 if st.button("Préparer l'export"):
     data_json = get_download_data()
