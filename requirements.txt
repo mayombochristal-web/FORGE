@@ -6,3 +6,4 @@ PyPDF2
 python-docx
 PyGithub
 scikit-learn
+openpyxl
