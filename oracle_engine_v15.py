@@ -5,11 +5,6 @@ import hashlib
 from datetime import datetime
 from collections import Counter
 
-# =========================================================
-# ORACLE V15 Ω COSMOS+
-# ENGINE AMELIORE
-# =========================================================
-
 BASE_FOLDER="oracle_memory"
 
 CORE_DB=os.path.join(BASE_FOLDER,"oracle_core.db")
@@ -19,82 +14,19 @@ DICT_DB=os.path.join(BASE_FOLDER,"oracle_dictionary.db")
 if not os.path.exists(BASE_FOLDER):
     os.makedirs(BASE_FOLDER)
 
-# =========================================================
-# STOP WORDS
-# =========================================================
+# =====================================================
+# STOPWORDS
+# =====================================================
 
 STOP_WORDS=set([
-"le","la","les","de","des","du",
-"un","une","et","ou","a","à",
-"en","dans","sur","pour","par",
-"que","qui","quoi","est","sont"
+"le","la","les","de","des","du","un","une","et","ou",
+"a","à","en","dans","sur","pour","par","est","sont",
+"que","qui","quoi","comment"
 ])
 
-# =========================================================
-# INITIALISATION DB
-# =========================================================
-
-def init_db():
-
-    conn=sqlite3.connect(CORE_DB)
-    c=conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS memories(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT,
-    vector TEXT,
-    source TEXT,
-    timestamp TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS trigrams(
-    w1 TEXT,
-    w2 TEXT,
-    w3 TEXT,
-    count INTEGER
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    conn=sqlite3.connect(DOC_DB)
-    c=conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS documents(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT,
-    vector TEXT,
-    source TEXT,
-    timestamp TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    conn=sqlite3.connect(DICT_DB)
-    c=conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS dictionary(
-    word TEXT,
-    definition TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =========================================================
+# =====================================================
 # NETTOYAGE TEXTE
-# =========================================================
+# =====================================================
 
 def clean_words(text):
 
@@ -102,9 +34,23 @@ def clean_words(text):
 
     return [w for w in words if w not in STOP_WORDS]
 
-# =========================================================
-# VECTORISATION
-# =========================================================
+# =====================================================
+# EXTRACTION CONCEPTS
+# =====================================================
+
+def extract_concepts(text):
+
+    words=clean_words(text)
+
+    counts=Counter(words)
+
+    concepts=[w for w,c in counts.most_common(5)]
+
+    return concepts
+
+# =====================================================
+# VECTOR
+# =====================================================
 
 def text_vector(text):
 
@@ -121,9 +67,9 @@ def text_vector(text):
 
     return vec
 
-# =========================================================
+# =====================================================
 # COSINE
-# =========================================================
+# =====================================================
 
 def cosine(a,b):
 
@@ -142,9 +88,51 @@ def cosine(a,b):
 
     return dot/(na*nb)
 
-# =========================================================
+# =====================================================
+# INIT DATABASE
+# =====================================================
+
+def init_db():
+
+    conn=sqlite3.connect(CORE_DB)
+
+    c=conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS memories(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT,
+    vector TEXT,
+    source TEXT,
+    timestamp TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+    conn=sqlite3.connect(DOC_DB)
+
+    c=conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS documents(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT,
+    vector TEXT,
+    source TEXT,
+    timestamp TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =====================================================
 # ORACLE ENGINE
-# =========================================================
+# =====================================================
 
 class OracleEngine:
 
@@ -152,16 +140,12 @@ class OracleEngine:
 
         self.core=sqlite3.connect(CORE_DB,check_same_thread=False)
         self.docs=sqlite3.connect(DOC_DB,check_same_thread=False)
-        self.dict=sqlite3.connect(DICT_DB,check_same_thread=False)
 
-    # =====================================================
+    # =================================================
     # LEARN
-    # =====================================================
+    # =================================================
 
     def learn(self,text,source="user"):
-
-        if not text:
-            return
 
         vec=text_vector(text)
 
@@ -171,8 +155,6 @@ class OracleEngine:
         )
 
         self.core.commit()
-
-        self.learn_trigram(text)
 
     def learn_document(self,text,source="document"):
 
@@ -185,48 +167,17 @@ class OracleEngine:
 
         self.docs.commit()
 
-    # =====================================================
-    # TRIGRAM
-    # =====================================================
-
-    def learn_trigram(self,text):
-
-        words=clean_words(text)
-
-        for i in range(len(words)-2):
-
-            w1,w2,w3=words[i],words[i+1],words[i+2]
-
-            cur=self.core.execute(
-            "SELECT count FROM trigrams WHERE w1=? AND w2=? AND w3=?",
-            (w1,w2,w3)
-            ).fetchone()
-
-            if cur:
-
-                self.core.execute(
-                "UPDATE trigrams SET count=count+1 WHERE w1=? AND w2=? AND w3=?",
-                (w1,w2,w3)
-                )
-
-            else:
-
-                self.core.execute(
-                "INSERT INTO trigrams VALUES(?,?,?,1)",
-                (w1,w2,w3)
-                )
-
-        self.core.commit()
-
-    # =====================================================
-    # RECHERCHE HYBRIDE
-    # =====================================================
+    # =================================================
+    # RECHERCHE INTELLIGENTE
+    # =================================================
 
     def search(self,question,conn,table):
 
         qvec=text_vector(question)
 
         qwords=set(clean_words(question))
+
+        qconcepts=set(extract_concepts(question))
 
         rows=conn.execute(f"SELECT text,vector,source FROM {table}")
 
@@ -236,25 +187,25 @@ class OracleEngine:
 
             try:
 
-                mem_text=r[0]
-
+                text=r[0]
                 vec=eval(r[1])
-
                 source=r[2]
 
-                # cosine similarity
-                score=cosine(qvec,vec)
+                score_cos=cosine(qvec,vec)
 
-                # lexical overlap
-                mem_words=set(clean_words(mem_text))
+                mem_words=set(clean_words(text))
 
                 overlap=len(qwords & mem_words)
 
-                score=score+(overlap*0.1)
+                mem_concepts=set(extract_concepts(text))
 
-                if score>0.05:
+                concept_match=len(qconcepts & mem_concepts)
 
-                    best.append((score,mem_text,source))
+                score=(score_cos*0.5)+(overlap*0.3)+(concept_match*0.2)
+
+                if score>0.1:
+
+                    best.append((score,text,source))
 
             except:
 
@@ -262,101 +213,66 @@ class OracleEngine:
 
         best.sort(reverse=True)
 
-        return best[:5]
+        return best[:7]
 
-    # =====================================================
-    # GENERATION TRIGRAM
-    # =====================================================
+    # =================================================
+    # FUSION CONNAISSANCE
+    # =================================================
 
-    def generate(self,question):
-
-        words=clean_words(question)
-
-        if len(words)<2:
-            return question
-
-        w1,w2=words[-2],words[-1]
-
-        cur=self.core.execute(
-        "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 1",
-        (w1,w2)
-        ).fetchone()
-
-        if not cur:
-            return question
-
-        return question+" "+cur[0]
-
-    # =====================================================
-    # EXTRACTION CONNAISSANCE
-    # =====================================================
-
-    def extract_answer(self,memories):
+    def synthesize(self,memories):
 
         if not memories:
             return None
 
-        best=memories[0][1]
+        texts=[m[1] for m in memories[:3]]
 
-        return best
+        combined=" ".join(texts)
 
-    # =====================================================
+        return combined[:500]
+
+    # =================================================
     # RAISONNEMENT
-    # =====================================================
+    # =================================================
 
     def reason(self,question):
 
-        memories=self.search(question,self.core,"memories")
+        mem=self.search(question,self.core,"memories")
 
         docs=self.search(question,self.docs,"documents")
 
-        generated=self.generate(question)
+        knowledge=mem+docs
 
-        best_answer=self.extract_answer(memories)
+        synthesis=self.synthesize(knowledge)
 
         response="ANALYSE DE LA QUESTION\n\n"
 
         response+=question+"\n\n"
 
-        response+="CONNAISSANCES TROUVÉES\n\n"
+        response+="CONNAISSANCES IDENTIFIÉES\n\n"
 
-        if memories:
+        for s,t,src in knowledge[:5]:
 
-            for s,m,src in memories:
-
-                response+=f"- ({src}) {m[:250]}\n\n"
-
-        if docs:
-
-            for s,m,src in docs:
-
-                response+=f"- (document) {m[:250]}\n\n"
-
-        if not memories and not docs:
-
-            response+="Aucune connaissance pertinente trouvée.\n\n"
+            response+=f"- ({src}) {t[:200]}\n\n"
 
         response+="RAISONNEMENT\n\n"
 
-        if best_answer:
+        if synthesis:
 
-            response+="Les informations retrouvées dans la mémoire indiquent que :\n\n"
-
-            response+=best_answer+"\n\n"
+            response+=synthesis+"\n\n"
 
         else:
 
-            response+=generated+"\n\n"
+            response+="Aucune connaissance suffisante pour répondre.\n\n"
 
         response+="CONCLUSION\n\n"
 
-        response+="La réponse est produite à partir des connaissances stockées dans les bases mémoire et de l'analyse contextuelle de la question."
+        response+="La réponse est construite à partir des connaissances apprises par l'ORACLE."
 
         return response
 
-    # =====================================================
+    # =================================================
     # STATS
-    # =====================================================
+    # =================================================
 
     def stats(self):
 
