@@ -34,8 +34,10 @@ def load_oracle():
 oracle = load_oracle()
 
 # ============================================================
-# INTERFACE
+# QUESTION UTILISATEUR
 # ============================================================
+
+st.subheader("Poser une question")
 
 question = st.text_input("Pose une question à ORACLE")
 
@@ -45,9 +47,17 @@ if question:
 
     st.markdown("### Réponse")
     st.write(response)
-    uploaded_file = st.file_uploader(
-    "Ajouter document",
-    type=["pdf","docx","xlsx","csv","txt"]
+
+# ============================================================
+# AJOUT DOCUMENT
+# ============================================================
+
+st.markdown("---")
+st.subheader("Ajouter un document à la mémoire")
+
+uploaded_file = st.file_uploader(
+    "Importer un fichier",
+    type=["pdf", "docx", "xlsx", "csv", "txt"]
 )
 
 if uploaded_file:
@@ -57,7 +67,7 @@ if uploaded_file:
     st.success(result)
 
 # ============================================================
-# AJOUT MEMOIRE
+# AJOUT MEMOIRE TEXTE
 # ============================================================
 
 st.markdown("---")
@@ -66,5 +76,9 @@ st.subheader("Ajouter un souvenir")
 memory = st.text_input("Nouvelle information")
 
 if st.button("Enregistrer"):
-    oracle.add_memory(memory)
-    st.success("Mémoire ajoutée")
+
+    if memory.strip() != "":
+        oracle.add_memory(memory)
+        st.success("Mémoire ajoutée")
+    else:
+        st.warning("Veuillez entrer une information.")
