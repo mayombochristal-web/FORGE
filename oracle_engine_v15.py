@@ -6,7 +6,8 @@ from datetime import datetime
 from collections import Counter
 
 # =========================================================
-# ORACLE V15 Ω COSMOS ENGINE
+# ORACLE V15 Ω COSMOS+
+# ENGINE AMELIORE
 # =========================================================
 
 BASE_FOLDER="oracle_memory"
@@ -18,9 +19,19 @@ DICT_DB=os.path.join(BASE_FOLDER,"oracle_dictionary.db")
 if not os.path.exists(BASE_FOLDER):
     os.makedirs(BASE_FOLDER)
 
+# =========================================================
+# STOP WORDS
+# =========================================================
+
+STOP_WORDS=set([
+"le","la","les","de","des","du",
+"un","une","et","ou","a","à",
+"en","dans","sur","pour","par",
+"que","qui","quoi","est","sont"
+])
 
 # =========================================================
-# DATABASE INIT
+# INITIALISATION DB
 # =========================================================
 
 def init_db():
@@ -50,7 +61,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
     conn=sqlite3.connect(DOC_DB)
     c=conn.cursor()
 
@@ -67,7 +77,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
     conn=sqlite3.connect(DICT_DB)
     c=conn.cursor()
 
@@ -81,16 +90,26 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 init_db()
 
 # =========================================================
-# VECTOR
+# NETTOYAGE TEXTE
+# =========================================================
+
+def clean_words(text):
+
+    words=text.lower().split()
+
+    return [w for w in words if w not in STOP_WORDS]
+
+# =========================================================
+# VECTORISATION
 # =========================================================
 
 def text_vector(text):
 
-    words=text.lower().split()
+    words=clean_words(text)
+
     counts=Counter(words)
 
     vec=[]
@@ -102,6 +121,9 @@ def text_vector(text):
 
     return vec
 
+# =========================================================
+# COSINE
+# =========================================================
 
 def cosine(a,b):
 
@@ -138,6 +160,9 @@ class OracleEngine:
 
     def learn(self,text,source="user"):
 
+        if not text:
+            return
+
         vec=text_vector(text)
 
         self.core.execute(
@@ -166,7 +191,7 @@ class OracleEngine:
 
     def learn_trigram(self,text):
 
-        words=text.lower().split()
+        words=clean_words(text)
 
         for i in range(len(words)-2):
 
@@ -194,12 +219,14 @@ class OracleEngine:
         self.core.commit()
 
     # =====================================================
-    # SEARCH
+    # RECHERCHE HYBRIDE
     # =====================================================
 
     def search(self,question,conn,table):
 
         qvec=text_vector(question)
+
+        qwords=set(clean_words(question))
 
         rows=conn.execute(f"SELECT text,vector,source FROM {table}")
 
@@ -207,43 +234,43 @@ class OracleEngine:
 
         for r in rows.fetchall():
 
-            vec=eval(r[1])
+            try:
 
-            score=cosine(qvec,vec)
+                mem_text=r[0]
 
-            if score>0.2:
+                vec=eval(r[1])
 
-                best.append((score,r[0],r[2]))
+                source=r[2]
+
+                # cosine similarity
+                score=cosine(qvec,vec)
+
+                # lexical overlap
+                mem_words=set(clean_words(mem_text))
+
+                overlap=len(qwords & mem_words)
+
+                score=score+(overlap*0.1)
+
+                if score>0.05:
+
+                    best.append((score,mem_text,source))
+
+            except:
+
+                continue
 
         best.sort(reverse=True)
 
         return best[:5]
 
     # =====================================================
-    # AUTO SOURCE
-    # =====================================================
-
-    def select_sources(self,question):
-
-        q=question.lower()
-
-        sources=["memories"]
-
-        if "document" in q or "analyse" in q:
-            sources.append("documents")
-
-        if "signifie" in q or "definition" in q:
-            sources.append("dictionary")
-
-        return sources
-
-    # =====================================================
-    # GENERATE
+    # GENERATION TRIGRAM
     # =====================================================
 
     def generate(self,question):
 
-        words=question.lower().split()
+        words=clean_words(question)
 
         if len(words)<2:
             return question
@@ -261,43 +288,69 @@ class OracleEngine:
         return question+" "+cur[0]
 
     # =====================================================
-    # REASON
+    # EXTRACTION CONNAISSANCE
+    # =====================================================
+
+    def extract_answer(self,memories):
+
+        if not memories:
+            return None
+
+        best=memories[0][1]
+
+        return best
+
+    # =====================================================
+    # RAISONNEMENT
     # =====================================================
 
     def reason(self,question):
 
-        sources=self.select_sources(question)
-
         memories=self.search(question,self.core,"memories")
 
-        docs=[]
-
-        if "documents" in sources:
-
-            docs=self.search(question,self.docs,"documents")
+        docs=self.search(question,self.docs,"documents")
 
         generated=self.generate(question)
 
+        best_answer=self.extract_answer(memories)
+
         response="ANALYSE DE LA QUESTION\n\n"
+
         response+=question+"\n\n"
 
         response+="CONNAISSANCES TROUVÉES\n\n"
 
-        for s,m,src in memories:
+        if memories:
 
-            response+=f"- ({src}) {m[:200]}\n\n"
+            for s,m,src in memories:
 
-        for s,m,src in docs:
+                response+=f"- ({src}) {m[:250]}\n\n"
 
-            response+=f"- (document) {m[:200]}\n\n"
+        if docs:
+
+            for s,m,src in docs:
+
+                response+=f"- (document) {m[:250]}\n\n"
+
+        if not memories and not docs:
+
+            response+="Aucune connaissance pertinente trouvée.\n\n"
 
         response+="RAISONNEMENT\n\n"
 
-        response+=generated+"\n\n"
+        if best_answer:
+
+            response+="Les informations retrouvées dans la mémoire indiquent que :\n\n"
+
+            response+=best_answer+"\n\n"
+
+        else:
+
+            response+=generated+"\n\n"
 
         response+="CONCLUSION\n\n"
 
-        response+="Cette réponse est basée sur les connaissances stockées dans les bases mémoire de l'ORACLE."
+        response+="La réponse est produite à partir des connaissances stockées dans les bases mémoire et de l'analyse contextuelle de la question."
 
         return response
 
@@ -307,8 +360,14 @@ class OracleEngine:
 
     def stats(self):
 
-        n=self.core.execute(
-        "SELECT COUNT(*) FROM memories"
-        ).fetchone()[0]
+        try:
 
-        return n
+            n=self.core.execute(
+            "SELECT COUNT(*) FROM memories"
+            ).fetchone()[0]
+
+            return n
+
+        except:
+
+            return 0
