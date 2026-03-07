@@ -4,10 +4,10 @@ import math
 from collections import Counter
 
 # lecture fichiers
-import io
 import pandas as pd
 import PyPDF2
 import docx
+
 
 # ============================================================
 # ORACLE V16 ENGINE
@@ -25,15 +25,25 @@ class OracleEngine:
         self.load_memory()
 
     # ========================================================
+    # NETTOYAGE TEXTE
+    # ========================================================
+
+    def clean_text(self, text):
+
+        text = text.replace("\n", " ")
+        text = text.replace("\r", " ")
+
+        return text.strip()
+
+    # ========================================================
     # VECTORISATION TEXTE
     # ========================================================
 
     def text_to_vector(self, text):
 
         words = text.lower().split()
-        counter = Counter(words)
 
-        return counter
+        return Counter(words)
 
     # ========================================================
     # SIMILARITE COSINUS
@@ -45,15 +55,15 @@ class OracleEngine:
 
         numerator = sum(v1[x] * v2[x] for x in intersection)
 
-        sum1 = sum(v1[x] ** 2 for x in v1.keys())
-        sum2 = sum(v2[x] ** 2 for x in v2.keys())
+        sum1 = sum(v1[x] ** 2 for x in v1)
+        sum2 = sum(v2[x] ** 2 for x in v2)
 
         denominator = math.sqrt(sum1) * math.sqrt(sum2)
 
-        if not denominator:
+        if denominator == 0:
             return 0.0
 
-        return float(numerator) / denominator
+        return numerator / denominator
 
     # ========================================================
     # CHARGEMENT MEMOIRE
@@ -62,11 +72,17 @@ class OracleEngine:
     def load_memory(self):
 
         if not os.path.exists(self.memory_file):
+
             self.memory_cache = []
             return
 
-        with open(self.memory_file, "r", encoding="utf-8") as f:
-            self.memory_cache = json.load(f)
+        try:
+
+            with open(self.memory_file, "r", encoding="utf-8") as f:
+                self.memory_cache = json.load(f)
+
+        except:
+            self.memory_cache = []
 
         self.build_vector_index()
 
@@ -124,6 +140,7 @@ class OracleEngine:
             score = 0
 
             for w in words:
+
                 if w in mem.lower():
                     score += 1
 
@@ -148,6 +165,7 @@ class OracleEngine:
             score = 0
 
             for c in concepts:
+
                 if c.lower() in mem.lower():
                     score += 1
 
@@ -168,6 +186,7 @@ class OracleEngine:
         response = "Voici ce que je sais :\n\n"
 
         for m in memories[:3]:
+
             response += "- " + m + "\n"
 
         return response
@@ -186,9 +205,7 @@ class OracleEngine:
 
         memories = self.multi_concept_reasoning(query, memories)
 
-        response = self.generate_response(query, memories)
-
-        return response
+        return self.generate_response(query, memories)
 
     # ========================================================
     # AJOUT MEMOIRE TEXTE
@@ -196,17 +213,38 @@ class OracleEngine:
 
     def add_memory(self, text):
 
+        text = self.clean_text(text)
+
         entry = {"text": text}
 
         self.memory_cache.append(entry)
 
         with open(self.memory_file, "w", encoding="utf-8") as f:
+
             json.dump(self.memory_cache, f, indent=2)
 
         self.build_vector_index()
 
     # ========================================================
-    # EXTRACTION TEXTE PDF
+    # DECOUPAGE LONG TEXTE
+    # ========================================================
+
+    def split_text(self, text, size=500):
+
+        chunks = []
+
+        words = text.split()
+
+        for i in range(0, len(words), size):
+
+            chunk = " ".join(words[i:i+size])
+
+            chunks.append(chunk)
+
+        return chunks
+
+    # ========================================================
+    # LECTURE PDF
     # ========================================================
 
     def read_pdf(self, file):
@@ -216,12 +254,13 @@ class OracleEngine:
         text = ""
 
         for page in reader.pages:
-            text += page.extract_text() + "\n"
+
+            text += page.extract_text() or ""
 
         return text
 
     # ========================================================
-    # EXTRACTION WORD
+    # LECTURE WORD
     # ========================================================
 
     def read_docx(self, file):
@@ -231,12 +270,13 @@ class OracleEngine:
         text = ""
 
         for p in document.paragraphs:
+
             text += p.text + "\n"
 
         return text
 
     # ========================================================
-    # EXTRACTION EXCEL
+    # LECTURE EXCEL
     # ========================================================
 
     def read_excel(self, file):
@@ -246,7 +286,7 @@ class OracleEngine:
         return df.to_string()
 
     # ========================================================
-    # EXTRACTION CSV
+    # LECTURE CSV
     # ========================================================
 
     def read_csv(self, file):
@@ -256,7 +296,7 @@ class OracleEngine:
         return df.to_string()
 
     # ========================================================
-    # EXTRACTION GENERIQUE
+    # LECTURE GENERIQUE
     # ========================================================
 
     def read_file(self, uploaded_file):
@@ -266,20 +306,19 @@ class OracleEngine:
         if name.endswith(".pdf"):
             return self.read_pdf(uploaded_file)
 
-        elif name.endswith(".docx"):
+        if name.endswith(".docx"):
             return self.read_docx(uploaded_file)
 
-        elif name.endswith(".xlsx"):
+        if name.endswith(".xlsx"):
             return self.read_excel(uploaded_file)
 
-        elif name.endswith(".csv"):
+        if name.endswith(".csv"):
             return self.read_csv(uploaded_file)
 
-        elif name.endswith(".txt"):
+        if name.endswith(".txt"):
             return uploaded_file.read().decode("utf-8")
 
-        else:
-            return ""
+        return ""
 
     # ========================================================
     # AJOUT MEMOIRE FICHIER
@@ -290,8 +329,12 @@ class OracleEngine:
         text = self.read_file(uploaded_file)
 
         if text.strip() == "":
-            return "Impossible de lire le fichier."
+            return "Fichier vide ou non supporté."
 
-        self.add_memory(text)
+        chunks = self.split_text(text)
 
-        return "Fichier ajouté à la mémoire."
+        for chunk in chunks:
+
+            self.add_memory(chunk)
+
+        return "Document ajouté à la mémoire."
