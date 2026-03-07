@@ -1,54 +1,82 @@
+# ======================================================
+# ORACLE ANALYTICS ENGINE
+# ======================================================
+
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-DB_PATH = "oracle_memory/oracle.db"
+DB_PATH = "oracle_memory/cosmos_memory.db"
 
 # ======================================================
 # EXPORT CSV
 # ======================================================
 
-def export_csv(db=DB_PATH):
+def export_csv():
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(DB_PATH)
 
-    df = pd.read_sql_query("SELECT * FROM memories", conn)
+    df = pd.read_sql_query("SELECT * FROM memory", conn)
 
-    df.to_csv("oracle_report.csv", index=False)
+    os.makedirs("reports", exist_ok=True)
 
-    return df
+    path = "reports/oracle_report.csv"
+
+    df.to_csv(path, index=False)
+
+    return path
 
 
 # ======================================================
 # EXPORT JSON
 # ======================================================
 
-def export_json(df):
+def export_json():
 
-    df.to_json("oracle_report.json", orient="records")
+    conn = sqlite3.connect(DB_PATH)
+
+    df = pd.read_sql_query("SELECT * FROM memory", conn)
+
+    os.makedirs("reports", exist_ok=True)
+
+    path = "reports/oracle_report.json"
+
+    df.to_json(path, orient="records")
+
+    return path
 
 
 # ======================================================
 # EXPORT TXT
 # ======================================================
 
-def export_txt(df):
+def export_txt():
 
-    with open("oracle_report.txt","w",encoding="utf-8") as f:
+    conn = sqlite3.connect(DB_PATH)
+
+    df = pd.read_sql_query("SELECT * FROM memory", conn)
+
+    os.makedirs("reports", exist_ok=True)
+
+    path = "reports/oracle_report.txt"
+
+    with open(path,"w",encoding="utf-8") as f:
 
         f.write(df.to_string())
 
+    return path
+
 
 # ======================================================
-# ANALYSE DES SOUVENIRS
+# ANALYSE MEMOIRE
 # ======================================================
 
-def analyze_memories(db=DB_PATH):
+def analyze_memories():
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(DB_PATH)
 
-    df = pd.read_sql_query("SELECT * FROM memories", conn)
+    df = pd.read_sql_query("SELECT * FROM memory", conn)
 
     if df.empty:
 
@@ -58,10 +86,8 @@ def analyze_memories(db=DB_PATH):
             "top_words":[]
         }
 
-    # compteur sources
     sources = df["source"].value_counts().to_dict()
 
-    # analyse lexicale simple
     text = " ".join(df["text"].astype(str).tolist())
 
     words = text.lower().split()
@@ -76,29 +102,26 @@ def analyze_memories(db=DB_PATH):
 
 
 # ======================================================
-# GRAPH PROGRESSION IA
+# GRAPH PROGRESSION
 # ======================================================
 
-def graph_progress(db=DB_PATH):
+def graph_progress():
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(DB_PATH)
 
-    df = pd.read_sql_query("SELECT timestamp FROM memories", conn)
+    df = pd.read_sql_query("SELECT date FROM memory", conn)
 
     if df.empty:
 
         return None
 
-    # conversion date
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     df = df.dropna()
 
-    # colonne compteur
     df["count"] = 1
 
-    # grouper par jour
-    progress = df.groupby(df["timestamp"].dt.date)["count"].sum()
+    progress = df.groupby(df["date"].dt.date)["count"].sum()
 
     fig, ax = plt.subplots()
 
@@ -108,7 +131,7 @@ def graph_progress(db=DB_PATH):
 
     ax.set_xlabel("Date")
 
-    ax.set_ylabel("Memories Learned")
+    ax.set_ylabel("Memories")
 
     plt.xticks(rotation=45)
 
@@ -122,14 +145,14 @@ def graph_progress(db=DB_PATH):
 
 
 # ======================================================
-# GRAPH TYPES DE CONNAISSANCE
+# GRAPH SOURCES
 # ======================================================
 
-def graph_sources(db=DB_PATH):
+def graph_sources():
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(DB_PATH)
 
-    df = pd.read_sql_query("SELECT source FROM memories", conn)
+    df = pd.read_sql_query("SELECT source FROM memory", conn)
 
     if df.empty:
 
