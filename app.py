@@ -1,95 +1,57 @@
-# ============================================================
-# ORACLE V14 Ω STREAMLIT INTERFACE
-# ============================================================
-
 import streamlit as st
 from oracle_engine_v14 import OracleEngine
-from github import Github
-import os
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-st.set_page_config(page_title="ORACLE V14 Ω",layout="wide")
+from ttu_file_scanner import scan_file
+from analytics_engine import *
+from github_memory import backup_memory
 
 oracle=OracleEngine()
 
-# ============================================================
-# GITHUB CONFIG
-# ============================================================
+st.title("ORACLE V14 Ω TTU")
 
-try:
+st.metric("Memories",oracle.stats())
 
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    GITHUB_REPO = st.secrets["GITHUB_REPO"]
-    GITHUB_MEMORY_DIR = st.secrets["GITHUB_MEMORY_DIR"]
-    GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
-
-    github=Github(GITHUB_TOKEN)
-    repo=github.get_repo(GITHUB_REPO)
-
-except:
-
-    github=None
-
-# ============================================================
-# HEADER
-# ============================================================
-
-st.title("🧠 ORACLE V14 Ω")
-
-col1,col2=st.columns(2)
-
-with col1:
-    st.metric("Memories",oracle.memory_size())
-
-with col2:
-    st.metric("Status","ACTIVE")
-
-# ============================================================
-# INPUT
-# ============================================================
-
-user_input=st.text_area("Dialogue avec ORACLE")
+text=st.text_area("Dialogue avec ORACLE")
 
 if st.button("Envoyer"):
 
-    if user_input:
+    oracle.learn(text)
 
-        oracle.store(user_input)
+    r=oracle.reason(text)
 
-        response=oracle.reason(user_input)
+    st.write(r)
 
-        st.success(response)
+uploaded=st.file_uploader("Nourriture cérébrale",type=["txt","pdf","docx","csv","json"])
 
-# ============================================================
-# GITHUB SAVE
-# ============================================================
+if uploaded:
 
-if st.button("Sauvegarde mémoire GitHub"):
+    content=scan_file(uploaded)
 
-    if github:
+    oracle.learn(content,"document")
 
-        for root,dirs,files in os.walk("oracle_memory"):
+    st.success("Document analysé et appris")
 
-            for f in files:
+if st.button("Exporter rapport"):
 
-                path=os.path.join(root,f)
+    df=export_csv("oracle_memory/oracle.db")
 
-                with open(path,"rb") as file:
+    export_json(df)
 
-                    content=file.read()
+    export_txt(df)
 
-                repo.create_file(
-                    f"{GITHUB_MEMORY_DIR}/{f}",
-                    "memory backup",
-                    content,
-                    branch=GITHUB_BRANCH
-                )
+    st.success("Rapports générés")
 
-        st.success("Mémoire sauvegardée sur GitHub")
+if st.button("Graph évolution"):
 
-    else:
+    img=graph_progress("oracle_memory/oracle.db")
 
-        st.warning("GitHub non configuré")
+    st.image(img)
+
+if st.button("Backup GitHub"):
+
+    token=st.secrets["GITHUB_TOKEN"]
+
+    repo=st.secrets["GITHUB_REPO"]
+
+    backup_memory(token,repo,"oracle_memory")
+
+    st.success("Backup GitHub effectué")
