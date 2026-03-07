@@ -3,6 +3,7 @@ from oracle_engine_v14 import OracleEngine
 from ttu_file_scanner import scan_file
 from analytics_engine import *
 from github_memory import backup_memory
+from analytics_engine import analyze_memories, graph_sources
 
 oracle=OracleEngine()
 
@@ -39,6 +40,20 @@ if st.button("Exporter rapport"):
     export_txt(df)
 
     st.success("Rapports générés")
+if st.button("Analyse des souvenirs"):
+
+    stats = analyze_memories()
+
+    st.write("Souvenirs totaux :", stats["total_memories"])
+
+    st.write("Sources :", stats["sources"])
+
+    st.write("Concepts dominants :", stats["top_words"])
+
+    img = graph_sources()
+
+    if img:
+        st.image(img)
 
 if st.button("Graph évolution"):
 
