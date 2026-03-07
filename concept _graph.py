@@ -1,17 +1,12 @@
 from collections import Counter
 
 class ConceptGraph:
-
     def __init__(self):
+        self.graph = Counter()
 
-        self.graph=Counter()
-
-    def update(self,tokens):
-
+    def update(self, tokens):
         for t in tokens:
+            self.graph[t] += 1
 
-            self.graph[t]+=1
-
-    def top(self,n=20):
-
+    def top(self, n=20):
         return self.graph.most_common(n)
