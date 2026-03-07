@@ -1,318 +1,186 @@
 import os
-import json
-import uuid
-import datetime
 import numpy as np
-import re
-import pandas as pd
-from collections import Counter, defaultdict
+import hashlib
+import pickle
 
-from sentence_transformers import SentenceTransformer
-from github import Github
-
-import PyPDF2
-import docx
-
-
-MEMORY_PATH = "oracle_memory"
-
+# ==========================================
+# ORACLE ENGINE V18
+# ==========================================
 
 class OracleEngine:
 
     def __init__(self):
 
-        # modèle embeddings
-        self.model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L12-v2"
-        )
-
-        # github
-        try:
-            self.github = Github(os.getenv("GITHUB_TOKEN"))
-            self.repo = self.github.get_repo(os.getenv("GITHUB_REPO"))
-        except:
-            self.repo = None
-
         self.memory = []
-        self.concept_index = defaultdict(list)
+        self.vectors = []
+
+        self.memory_file = "oracle_memory.pkl"
 
         self.load_memory()
-        self.build_concept_index()
 
-    # =====================================================
-    # LOAD MEMORY
-    # =====================================================
+
+    # ==========================================
+    # VECTOR EMBEDDING SIMPLE
+    # ==========================================
+
+    def embed(self, text):
+
+        words = text.lower().split()
+
+        vec = np.zeros(128)
+
+        for w in words:
+            h = int(hashlib.md5(w.encode()).hexdigest(),16)
+            vec[h % 128] += 1
+
+        return vec / (np.linalg.norm(vec) + 1e-9)
+
+
+    # ==========================================
+    # LOAD MEMORY (démarrage rapide)
+    # ==========================================
 
     def load_memory(self):
 
-        if self.repo is None:
-            return
+        if os.path.exists(self.memory_file):
 
-        try:
+            with open(self.memory_file,"rb") as f:
 
-            files = self.repo.get_contents(MEMORY_PATH)
+                data = pickle.load(f)
 
-            for f in files:
+                self.memory = data["memory"]
+                self.vectors = data["vectors"]
 
-                data = json.loads(
-                    self.repo.get_contents(f.path).decoded_content
-                )
+        else:
 
-                if "source" not in data:
-                    data["source"] = "legacy"
+            self.memory = []
+            self.vectors = []
 
-                self.memory.append(data)
 
-        except:
-            pass
-
-    # =====================================================
+    # ==========================================
     # SAVE MEMORY
-    # =====================================================
+    # ==========================================
 
-    def save_memory(self, data):
+    def save_memory(self):
 
-        if self.repo is None:
-            return
-
-        uid = data["id"]
-
-        filename = f"{MEMORY_PATH}/{uid}.json"
-
-        content = json.dumps(data, indent=2, ensure_ascii=False)
-
-        try:
-
-            self.repo.create_file(
-                filename,
-                f"oracle memory {uid}",
-                content
-            )
-
-        except:
-            pass
-
-    # =====================================================
-    # CONCEPT EXTRACTION
-    # =====================================================
-
-    def extract_concepts(self, text):
-
-        words = re.findall(r"\b\w+\b", text.lower())
-
-        stop = {
-            "le","la","les","de","des","du",
-            "un","une","et","en","dans",
-            "est","pour","que"
+        data = {
+            "memory": self.memory,
+            "vectors": self.vectors
         }
 
-        concepts = [w for w in words if w not in stop and len(w) > 4]
+        with open(self.memory_file,"wb") as f:
+            pickle.dump(data,f)
 
-        return list(set(concepts))
 
-    # =====================================================
-    # BUILD CONCEPT INDEX
-    # =====================================================
+    # ==========================================
+    # ADD FILE MEMORY
+    # ==========================================
 
-    def build_concept_index(self):
+    def add_file_memory(self, file):
 
-        self.concept_index = defaultdict(list)
+        text = file.read().decode("utf-8",errors="ignore")
 
-        for m in self.memory:
+        chunks = text.split("\n")
 
-            concepts = self.extract_concepts(m["text"])
+        for chunk in chunks:
 
-            for c in concepts:
-                self.concept_index[c].append(m)
+            if len(chunk.strip()) < 20:
+                continue
 
-    # =====================================================
-    # TEXT SEGMENTATION
-    # =====================================================
+            vec = self.embed(chunk)
 
-    def semantic_split(self, text):
+            self.memory.append(chunk)
+            self.vectors.append(vec)
 
-        sections = re.split(r"\n\s*\d+\s*—|\n\n", text)
+        self.save_memory()
 
-        chunks = []
+        return "Mémoire ajoutée"
 
-        for s in sections:
 
-            s = s.strip()
-
-            if len(s) > 200:
-                chunks.append(s)
-
-        return chunks
-
-    # =====================================================
-    # LEARN TEXT
-    # =====================================================
-
-    def learn(self, text, source="text"):
-
-        blocks = self.semantic_split(text)
-
-        for block in blocks:
-
-            embedding = self.model.encode(block).tolist()
-
-            data = {
-
-                "id": str(uuid.uuid4()),
-                "timestamp": str(datetime.datetime.now()),
-                "text": block,
-                "embedding": embedding,
-                "source": source
-
-            }
-
-            self.memory.append(data)
-
-            self.save_memory(data)
-
-        self.build_concept_index()
-
-        return len(blocks)
-
-    # =====================================================
-    # DOCUMENT EXTRACTION
-    # =====================================================
-
-    def extract_text(self, file):
-
-        text = ""
-
-        if file.type == "text/plain":
-
-            text = file.read().decode("utf-8")
-
-        elif file.type == "application/pdf":
-
-            pdf = PyPDF2.PdfReader(file)
-
-            for page in pdf.pages:
-
-                content = page.extract_text()
-
-                if content:
-                    text += content + "\n"
-
-        elif "word" in file.type:
-
-            doc = docx.Document(file)
-
-            for p in doc.paragraphs:
-                text += p.text + "\n"
-
-        elif "csv" in file.type:
-
-            df = pd.read_csv(file)
-
-            text = df.to_string()
-
-        elif "excel" in file.type:
-
-            df = pd.read_excel(file)
-
-            text = df.to_string()
-
-        return text
-
-    # =====================================================
-    # LEARN DOCUMENT
-    # =====================================================
-
-    def learn_document(self, file):
-
-        text = self.extract_text(file)
-
-        return self.learn(text, source=file.name)
-
-    # =====================================================
+    # ==========================================
     # VECTOR SEARCH
-    # =====================================================
+    # ==========================================
 
-    def vector_search(self, question, top_k=5):
+    def vector_search(self, query, k=5):
 
-        q_embed = self.model.encode(question)
+        q_vec = self.embed(query)
 
         scores = []
 
-        for m in self.memory:
+        for i,v in enumerate(self.vectors):
 
-            if "embedding" not in m:
-                continue
+            sim = np.dot(q_vec,v)
 
-            emb = np.array(m["embedding"])
+            scores.append((sim,i))
 
-            score = np.dot(q_embed, emb) / (
-                np.linalg.norm(q_embed) *
-                np.linalg.norm(emb)
-            )
-
-            scores.append((score, m))
-
-        scores = sorted(scores, key=lambda x: x[0], reverse=True)
-
-        return [m for score, m in scores[:top_k]]
-
-    # =====================================================
-    # CONCEPT SEARCH
-    # =====================================================
-
-    def concept_search(self, question):
-
-        concepts = self.extract_concepts(question)
+        scores.sort(reverse=True)
 
         results = []
 
-        for c in concepts:
+        for s,i in scores[:k]:
 
-            if c in self.concept_index:
-
-                results.extend(self.concept_index[c])
+            results.append(self.memory[i])
 
         return results
 
-    # =====================================================
-    # REASONING
-    # =====================================================
 
-    def reason(self, question):
+    # ==========================================
+    # TRANSFORMER ATTENTION (simplifié)
+    # ==========================================
 
-        vector_results = self.vector_search(question)
+    def transformer_attention(self, query, contexts):
 
-        concept_results = self.concept_search(question)
+        attention_scores = []
 
-        combined = vector_results + concept_results
+        q_vec = self.embed(query)
 
-        seen = set()
-        texts = []
+        for ctx in contexts:
 
-        for m in combined:
+            v = self.embed(ctx)
 
-            if m["id"] not in seen:
+            score = np.dot(q_vec,v)
 
-                texts.append(m["text"])
-                seen.add(m["id"])
+            attention_scores.append((score,ctx))
 
-        if not texts:
+        attention_scores.sort(reverse=True)
 
-            return "Aucune connaissance pertinente trouvée."
+        return [c for s,c in attention_scores]
 
-        return "\n\n".join(texts[:3])
 
-    # =====================================================
-    # STATS
-    # =====================================================
+    # ==========================================
+    # MULTI CONCEPT REASONING
+    # ==========================================
 
-    def stats(self):
+    def multi_concept_reasoning(self, query, contexts):
 
-        sources = Counter(
-            [m.get("source","unknown") for m in self.memory]
-        )
+        words = query.split()
 
-        return {
-            "souvenirs": len(self.memory),
-            "sources": dict(sources)
-        }
+        reasoning = []
+
+        for ctx in contexts:
+
+            score = sum(1 for w in words if w.lower() in ctx.lower())
+
+            reasoning.append((score,ctx))
+
+        reasoning.sort(reverse=True)
+
+        return [c for s,c in reasoning]
+
+
+    # ==========================================
+    # GENERATE RESPONSE
+    # ==========================================
+
+    def generate_response(self, query):
+
+        contexts = self.vector_search(query)
+
+        attention = self.transformer_attention(query, contexts)
+
+        reasoning = self.multi_concept_reasoning(query, attention)
+
+        if reasoning:
+            return reasoning[0]
+
+        return "Je n'ai pas encore appris cela."
