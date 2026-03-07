@@ -4,9 +4,12 @@ import uuid
 import datetime
 import numpy as np
 import re
+import pandas as pd
 from collections import Counter
 from sentence_transformers import SentenceTransformer
 from github import Github
+import PyPDF2
+import docx
 
 MEMORY_PATH = "oracle_memory"
 
@@ -25,7 +28,9 @@ class OracleEngine:
 
         self.load_memory()
 
-    # ------------------------------------------------
+    # =====================================================
+    # CHARGEMENT MEMOIRE GITHUB
+    # =====================================================
 
     def load_memory(self):
 
@@ -44,7 +49,9 @@ class OracleEngine:
         except:
             pass
 
-    # ------------------------------------------------
+    # =====================================================
+    # SAUVEGARDE MEMOIRE
+    # =====================================================
 
     def save_memory(self, data):
 
@@ -52,27 +59,29 @@ class OracleEngine:
 
         filename = f"{MEMORY_PATH}/{uid}.json"
 
-        content = json.dumps(data, indent=2)
+        content = json.dumps(data, indent=2, ensure_ascii=False)
 
         self.repo.create_file(
             filename,
-            f"memory {uid}",
+            f"oracle memory {uid}",
             content
         )
 
-    # ------------------------------------------------
+    # =====================================================
+    # STATS
+    # =====================================================
 
     def stats(self):
 
         return len(self.memory)
 
-    # ------------------------------------------------
-    # SEGMENTATION INTELLIGENTE
-    # ------------------------------------------------
+    # =====================================================
+    # SEGMENTATION SEMANTIQUE
+    # =====================================================
 
     def semantic_split(self, text):
 
-        sections = re.split(r"\n\s*\d+\s*—", text)
+        sections = re.split(r"\n\s*\d+\s*—|\n\n", text)
 
         chunks = []
 
@@ -81,14 +90,15 @@ class OracleEngine:
             s = s.strip()
 
             if len(s) > 200:
-
                 chunks.append(s)
 
         return chunks
 
-    # ------------------------------------------------
+    # =====================================================
+    # APPRENTISSAGE TEXTE
+    # =====================================================
 
-    def learn(self, text):
+    def learn(self, text, source="text"):
 
         blocks = self.semantic_split(text)
 
@@ -102,7 +112,7 @@ class OracleEngine:
                 "timestamp": str(datetime.datetime.now()),
                 "text": block,
                 "embedding": embedding,
-                "type": "knowledge"
+                "source": source
 
             }
 
@@ -112,7 +122,60 @@ class OracleEngine:
 
         return len(blocks)
 
-    # ------------------------------------------------
+    # =====================================================
+    # EXTRACTION DOCUMENT
+    # =====================================================
+
+    def extract_text(self, file):
+
+        text = ""
+
+        if file.type == "text/plain":
+
+            text = file.read().decode("utf-8")
+
+        elif file.type == "application/pdf":
+
+            pdf = PyPDF2.PdfReader(file)
+
+            for page in pdf.pages:
+
+                content = page.extract_text()
+
+                if content:
+                    text += content + "\n"
+
+        elif "word" in file.type:
+
+            doc = docx.Document(file)
+
+            for p in doc.paragraphs:
+
+                text += p.text + "\n"
+
+        elif "csv" in file.type:
+
+            df = pd.read_csv(file)
+
+            text = df.to_string()
+
+        return text
+
+    # =====================================================
+    # APPRENTISSAGE DOCUMENT
+    # =====================================================
+
+    def learn_document(self, file):
+
+        text = self.extract_text(file)
+
+        blocks = self.learn(text, source=file.name)
+
+        return blocks
+
+    # =====================================================
+    # RAISONNEMENT
+    # =====================================================
 
     def reason(self, question):
 
@@ -135,9 +198,15 @@ class OracleEngine:
                 score_max = score
                 best = m["text"]
 
-        return best
+        if best:
 
-    # ------------------------------------------------
+            return best
+
+        return "Aucune connaissance pertinente trouvée."
+
+    # =====================================================
+    # RAPPORT MEMOIRE
+    # =====================================================
 
     def report(self):
 
@@ -147,9 +216,14 @@ class OracleEngine:
 
         concepts = Counter(words).most_common(10)
 
+        sources = Counter([m["source"] for m in self.memory])
+
         return {
 
             "souvenirs_totaux": len(self.memory),
 
+            "sources": dict(sources),
+
             "concepts": concepts
+
         }
