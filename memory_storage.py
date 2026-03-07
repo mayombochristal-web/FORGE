@@ -2,35 +2,34 @@ import os
 import json
 from datetime import datetime
 
-BASE_DIR = "oracle_memory"
-MEMORY_DIR = os.path.join(BASE_DIR, "memories")
+BASE="oracle_memory"
 
-def init_storage():
+MEM="oracle_memory/memories"
 
-    if not os.path.exists(BASE_DIR):
-        os.makedirs(BASE_DIR)
+def init():
 
-    if not os.path.exists(MEMORY_DIR):
-        os.makedirs(MEMORY_DIR)
+    os.makedirs(MEM,exist_ok=True)
 
 
-def save_memory(content, score):
+def save(text,vector,source):
 
-    init_storage()
+    init()
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    t=datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-    memory = {
-        "timestamp": timestamp,
-        "score": score,
-        "content": content
+    data={
+
+    "text":text,
+    "vector":vector,
+    "source":source,
+    "time":t
+
     }
 
-    filename = f"memory_{timestamp}.json"
+    path=f"{MEM}/memory_{t}.json"
 
-    path = os.path.join(MEMORY_DIR, filename)
+    with open(path,"w",encoding="utf8") as f:
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(memory, f, indent=4)
+        json.dump(data,f)
 
     return path
