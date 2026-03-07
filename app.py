@@ -1,16 +1,9 @@
 import streamlit as st
 from oracle_engine import OracleEngine
 
-# ============================================================
-# CONFIG STREAMLIT
-# ============================================================
+st.set_page_config(page_title="ORACLE V18", layout="wide")
 
-st.set_page_config(
-    page_title="ORACLE V16",
-    layout="wide"
-)
-
-st.title("🧠 ORACLE V16 — Cognitive Engine")
+st.title("🧠 ORACLE V18 — Moteur cognitif")
 
 st.markdown("""
 Architecture cognitive expérimentale
@@ -18,46 +11,48 @@ Architecture cognitive expérimentale
 Capacités :
 
 • mémoire vectorielle indexée  
-• attention transformer  
+• transformateur d'attention  
 • raisonnement multi-concept  
-• base de connaissances dynamique  
+• base de connaissances dynamique
 """)
 
-# ============================================================
-# CACHE ORACLE (DEMARRAGE RAPIDE)
-# ============================================================
+
+# ==========================================
+# LOAD ORACLE (CACHE)
+# ==========================================
 
 @st.cache_resource
 def load_oracle():
+
     return OracleEngine()
 
 oracle = load_oracle()
 
-# ============================================================
-# QUESTION UTILISATEUR
-# ============================================================
 
-st.subheader("Poser une question")
+# ==========================================
+# QUESTION
+# ==========================================
 
 question = st.text_input("Pose une question à ORACLE")
 
-if question:
+if st.button("Interroger"):
 
-    response = oracle.reason(question)
+    if question:
 
-    st.markdown("### Réponse")
-    st.write(response)
+        response = oracle.generate_response(question)
 
-# ============================================================
-# AJOUT DOCUMENT
-# ============================================================
+        st.success(response)
 
-st.markdown("---")
+
+# ==========================================
+# FILE MEMORY
+# ==========================================
+
 st.subheader("Ajouter un document à la mémoire")
 
 uploaded_file = st.file_uploader(
     "Importer un fichier",
-    type=["pdf", "docx", "xlsx", "csv", "txt"]
+    type=["txt","csv","pdf","docx"]
 )
 
 if uploaded_file:
@@ -65,20 +60,3 @@ if uploaded_file:
     result = oracle.add_file_memory(uploaded_file)
 
     st.success(result)
-
-# ============================================================
-# AJOUT MEMOIRE TEXTE
-# ============================================================
-
-st.markdown("---")
-st.subheader("Ajouter un souvenir")
-
-memory = st.text_input("Nouvelle information")
-
-if st.button("Enregistrer"):
-
-    if memory.strip() != "":
-        oracle.add_memory(memory)
-        st.success("Mémoire ajoutée")
-    else:
-        st.warning("Veuillez entrer une information.")
