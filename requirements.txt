@@ -1,7 +1,4 @@
 streamlit
-pandas
-numpy
-PyGithub
-matplotlib
-PyPDF2
+pdfplumber
 python-docx
+PyGithub
