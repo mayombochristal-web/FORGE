@@ -1,56 +1,50 @@
-# =====================================================
-# ORACLE V14 Ω ENGINE
-# =====================================================
+# ============================================================
+# ORACLE V14 Ω ULTRA STABLE
+# TTU Cognitive Engine
+# Vector Memory + Multi Concept Reasoning
+# ============================================================
 
 import sqlite3
-import numpy as np
-import pandas as pd
-import math
 import os
-import json
-import io
-import random
+import math
+import hashlib
+from datetime import datetime
 from collections import Counter
-from sentence_transformers import SentenceTransformer
-from sklearn.manifold import TSNE
-import plotly.express as px
 
-try:
-    import PyPDF2
-    PDF_AVAILABLE=True
-except:
-    PDF_AVAILABLE=False
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-try:
-    import docx
-    DOCX_AVAILABLE=True
-except:
-    DOCX_AVAILABLE=False
+DB_FOLDER = "oracle_memory"
+DB_PATH = os.path.join(DB_FOLDER, "oracle.db")
 
-MEM="oracle_memory"
-os.makedirs(MEM,exist_ok=True)
+if not os.path.exists(DB_FOLDER):
+    os.makedirs(DB_FOLDER)
 
-DB=os.path.join(MEM,"relations.db")
-
-model=SentenceTransformer("all-MiniLM-L6-v2")
-
-TARGET={"m":0.62,"c":0.71,"d":0.88}
-
-# =====================================================
-# INITIALISATION DB
-# =====================================================
+# ============================================================
+# DATABASE INITIALISATION
+# ============================================================
 
 def init_db():
 
-    conn=sqlite3.connect(DB)
+    conn = sqlite3.connect(DB_PATH)
+
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS memories(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT,
+        vector TEXT,
+        timestamp TEXT
+    )
+    """)
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS trigrams(
-    w1 TEXT,
-    w2 TEXT,
-    w3 TEXT,
-    weight REAL,
-    PRIMARY KEY(w1,w2,w3))
+        w1 TEXT,
+        w2 TEXT,
+        w3 TEXT,
+        count INTEGER
+    )
     """)
 
     conn.commit()
@@ -58,315 +52,183 @@ def init_db():
 
 init_db()
 
-# =====================================================
-# ORACLE BRAIN
-# =====================================================
+# ============================================================
+# VECTOR EMBEDDING SIMPLIFIÉ
+# ============================================================
 
-class OracleBrain:
+def text_to_vector(text):
+
+    words = text.lower().split()
+    counts = Counter(words)
+
+    vector = []
+
+    for w in counts:
+        h = int(hashlib.md5(w.encode()).hexdigest(),16)%1000
+        vector.append(h * counts[w])
+
+    return vector
+
+def cosine_similarity(a,b):
+
+    if not a or not b:
+        return 0
+
+    min_len=min(len(a),len(b))
+
+    dot=sum(a[i]*b[i] for i in range(min_len))
+    normA=math.sqrt(sum(x*x for x in a))
+    normB=math.sqrt(sum(x*x for x in b))
+
+    if normA==0 or normB==0:
+        return 0
+
+    return dot/(normA*normB)
+
+# ============================================================
+# ORACLE ENGINE
+# ============================================================
+
+class OracleEngine:
 
     def __init__(self):
 
-        self.phi={"phi_m":0.5,"phi_c":0.5,"phi_d":0.5}
+        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 
-        self.age=0
+    # ========================================================
+    # MEMORY
+    # ========================================================
 
-    # =================================================
-    # TTU DISTANCE
-    # =================================================
+    def store(self,text):
 
-    def distance(self):
+        vector=text_to_vector(text)
 
-        p=self.phi
+        self.conn.execute(
+            "INSERT INTO memories(text,vector,timestamp) VALUES(?,?,?)",
+            (text,str(vector),datetime.now().isoformat())
+        )
 
-        return math.sqrt(
-        (p["phi_m"]-TARGET["m"])**2+
-        (p["phi_c"]-TARGET["c"])**2+
-        (p["phi_d"]-TARGET["d"])**2)
+        self.conn.commit()
 
-    # =================================================
-    # EVOLUTION TTU
-    # =================================================
+        self.learn_trigrams(text)
 
-    def evolve(self,exc):
+    # ========================================================
+    # TRIGRAM LEARNING
+    # ========================================================
 
-        p=self.phi
+    def learn_trigrams(self,text):
 
-        err=self.distance()
-
-        m=p["phi_m"]+exc*0.1-(p["phi_m"]-TARGET["m"])*0.2
-        c=p["phi_c"]+exc*0.2-(p["phi_c"]-TARGET["c"])*0.2
-        d=p["phi_d"]+0.04+err*0.15
-
-        norm=math.sqrt(m*m+c*c+d*d)
-
-        self.phi={
-        "phi_m":m/norm,
-        "phi_c":c/norm,
-        "phi_d":d/norm
-        }
-
-    # =================================================
-    # TOKENIZE
-    # =================================================
-
-    def tokenize(self,text):
-
-        return [w.lower() for w in text.split() if len(w)>1]
-
-    # =================================================
-    # LEARN
-    # =================================================
-
-    def learn(self,text):
-
-        words=self.tokenize(text)
-
-        if len(words)<3:
-            return
-
-        conn=sqlite3.connect(DB)
+        words=text.lower().split()
 
         for i in range(len(words)-2):
 
-            a,b,d=words[i],words[i+1],words[i+2]
+            w1,w2,w3=words[i],words[i+1],words[i+2]
 
-            conn.execute("""
-            INSERT INTO trigrams VALUES(?,?,?,1)
-            ON CONFLICT(w1,w2,w3)
-            DO UPDATE SET weight=weight+1
-            """,(a,b,d))
-
-        conn.commit()
-        conn.close()
-
-        self.age+=len(words)
-
-        self.evolve(0.5)
-
-    # =================================================
-    # VECTOR SEARCH
-    # =================================================
-
-    def semantic_search(self,text):
-
-        emb=model.encode([text])[0]
-
-        conn=sqlite3.connect(DB)
-
-        words=pd.read_sql_query(
-        "SELECT DISTINCT w1 FROM trigrams LIMIT 500",
-        conn)
-
-        conn.close()
-
-        if len(words)==0:
-            return []
-
-        emb_words=model.encode(words["w1"].tolist())
-
-        scores=np.dot(emb_words,emb)
-
-        idx=np.argsort(scores)[-5:]
-
-        return words.iloc[idx]["w1"].tolist()
-
-    # =================================================
-    # THINK
-    # =================================================
-
-    def think(self,text=""):
-
-        concepts=self.semantic_search(text)
-
-        conn=sqlite3.connect(DB)
-
-        if concepts:
-
-            seed=random.choice(concepts)
-
-            q=conn.execute(
-            "SELECT w2 FROM trigrams WHERE w1=? LIMIT 1",
-            (seed,)
+            cur=self.conn.execute(
+                "SELECT count FROM trigrams WHERE w1=? AND w2=? AND w3=?",
+                (w1,w2,w3)
             ).fetchone()
 
-            if q:
-                words=[seed,q[0]]
+            if cur:
+
+                self.conn.execute(
+                    "UPDATE trigrams SET count=count+1 WHERE w1=? AND w2=? AND w3=?",
+                    (w1,w2,w3)
+                )
+
             else:
-                words=[seed]
-        else:
 
-            r=conn.execute(
-            "SELECT w1,w2 FROM trigrams ORDER BY RANDOM() LIMIT 1"
-            ).fetchone()
+                self.conn.execute(
+                    "INSERT INTO trigrams VALUES(?,?,?,1)",
+                    (w1,w2,w3)
+                )
 
-            if not r:
-                return "Donne moi du texte."
+        self.conn.commit()
 
-            words=[r[0],r[1]]
+    # ========================================================
+    # VECTOR SEARCH
+    # ========================================================
 
-        for _ in range(20):
+    def search_memory(self,text):
 
-            rows=conn.execute(
-            "SELECT w3,weight FROM trigrams WHERE w1=? AND w2=?",
-            (words[-2],words[-1])
-            ).fetchall()
+        vector=text_to_vector(text)
 
-            if not rows:
-                break
+        cur=self.conn.execute("SELECT text,vector FROM memories")
 
-            ws=[r[0] for r in rows]
+        best_score=0
+        best_text=""
 
-            w=np.array([r[1] for r in rows])
+        for row in cur.fetchall():
 
-            p=w/w.sum()
+            mem=row[0]
+            vec=eval(row[1])
 
-            nxt=np.random.choice(ws,p=p)
+            score=cosine_similarity(vector,vec)
 
-            words.append(nxt)
+            if score>best_score:
 
-        conn.close()
+                best_score=score
+                best_text=mem
 
-        return " ".join(words).capitalize()+"."
+        return best_text
 
-    # =================================================
-    # DOCUMENT READER
-    # =================================================
+    # ========================================================
+    # TRIGRAM GENERATION
+    # ========================================================
 
-    def read_document(self,file):
+    def generate(self,seed):
 
-        name=file.name.lower()
+        words=seed.lower().split()
 
-        try:
+        if len(words)<2:
+            return seed
 
-            if name.endswith(".txt"):
-                return file.read().decode("utf-8","ignore")
+        w1,w2=words[-2],words[-1]
 
-            if name.endswith(".csv"):
-                return pd.read_csv(file).to_string()
+        cur=self.conn.execute(
+            "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 5",
+            (w1,w2)
+        )
 
-            if name.endswith(".json"):
-                return json.dumps(json.load(file))
+        options=cur.fetchall()
 
-            if name.endswith(".xlsx"):
-                return pd.read_excel(file).to_string()
+        if not options:
+            return seed
 
-            if name.endswith(".docx") and DOCX_AVAILABLE:
-                doc=docx.Document(io.BytesIO(file.read()))
-                return " ".join(p.text for p in doc.paragraphs)
+        next_word=options[0][0]
 
-            if name.endswith(".pdf") and PDF_AVAILABLE:
-                reader=PyPDF2.PdfReader(io.BytesIO(file.read()))
-                text=""
-                for p in reader.pages:
-                    text+=p.extract_text() or ""
-                return text
+        return seed+" "+next_word
 
-        except:
-            return ""
+    # ========================================================
+    # MULTI CONCEPT REASONING
+    # ========================================================
 
-        return ""
+    def reason(self,text):
 
-    # =================================================
-    # DOCUMENT ANALYSIS
-    # =================================================
+        memory=self.search_memory(text)
 
-    def analyze_document(self,text):
+        generated=self.generate(text)
 
-        words=self.tokenize(text)
+        if memory:
 
-        self.learn(text)
+            return f"{generated}\n\nConcept associé : {memory}"
 
-        stats={
-        "mots":len(words),
-        "concepts":len(set(words)),
-        "top":Counter(words).most_common(10)
-        }
+        return generated
 
-        return stats
-
-    # =================================================
-    # SLEEP
-    # =================================================
-
-    def sleep_cycle(self):
-
-        conn=sqlite3.connect(DB)
-
-        df=pd.read_sql_query("SELECT weight FROM trigrams",conn)
-
-        if len(df)>5:
-
-            th=df.weight.mean()-df.weight.std()
-
-            conn.execute(
-            "DELETE FROM trigrams WHERE weight<?",
-            (th,)
-            )
-
-        conn.commit()
-        conn.close()
-
-    # =================================================
-    # MEMORY SIZE
-    # =================================================
+    # ========================================================
+    # STATS
+    # ========================================================
 
     def memory_size(self):
 
-        conn=sqlite3.connect(DB)
+        try:
 
-        n=conn.execute(
-        "SELECT COUNT(*) FROM trigrams"
-        ).fetchone()[0]
+            n=self.conn.execute(
+                "SELECT COUNT(*) FROM memories"
+            ).fetchone()[0]
 
-        conn.close()
+            return n
 
-        return n
+        except:
 
-    # =================================================
-    # EXPORT
-    # =================================================
-
-    def export_concepts(self):
-
-        conn=sqlite3.connect(DB)
-
-        df=pd.read_sql_query(
-        "SELECT * FROM trigrams",
-        conn)
-
-        conn.close()
-
-        return df
-
-    # =================================================
-    # VISUALISATION
-    # =================================================
-
-    def visualize(self):
-
-        conn=sqlite3.connect(DB)
-
-        words=pd.read_sql_query(
-        "SELECT DISTINCT w1 FROM trigrams LIMIT 200",
-        conn)
-
-        conn.close()
-
-        if len(words)<5:
-            return None
-
-        emb=model.encode(words["w1"].tolist())
-
-        tsne=TSNE(n_components=2)
-
-        coords=tsne.fit_transform(emb)
-
-        df=pd.DataFrame({
-        "word":words["w1"],
-        "x":coords[:,0],
-        "y":coords[:,1]
-        })
-
-        fig=px.scatter(df,x="x",y="y",text="word")
-
-        return fig
+            return 0
