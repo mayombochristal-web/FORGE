@@ -3,6 +3,12 @@ import json
 import math
 from collections import Counter
 
+# lecture fichiers
+import io
+import pandas as pd
+import PyPDF2
+import docx
+
 # ============================================================
 # ORACLE V16 ENGINE
 # ============================================================
@@ -50,7 +56,7 @@ class OracleEngine:
         return float(numerator) / denominator
 
     # ========================================================
-    # CHARGEMENT MEMOIRE (CACHE)
+    # CHARGEMENT MEMOIRE
     # ========================================================
 
     def load_memory(self):
@@ -104,7 +110,7 @@ class OracleEngine:
         return scores[:5]
 
     # ========================================================
-    # TRANSFORMER ATTENTION (SIMPLIFIE)
+    # TRANSFORMER ATTENTION
     # ========================================================
 
     def transformer_attention(self, query, memories):
@@ -185,14 +191,12 @@ class OracleEngine:
         return response
 
     # ========================================================
-    # AJOUT MEMOIRE
+    # AJOUT MEMOIRE TEXTE
     # ========================================================
 
     def add_memory(self, text):
 
-        entry = {
-            "text": text
-        }
+        entry = {"text": text}
 
         self.memory_cache.append(entry)
 
@@ -200,3 +204,94 @@ class OracleEngine:
             json.dump(self.memory_cache, f, indent=2)
 
         self.build_vector_index()
+
+    # ========================================================
+    # EXTRACTION TEXTE PDF
+    # ========================================================
+
+    def read_pdf(self, file):
+
+        reader = PyPDF2.PdfReader(file)
+
+        text = ""
+
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+
+        return text
+
+    # ========================================================
+    # EXTRACTION WORD
+    # ========================================================
+
+    def read_docx(self, file):
+
+        document = docx.Document(file)
+
+        text = ""
+
+        for p in document.paragraphs:
+            text += p.text + "\n"
+
+        return text
+
+    # ========================================================
+    # EXTRACTION EXCEL
+    # ========================================================
+
+    def read_excel(self, file):
+
+        df = pd.read_excel(file)
+
+        return df.to_string()
+
+    # ========================================================
+    # EXTRACTION CSV
+    # ========================================================
+
+    def read_csv(self, file):
+
+        df = pd.read_csv(file)
+
+        return df.to_string()
+
+    # ========================================================
+    # EXTRACTION GENERIQUE
+    # ========================================================
+
+    def read_file(self, uploaded_file):
+
+        name = uploaded_file.name.lower()
+
+        if name.endswith(".pdf"):
+            return self.read_pdf(uploaded_file)
+
+        elif name.endswith(".docx"):
+            return self.read_docx(uploaded_file)
+
+        elif name.endswith(".xlsx"):
+            return self.read_excel(uploaded_file)
+
+        elif name.endswith(".csv"):
+            return self.read_csv(uploaded_file)
+
+        elif name.endswith(".txt"):
+            return uploaded_file.read().decode("utf-8")
+
+        else:
+            return ""
+
+    # ========================================================
+    # AJOUT MEMOIRE FICHIER
+    # ========================================================
+
+    def add_file_memory(self, uploaded_file):
+
+        text = self.read_file(uploaded_file)
+
+        if text.strip() == "":
+            return "Impossible de lire le fichier."
+
+        self.add_memory(text)
+
+        return "Fichier ajouté à la mémoire."
