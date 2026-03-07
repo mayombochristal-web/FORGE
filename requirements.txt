@@ -1,10 +1,11 @@
 streamlit
-numpy
-scipy
 pandas
-matplotlib
-reportlab
-sentence-transformers
-scikit-learn
+numpy
 PyPDF2
 python-docx
+scipy
+matplotlib
+sentence-transformers
+scikit-learn
+plotly
+requests
