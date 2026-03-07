@@ -5,7 +5,7 @@ import datetime
 import numpy as np
 import re
 import pandas as pd
-from collections import Counter
+from collections import Counter, defaultdict
 from sentence_transformers import SentenceTransformer
 from github import Github
 import PyPDF2
@@ -25,12 +25,14 @@ class OracleEngine:
         self.repo = self.github.get_repo(os.getenv("GITHUB_REPO"))
 
         self.memory = []
+        self.concept_index = defaultdict(list)
 
         self.load_memory()
+        self.build_concept_index()
 
-    # =====================================================
-    # CHARGEMENT MEMOIRE GITHUB
-    # =====================================================
+    # --------------------------------------------------
+    # LOAD MEMORY
+    # --------------------------------------------------
 
     def load_memory(self):
 
@@ -44,14 +46,17 @@ class OracleEngine:
                     self.repo.get_contents(f.path).decoded_content
                 )
 
+                if "source" not in data:
+                    data["source"] = "legacy"
+
                 self.memory.append(data)
 
         except:
             pass
 
-    # =====================================================
-    # SAUVEGARDE MEMOIRE
-    # =====================================================
+    # --------------------------------------------------
+    # SAVE MEMORY
+    # --------------------------------------------------
 
     def save_memory(self, data):
 
@@ -67,17 +72,48 @@ class OracleEngine:
             content
         )
 
-    # =====================================================
+    # --------------------------------------------------
     # STATS
-    # =====================================================
+    # --------------------------------------------------
 
     def stats(self):
 
         return len(self.memory)
 
-    # =====================================================
-    # SEGMENTATION SEMANTIQUE
-    # =====================================================
+    # --------------------------------------------------
+    # CONCEPT EXTRACTION
+    # --------------------------------------------------
+
+    def extract_concepts(self, text):
+
+        words = re.findall(r"\b\w+\b", text.lower())
+
+        stop = {
+            "le","la","les","de","des","du","un","une",
+            "et","en","dans","est","pour","que"
+        }
+
+        concepts = [w for w in words if w not in stop and len(w) > 4]
+
+        return list(set(concepts))
+
+    # --------------------------------------------------
+    # BUILD CONCEPT INDEX
+    # --------------------------------------------------
+
+    def build_concept_index(self):
+
+        for m in self.memory:
+
+            concepts = self.extract_concepts(m["text"])
+
+            for c in concepts:
+
+                self.concept_index[c].append(m)
+
+    # --------------------------------------------------
+    # SEGMENTATION
+    # --------------------------------------------------
 
     def semantic_split(self, text):
 
@@ -90,13 +126,14 @@ class OracleEngine:
             s = s.strip()
 
             if len(s) > 200:
+
                 chunks.append(s)
 
         return chunks
 
-    # =====================================================
-    # APPRENTISSAGE TEXTE
-    # =====================================================
+    # --------------------------------------------------
+    # LEARN TEXT
+    # --------------------------------------------------
 
     def learn(self, text, source="text"):
 
@@ -120,11 +157,13 @@ class OracleEngine:
 
             self.save_memory(data)
 
+        self.build_concept_index()
+
         return len(blocks)
 
-    # =====================================================
-    # EXTRACTION DOCUMENT
-    # =====================================================
+    # --------------------------------------------------
+    # DOCUMENT EXTRACTION
+    # --------------------------------------------------
 
     def extract_text(self, file):
 
@@ -161,9 +200,9 @@ class OracleEngine:
 
         return text
 
-    # =====================================================
-    # APPRENTISSAGE DOCUMENT
-    # =====================================================
+    # --------------------------------------------------
+    # LEARN DOCUMENT
+    # --------------------------------------------------
 
     def learn_document(self, file):
 
@@ -173,16 +212,15 @@ class OracleEngine:
 
         return blocks
 
-    # =====================================================
-    # RAISONNEMENT
-    # =====================================================
+    # --------------------------------------------------
+    # VECTOR SEARCH
+    # --------------------------------------------------
 
-    def reason(self, question):
+    def vector_search(self, question, top_k=5):
 
         q_embed = self.model.encode(question)
 
-        best = None
-        score_max = -1
+        scores = []
 
         for m in self.memory:
 
@@ -193,37 +231,84 @@ class OracleEngine:
                 np.linalg.norm(emb)
             )
 
-            if score > score_max:
+            scores.append((score, m))
 
-                score_max = score
-                best = m["text"]
+        scores.sort(reverse=True)
 
-        if best:
+        return [m for _, m in scores[:top_k]]
 
-            return best
+    # --------------------------------------------------
+    # CONCEPT SEARCH
+    # --------------------------------------------------
 
-        return "Aucune connaissance pertinente trouvée."
+    def concept_search(self, question):
 
-    # =====================================================
-    # RAPPORT MEMOIRE
-    # =====================================================
+        concepts = self.extract_concepts(question)
+
+        results = []
+
+        for c in concepts:
+
+            if c in self.concept_index:
+
+                results.extend(self.concept_index[c])
+
+        return results
+
+    # --------------------------------------------------
+    # REASONING ENGINE
+    # --------------------------------------------------
+
+    def reason(self, question):
+
+        vector_results = self.vector_search(question)
+
+        concept_results = self.concept_search(question)
+
+        combined = vector_results + concept_results
+
+        seen = set()
+        texts = []
+
+        for m in combined:
+
+            if m["id"] not in seen:
+
+                texts.append(m["text"])
+
+                seen.add(m["id"])
+
+        if not texts:
+
+            return "Aucune connaissance pertinente trouvée."
+
+        return "\n\n".join(texts[:3])
+
+    # --------------------------------------------------
+    # REPORT
+    # --------------------------------------------------
 
     def report(self):
 
-        texts = [m["text"] for m in self.memory]
+        texts = []
+        sources = []
+
+        for m in self.memory:
+
+            texts.append(m["text"])
+
+            sources.append(m.get("source","unknown"))
 
         words = " ".join(texts).split()
 
         concepts = Counter(words).most_common(10)
 
-        sources = Counter([m["source"] for m in self.memory])
+        source_count = Counter(sources)
 
         return {
 
             "souvenirs_totaux": len(self.memory),
-
-            "sources": dict(sources),
-
+            "sources": dict(source_count),
             "concepts": concepts
 
         }
