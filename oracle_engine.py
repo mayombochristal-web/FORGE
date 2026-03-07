@@ -1,340 +1,318 @@
 import os
 import json
-import math
-from collections import Counter
-
-# lecture fichiers
+import uuid
+import datetime
+import numpy as np
+import re
 import pandas as pd
+from collections import Counter, defaultdict
+
+from sentence_transformers import SentenceTransformer
+from github import Github
+
 import PyPDF2
 import docx
 
 
-# ============================================================
-# ORACLE V16 ENGINE
-# ============================================================
+MEMORY_PATH = "oracle_memory"
+
 
 class OracleEngine:
 
     def __init__(self):
 
-        self.memory_file = "oracle_memory.json"
+        # modèle embeddings
+        self.model = SentenceTransformer(
+            "paraphrase-multilingual-MiniLM-L12-v2"
+        )
 
-        self.memory_cache = []
-        self.vector_index = []
+        # github
+        try:
+            self.github = Github(os.getenv("GITHUB_TOKEN"))
+            self.repo = self.github.get_repo(os.getenv("GITHUB_REPO"))
+        except:
+            self.repo = None
+
+        self.memory = []
+        self.concept_index = defaultdict(list)
 
         self.load_memory()
+        self.build_concept_index()
 
-    # ========================================================
-    # NETTOYAGE TEXTE
-    # ========================================================
-
-    def clean_text(self, text):
-
-        text = text.replace("\n", " ")
-        text = text.replace("\r", " ")
-
-        return text.strip()
-
-    # ========================================================
-    # VECTORISATION TEXTE
-    # ========================================================
-
-    def text_to_vector(self, text):
-
-        words = text.lower().split()
-
-        return Counter(words)
-
-    # ========================================================
-    # SIMILARITE COSINUS
-    # ========================================================
-
-    def cosine_similarity(self, v1, v2):
-
-        intersection = set(v1.keys()) & set(v2.keys())
-
-        numerator = sum(v1[x] * v2[x] for x in intersection)
-
-        sum1 = sum(v1[x] ** 2 for x in v1)
-        sum2 = sum(v2[x] ** 2 for x in v2)
-
-        denominator = math.sqrt(sum1) * math.sqrt(sum2)
-
-        if denominator == 0:
-            return 0.0
-
-        return numerator / denominator
-
-    # ========================================================
-    # CHARGEMENT MEMOIRE
-    # ========================================================
+    # =====================================================
+    # LOAD MEMORY
+    # =====================================================
 
     def load_memory(self):
 
-        if not os.path.exists(self.memory_file):
-
-            self.memory_cache = []
+        if self.repo is None:
             return
 
         try:
 
-            with open(self.memory_file, "r", encoding="utf-8") as f:
-                self.memory_cache = json.load(f)
+            files = self.repo.get_contents(MEMORY_PATH)
+
+            for f in files:
+
+                data = json.loads(
+                    self.repo.get_contents(f.path).decoded_content
+                )
+
+                if "source" not in data:
+                    data["source"] = "legacy"
+
+                self.memory.append(data)
 
         except:
-            self.memory_cache = []
+            pass
 
-        self.build_vector_index()
+    # =====================================================
+    # SAVE MEMORY
+    # =====================================================
 
-    # ========================================================
-    # INDEX VECTORIEL
-    # ========================================================
+    def save_memory(self, data):
 
-    def build_vector_index(self):
+        if self.repo is None:
+            return
 
-        self.vector_index = []
+        uid = data["id"]
 
-        for mem in self.memory_cache:
+        filename = f"{MEMORY_PATH}/{uid}.json"
 
-            text = mem["text"]
+        content = json.dumps(data, indent=2, ensure_ascii=False)
 
-            vector = self.text_to_vector(text)
+        try:
 
-            self.vector_index.append({
-                "text": text,
-                "vector": vector
-            })
+            self.repo.create_file(
+                filename,
+                f"oracle memory {uid}",
+                content
+            )
 
-    # ========================================================
-    # RECHERCHE VECTORIELLE
-    # ========================================================
+        except:
+            pass
 
-    def vector_search(self, query):
+    # =====================================================
+    # CONCEPT EXTRACTION
+    # =====================================================
 
-        q_vector = self.text_to_vector(query)
+    def extract_concepts(self, text):
 
-        scores = []
+        words = re.findall(r"\b\w+\b", text.lower())
 
-        for mem in self.vector_index:
+        stop = {
+            "le","la","les","de","des","du",
+            "un","une","et","en","dans",
+            "est","pour","que"
+        }
 
-            score = self.cosine_similarity(q_vector, mem["vector"])
+        concepts = [w for w in words if w not in stop and len(w) > 4]
 
-            scores.append((score, mem["text"]))
+        return list(set(concepts))
 
-        scores.sort(key=lambda x: x[0], reverse=True)
+    # =====================================================
+    # BUILD CONCEPT INDEX
+    # =====================================================
 
-        return scores[:5]
+    def build_concept_index(self):
 
-    # ========================================================
-    # TRANSFORMER ATTENTION
-    # ========================================================
+        self.concept_index = defaultdict(list)
 
-    def transformer_attention(self, query, memories):
+        for m in self.memory:
 
-        words = query.lower().split()
-
-        attention_scores = []
-
-        for mem in memories:
-
-            score = 0
-
-            for w in words:
-
-                if w in mem.lower():
-                    score += 1
-
-            attention_scores.append((score, mem))
-
-        attention_scores.sort(reverse=True)
-
-        return [m[1] for m in attention_scores]
-
-    # ========================================================
-    # RAISONNEMENT MULTI CONCEPT
-    # ========================================================
-
-    def multi_concept_reasoning(self, query, memories):
-
-        concepts = query.split()
-
-        results = []
-
-        for mem in memories:
-
-            score = 0
+            concepts = self.extract_concepts(m["text"])
 
             for c in concepts:
+                self.concept_index[c].append(m)
 
-                if c.lower() in mem.lower():
-                    score += 1
+    # =====================================================
+    # TEXT SEGMENTATION
+    # =====================================================
 
-            if score > 0:
-                results.append(mem)
+    def semantic_split(self, text):
 
-        return results
-
-    # ========================================================
-    # GENERATION REPONSE
-    # ========================================================
-
-    def generate_response(self, query, memories):
-
-        if not memories:
-            return "Je n'ai pas encore d'information sur ce sujet."
-
-        response = "Voici ce que je sais :\n\n"
-
-        for m in memories[:3]:
-
-            response += "- " + m + "\n"
-
-        return response
-
-    # ========================================================
-    # PIPELINE COMPLET
-    # ========================================================
-
-    def reason(self, query):
-
-        vector_results = self.vector_search(query)
-
-        memories = [m[1] for m in vector_results]
-
-        memories = self.transformer_attention(query, memories)
-
-        memories = self.multi_concept_reasoning(query, memories)
-
-        return self.generate_response(query, memories)
-
-    # ========================================================
-    # AJOUT MEMOIRE TEXTE
-    # ========================================================
-
-    def add_memory(self, text):
-
-        text = self.clean_text(text)
-
-        entry = {"text": text}
-
-        self.memory_cache.append(entry)
-
-        with open(self.memory_file, "w", encoding="utf-8") as f:
-
-            json.dump(self.memory_cache, f, indent=2)
-
-        self.build_vector_index()
-
-    # ========================================================
-    # DECOUPAGE LONG TEXTE
-    # ========================================================
-
-    def split_text(self, text, size=500):
+        sections = re.split(r"\n\s*\d+\s*—|\n\n", text)
 
         chunks = []
 
-        words = text.split()
+        for s in sections:
 
-        for i in range(0, len(words), size):
+            s = s.strip()
 
-            chunk = " ".join(words[i:i+size])
-
-            chunks.append(chunk)
+            if len(s) > 200:
+                chunks.append(s)
 
         return chunks
 
-    # ========================================================
-    # LECTURE PDF
-    # ========================================================
+    # =====================================================
+    # LEARN TEXT
+    # =====================================================
 
-    def read_pdf(self, file):
+    def learn(self, text, source="text"):
 
-        reader = PyPDF2.PdfReader(file)
+        blocks = self.semantic_split(text)
+
+        for block in blocks:
+
+            embedding = self.model.encode(block).tolist()
+
+            data = {
+
+                "id": str(uuid.uuid4()),
+                "timestamp": str(datetime.datetime.now()),
+                "text": block,
+                "embedding": embedding,
+                "source": source
+
+            }
+
+            self.memory.append(data)
+
+            self.save_memory(data)
+
+        self.build_concept_index()
+
+        return len(blocks)
+
+    # =====================================================
+    # DOCUMENT EXTRACTION
+    # =====================================================
+
+    def extract_text(self, file):
 
         text = ""
 
-        for page in reader.pages:
+        if file.type == "text/plain":
 
-            text += page.extract_text() or ""
+            text = file.read().decode("utf-8")
+
+        elif file.type == "application/pdf":
+
+            pdf = PyPDF2.PdfReader(file)
+
+            for page in pdf.pages:
+
+                content = page.extract_text()
+
+                if content:
+                    text += content + "\n"
+
+        elif "word" in file.type:
+
+            doc = docx.Document(file)
+
+            for p in doc.paragraphs:
+                text += p.text + "\n"
+
+        elif "csv" in file.type:
+
+            df = pd.read_csv(file)
+
+            text = df.to_string()
+
+        elif "excel" in file.type:
+
+            df = pd.read_excel(file)
+
+            text = df.to_string()
 
         return text
 
-    # ========================================================
-    # LECTURE WORD
-    # ========================================================
+    # =====================================================
+    # LEARN DOCUMENT
+    # =====================================================
 
-    def read_docx(self, file):
+    def learn_document(self, file):
 
-        document = docx.Document(file)
+        text = self.extract_text(file)
 
-        text = ""
+        return self.learn(text, source=file.name)
 
-        for p in document.paragraphs:
+    # =====================================================
+    # VECTOR SEARCH
+    # =====================================================
 
-            text += p.text + "\n"
+    def vector_search(self, question, top_k=5):
 
-        return text
+        q_embed = self.model.encode(question)
 
-    # ========================================================
-    # LECTURE EXCEL
-    # ========================================================
+        scores = []
 
-    def read_excel(self, file):
+        for m in self.memory:
 
-        df = pd.read_excel(file)
+            if "embedding" not in m:
+                continue
 
-        return df.to_string()
+            emb = np.array(m["embedding"])
 
-    # ========================================================
-    # LECTURE CSV
-    # ========================================================
+            score = np.dot(q_embed, emb) / (
+                np.linalg.norm(q_embed) *
+                np.linalg.norm(emb)
+            )
 
-    def read_csv(self, file):
+            scores.append((score, m))
 
-        df = pd.read_csv(file)
+        scores = sorted(scores, key=lambda x: x[0], reverse=True)
 
-        return df.to_string()
+        return [m for score, m in scores[:top_k]]
 
-    # ========================================================
-    # LECTURE GENERIQUE
-    # ========================================================
+    # =====================================================
+    # CONCEPT SEARCH
+    # =====================================================
 
-    def read_file(self, uploaded_file):
+    def concept_search(self, question):
 
-        name = uploaded_file.name.lower()
+        concepts = self.extract_concepts(question)
 
-        if name.endswith(".pdf"):
-            return self.read_pdf(uploaded_file)
+        results = []
 
-        if name.endswith(".docx"):
-            return self.read_docx(uploaded_file)
+        for c in concepts:
 
-        if name.endswith(".xlsx"):
-            return self.read_excel(uploaded_file)
+            if c in self.concept_index:
 
-        if name.endswith(".csv"):
-            return self.read_csv(uploaded_file)
+                results.extend(self.concept_index[c])
 
-        if name.endswith(".txt"):
-            return uploaded_file.read().decode("utf-8")
+        return results
 
-        return ""
+    # =====================================================
+    # REASONING
+    # =====================================================
 
-    # ========================================================
-    # AJOUT MEMOIRE FICHIER
-    # ========================================================
+    def reason(self, question):
 
-    def add_file_memory(self, uploaded_file):
+        vector_results = self.vector_search(question)
 
-        text = self.read_file(uploaded_file)
+        concept_results = self.concept_search(question)
 
-        if text.strip() == "":
-            return "Fichier vide ou non supporté."
+        combined = vector_results + concept_results
 
-        chunks = self.split_text(text)
+        seen = set()
+        texts = []
 
-        for chunk in chunks:
+        for m in combined:
 
-            self.add_memory(chunk)
+            if m["id"] not in seen:
 
-        return "Document ajouté à la mémoire."
+                texts.append(m["text"])
+                seen.add(m["id"])
+
+        if not texts:
+
+            return "Aucune connaissance pertinente trouvée."
+
+        return "\n\n".join(texts[:3])
+
+    # =====================================================
+    # STATS
+    # =====================================================
+
+    def stats(self):
+
+        sources = Counter(
+            [m.get("source","unknown") for m in self.memory]
+        )
+
+        return {
+            "souvenirs": len(self.memory),
+            "sources": dict(sources)
+        }
