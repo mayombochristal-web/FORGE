@@ -45,6 +45,16 @@ if question:
 
     st.markdown("### Réponse")
     st.write(response)
+    uploaded_file = st.file_uploader(
+    "Ajouter document",
+    type=["pdf","docx","xlsx","csv","txt"]
+)
+
+if uploaded_file:
+
+    result = oracle.add_file_memory(uploaded_file)
+
+    st.success(result)
 
 # ============================================================
 # AJOUT MEMOIRE
