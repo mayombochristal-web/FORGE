@@ -2,19 +2,14 @@ import gzip
 import shutil
 import os
 
-COMPRESSED_DIR = "oracle_memory/compressed"
+def compress(path):
 
-def compress_memory(file_path):
+    out=path+".gz"
 
-    if not os.path.exists(COMPRESSED_DIR):
-        os.makedirs(COMPRESSED_DIR)
+    with open(path,"rb") as f_in:
 
-    filename = os.path.basename(file_path)
+        with gzip.open(out,"wb") as f_out:
 
-    compressed_file = os.path.join(COMPRESSED_DIR, filename + ".gz")
+            shutil.copyfileobj(f_in,f_out)
 
-    with open(file_path, 'rb') as f_in:
-        with gzip.open(compressed_file, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-
-    return compressed_file
+    return out
