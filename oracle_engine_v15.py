@@ -1,272 +1,201 @@
 # ============================================================
 # ORACLE V15 Ω COSMOS
-# Moteur Cognitif Expérimental
+# Moteur Cognitif
 # ============================================================
 
-import os
-import sqlite3
 import json
 import re
 import math
-from datetime import datetime
-from collections import defaultdict, Counter
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-MEMORY_FOLDER = "oracle_memory"
-DB_PATH = os.path.join(MEMORY_FOLDER, "cosmos_memory.db")
-
-if not os.path.exists(MEMORY_FOLDER):
-    os.makedirs(MEMORY_FOLDER)
-
-# ============================================================
-# TOKENIZER
-# ============================================================
+from collections import Counter
+from oracle_memory_manager import MemoryManager
+import pdfplumber
+import docx
+import csv
 
 STOPWORDS = {
-    "les","des","une","dans","pour","avec",
-    "qui","que","est","sur","pas","plus",
-    "par","comme","mais","donc","car",
-    "nous","vous","ils","elle","elles",
-    "aux","ces","ses","leur","leurs"
+"les","des","une","dans","pour","avec",
+"qui","que","est","sur","pas","plus",
+"par","comme","mais","donc","car"
 }
 
 def tokenize(text):
 
-    text = text.lower()
+    text=text.lower()
 
-    tokens = re.findall(r"[a-zàâéèêëîïôûùüç]{3,}", text)
+    tokens=re.findall(r"[a-zàâéèêëîïôûùüç]{3,}",text)
 
-    tokens = [t for t in tokens if t not in STOPWORDS]
+    tokens=[t for t in tokens if t not in STOPWORDS]
 
     return tokens
 
 
-# ============================================================
-# VECTOR
-# ============================================================
+def vectorize(tokens):
 
-def text_vector(tokens):
-
-    vector = defaultdict(int)
+    v={}
 
     for t in tokens:
-        vector[t] += 1
+        v[t]=v.get(t,0)+1
 
-    return vector
+    return v
 
 
-def cosine_similarity(v1, v2):
+def cosine(v1,v2):
 
-    intersection = set(v1.keys()) & set(v2.keys())
+    inter=set(v1)&set(v2)
 
-    numerator = sum(v1[x] * v2[x] for x in intersection)
+    num=sum(v1[x]*v2[x] for x in inter)
 
-    sum1 = sum(v**2 for v in v1.values())
-    sum2 = sum(v**2 for v in v2.values())
+    s1=sum(v**2 for v in v1.values())
+    s2=sum(v**2 for v in v2.values())
 
-    denominator = math.sqrt(sum1) * math.sqrt(sum2)
+    denom=math.sqrt(s1)*math.sqrt(s2)
 
-    if denominator == 0:
+    if denom==0:
         return 0
 
-    return numerator / denominator
+    return num/denom
 
-
-# ============================================================
-# DOCUMENT SPLIT
-# ============================================================
-
-def split_document(text, chunk_size=120):
-
-    words = text.split()
-
-    chunks = []
-
-    for i in range(0, len(words), chunk_size):
-
-        chunk = " ".join(words[i:i+chunk_size])
-
-        if len(chunk) > 80:
-            chunks.append(chunk)
-
-    return chunks
-
-
-# ============================================================
-# MEMORY
-# ============================================================
-
-class VectorMemory:
-
-    def __init__(self):
-
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-
-        self.create_table()
-
-    def create_table(self):
-
-        self.conn.execute("""
-
-        CREATE TABLE IF NOT EXISTS memory(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        text TEXT,
-        vector TEXT,
-        source TEXT,
-        date TEXT
-        )
-
-        """)
-
-        self.conn.commit()
-
-    def add(self, text, source="user"):
-
-        tokens = tokenize(text)
-
-        vector = text_vector(tokens)
-
-        self.conn.execute(
-
-            "INSERT INTO memory(text,vector,source,date) VALUES(?,?,?,?)",
-
-            (text, json.dumps(vector), source, str(datetime.now()))
-        )
-
-        self.conn.commit()
-
-    def search(self, query, top_k=5):
-
-        tokens = tokenize(query)
-
-        q_vector = text_vector(tokens)
-
-        rows = self.conn.execute(
-
-            "SELECT text,vector FROM memory"
-
-        ).fetchall()
-
-        results = []
-
-        for text, vector_json in rows:
-
-            vector = json.loads(vector_json)
-
-            score = cosine_similarity(q_vector, vector)
-
-            results.append((score, text))
-
-        results.sort(reverse=True)
-
-        return results[:top_k]
-
-    def all(self):
-
-        rows = self.conn.execute(
-
-            "SELECT source,text FROM memory"
-
-        ).fetchall()
-
-        return rows
-
-
-# ============================================================
-# ORACLE ENGINE
-# ============================================================
 
 class OracleEngine:
 
     def __init__(self):
 
-        self.memory = VectorMemory()
+        self.memory=MemoryManager()
 
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    def learn(self, text, source="user"):
+    def learn(self,text):
 
-        if len(text.strip()) > 10:
+        tokens=tokenize(text)
 
-            self.memory.add(text, source)
+        if len(tokens)>3:
 
-    # --------------------------------------------------------
+            vector=vectorize(tokens)
 
-    def learn_document(self, text):
+            self.memory.store(text,vector,"user")
 
-        chunks = split_document(text)
+    # -----------------------------------------------------
 
-        learned = 0
+    def learn_document(self,file):
+
+        name=file.name
+
+        text=""
+
+        if name.endswith(".txt"):
+
+            text=file.read().decode()
+
+        elif name.endswith(".pdf"):
+
+            with pdfplumber.open(file) as pdf:
+
+                for p in pdf.pages:
+                    text+=p.extract_text()
+
+        elif name.endswith(".docx"):
+
+            doc=docx.Document(file)
+
+            for p in doc.paragraphs:
+                text+=p.text
+
+        elif name.endswith(".csv"):
+
+            reader=csv.reader(file.read().decode().splitlines())
+
+            for r in reader:
+                text+=" ".join(r)
+
+        words=text.split()
+
+        chunks=[]
+
+        for i in range(0,len(words),120):
+
+            chunk=" ".join(words[i:i+120])
+
+            if len(chunk)>80:
+                chunks.append(chunk)
+
+        learned=0
 
         for c in chunks:
 
-            tokens = tokenize(c)
+            tokens=tokenize(c)
 
-            if len(tokens) > 5:
+            if len(tokens)>5:
 
-                self.memory.add(c, "document")
+                vector=vectorize(tokens)
 
-                learned += 1
+                self.memory.store(c,vector,"document")
+
+                learned+=1
 
         return learned
 
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
-    def reason(self, question):
+    def reason(self,question):
 
-        results = self.memory.search(question)
+        tokens=tokenize(question)
 
-        memories = [r[1] for r in results]
+        qvec=vectorize(tokens)
 
-        response = []
+        results=self.memory.search(qvec)
+
+        response=[]
 
         response.append("ANALYSE DE LA QUESTION")
         response.append(question)
 
-        response.append("\nCONNAISSANCES TROUVÉES")
+        response.append("\nCONNAISSANCES ASSOCIÉES")
 
-        for m in memories:
+        for score,text in results:
 
-            response.append("- " + m[:200])
+            response.append(f"- {text[:200]}")
 
-        response.append("\nCONCLUSION")
+        response.append("\nRAISONNEMENT")
 
-        if memories:
+        if results:
 
-            response.append(memories[0])
+            response.append(
+            "Les informations stockées suggèrent que la réponse est liée aux éléments ci-dessus."
+            )
 
         else:
 
-            response.append("Aucune connaissance trouvée.")
+            response.append(
+            "Aucune connaissance pertinente trouvée dans la mémoire actuelle."
+            )
+
+        response.append("\nCONCLUSION")
+
+        if results:
+            response.append(results[0][1])
 
         return "\n".join(response)
 
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
     def stats(self):
 
-        rows = self.memory.all()
+        return self.memory.count()
 
-        return len(rows)
-
-    # --------------------------------------------------------
+    # -----------------------------------------------------
 
     def report(self):
 
-        rows = self.memory.all()
+        rows=self.memory.all()
 
-        sources = Counter()
+        sources=Counter()
+        concepts=Counter()
 
-        concepts = Counter()
+        for r in rows:
 
-        for source,text in rows:
+            sources[r["source"]]+=1
 
-            sources[source]+=1
-
-            tokens = tokenize(text)
+            tokens=tokenize(r["text"])
 
             for t in tokens:
 
@@ -274,10 +203,8 @@ class OracleEngine:
 
         return {
 
-            "souvenirs_totaux": len(rows),
-
-            "sources": dict(sources),
-
-            "concepts": dict(concepts.most_common(20))
+        "souvenirs_totaux":len(rows),
+        "sources":dict(sources),
+        "concepts":dict(concepts.most_common(20))
 
         }
