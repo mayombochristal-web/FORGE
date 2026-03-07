@@ -4,3 +4,6 @@ pandas
 sentence-transformers
 scikit-learn
 plotly
+PyPDF2
+python-docx
+openpyxl
