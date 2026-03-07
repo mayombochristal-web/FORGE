@@ -1,3 +1,7 @@
 streamlit
-PyGithub
+pandas
 numpy
+PyGithub
+matplotlib
+PyPDF2
+python-docx
