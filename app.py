@@ -1,5 +1,5 @@
 import streamlit as st
-  from oracle_engine import OracleEngine
+from oracle_engine import OracleEngine
 
 st.set_page_config(
     page_title="ORACLE V15.5 Ω COSMOS",
@@ -14,17 +14,18 @@ Architecture cognitive expérimentale
 Capacités :
 
 • mémoire vectorielle  
-• graph de connaissances  
+• graph conceptuel  
 • raisonnement multi-souvenirs  
 • apprentissage documentaire  
 • mémoire persistante GitHub  
 • analyse cognitive  
 """)
 
-# INITIALISATION
+# =====================================================
+# INITIALISATION ORACLE
+# =====================================================
 
 if "oracle" not in st.session_state:
-
     st.session_state.oracle = OracleEngine()
 
 oracle = st.session_state.oracle
@@ -33,7 +34,9 @@ st.metric("Souvenirs enregistrés", oracle.stats())
 
 st.divider()
 
-# QUESTION
+# =====================================================
+# DIALOGUE
+# =====================================================
 
 st.subheader("💬 Dialogue avec ORACLE")
 
@@ -41,11 +44,15 @@ question = st.text_area("Pose une question")
 
 if st.button("Interroger ORACLE"):
 
-    response = oracle.reason(question)
+    if question.strip() != "":
 
-    st.write(response)
+        response = oracle.reason(question)
 
+        st.write(response)
+
+# =====================================================
 # APPRENTISSAGE TEXTE
+# =====================================================
 
 st.divider()
 
@@ -55,11 +62,15 @@ text = st.text_area("Texte à apprendre")
 
 if st.button("Apprendre texte"):
 
-    blocks = oracle.learn(text)
+    if text.strip() != "":
 
-    st.success(f"{blocks} souvenirs ajoutés")
+        blocks = oracle.learn(text)
 
+        st.success(f"{blocks} souvenirs ajoutés")
+
+# =====================================================
 # DOCUMENT
+# =====================================================
 
 st.divider()
 
@@ -76,7 +87,9 @@ if uploaded:
 
     st.success(f"{learned} blocs de connaissance ajoutés")
 
+# =====================================================
 # ANALYSE
+# =====================================================
 
 st.divider()
 
