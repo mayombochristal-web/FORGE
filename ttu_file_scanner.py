@@ -1,71 +1,40 @@
-# ======================================================
-# TTU FILE SCANNER
-# Text Transfer Unit
-# ======================================================
-
-import pandas as pd
-import json
-import PyPDF2
+import pdfplumber
 import docx
+import csv
+
 
 def scan_file(file):
 
-    name = file.name.lower()
+    name=file.name
 
-    try:
+    text=""
 
-        # TXT
-        if name.endswith(".txt"):
+    if name.endswith(".txt"):
 
-            return file.read().decode("utf-8", errors="ignore")
+        text=file.read().decode()
 
-        # CSV
-        if name.endswith(".csv"):
+    elif name.endswith(".pdf"):
 
-            df = pd.read_csv(file)
+        with pdfplumber.open(file) as pdf:
 
-            return df.to_string()
+            for p in pdf.pages:
 
-        # JSON
-        if name.endswith(".json"):
+                text+=p.extract_text()
 
-            data = json.load(file)
+    elif name.endswith(".docx"):
 
-            return json.dumps(data)
+        doc=docx.Document(file)
 
-        # PDF
-        if name.endswith(".pdf"):
+        for p in doc.paragraphs:
 
-            reader = PyPDF2.PdfReader(file)
+            text+=p.text
 
-            text = ""
+    elif name.endswith(".csv"):
 
-            for page in reader.pages:
+        reader=csv.reader(file.read().decode().splitlines())
 
-                t = page.extract_text()
+        for r in reader:
 
-                if t:
-                    text += t
+            text+=" ".join(r)
 
-            return text
-
-        # DOCX
-        if name.endswith(".docx"):
-
-            doc = docx.Document(file)
-
-            text = ""
-
-            for p in doc.paragraphs:
-
-                text += p.text + "\n"
-
-            return text
-
-        return ""
-
-    except Exception as e:
-
-        print("Scan error:", e)
-
-        return ""
+    return text
