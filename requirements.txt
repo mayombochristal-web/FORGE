@@ -1,11 +1,6 @@
 streamlit
-pandas
 numpy
-PyPDF2
-python-docx
-scipy
-matplotlib
+pandas
 sentence-transformers
 scikit-learn
 plotly
-requests
