@@ -1,8 +1,8 @@
 streamlit
-pandas
-numpy
-scipy
 sentence-transformers
+numpy
+pandas
+PyPDF2
+python-docx
+PyGithub
 scikit-learn
-plotly
-requests
