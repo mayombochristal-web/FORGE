@@ -30,9 +30,9 @@ class OracleEngine:
         self.load_memory()
         self.build_concept_index()
 
-    # --------------------------------------------------
+    # =====================================================
     # LOAD MEMORY
-    # --------------------------------------------------
+    # =====================================================
 
     def load_memory(self):
 
@@ -54,9 +54,9 @@ class OracleEngine:
         except:
             pass
 
-    # --------------------------------------------------
+    # =====================================================
     # SAVE MEMORY
-    # --------------------------------------------------
+    # =====================================================
 
     def save_memory(self, data):
 
@@ -66,40 +66,46 @@ class OracleEngine:
 
         content = json.dumps(data, indent=2, ensure_ascii=False)
 
-        self.repo.create_file(
-            filename,
-            f"oracle memory {uid}",
-            content
-        )
+        try:
 
-    # --------------------------------------------------
+            self.repo.create_file(
+                filename,
+                f"oracle memory {uid}",
+                content
+            )
+
+        except:
+            pass
+
+    # =====================================================
     # STATS
-    # --------------------------------------------------
+    # =====================================================
 
     def stats(self):
 
         return len(self.memory)
 
-    # --------------------------------------------------
+    # =====================================================
     # CONCEPT EXTRACTION
-    # --------------------------------------------------
+    # =====================================================
 
     def extract_concepts(self, text):
 
         words = re.findall(r"\b\w+\b", text.lower())
 
         stop = {
-            "le","la","les","de","des","du","un","une",
-            "et","en","dans","est","pour","que"
+            "le","la","les","de","des","du",
+            "un","une","et","en","dans",
+            "est","pour","que"
         }
 
         concepts = [w for w in words if w not in stop and len(w) > 4]
 
         return list(set(concepts))
 
-    # --------------------------------------------------
-    # BUILD CONCEPT INDEX
-    # --------------------------------------------------
+    # =====================================================
+    # BUILD INDEX
+    # =====================================================
 
     def build_concept_index(self):
 
@@ -111,9 +117,9 @@ class OracleEngine:
 
                 self.concept_index[c].append(m)
 
-    # --------------------------------------------------
+    # =====================================================
     # SEGMENTATION
-    # --------------------------------------------------
+    # =====================================================
 
     def semantic_split(self, text):
 
@@ -131,9 +137,9 @@ class OracleEngine:
 
         return chunks
 
-    # --------------------------------------------------
+    # =====================================================
     # LEARN TEXT
-    # --------------------------------------------------
+    # =====================================================
 
     def learn(self, text, source="text"):
 
@@ -161,9 +167,9 @@ class OracleEngine:
 
         return len(blocks)
 
-    # --------------------------------------------------
-    # DOCUMENT EXTRACTION
-    # --------------------------------------------------
+    # =====================================================
+    # EXTRACT DOCUMENT
+    # =====================================================
 
     def extract_text(self, file):
 
@@ -189,7 +195,6 @@ class OracleEngine:
             doc = docx.Document(file)
 
             for p in doc.paragraphs:
-
                 text += p.text + "\n"
 
         elif "csv" in file.type:
@@ -200,9 +205,9 @@ class OracleEngine:
 
         return text
 
-    # --------------------------------------------------
+    # =====================================================
     # LEARN DOCUMENT
-    # --------------------------------------------------
+    # =====================================================
 
     def learn_document(self, file):
 
@@ -212,35 +217,37 @@ class OracleEngine:
 
         return blocks
 
-    # --------------------------------------------------
+    # =====================================================
     # VECTOR SEARCH
-    # --------------------------------------------------
+    # =====================================================
 
     def vector_search(self, question, top_k=5):
 
-    q_embed = self.model.encode(question)
+        q_embed = self.model.encode(question)
 
-    scores = []
+        scores = []
 
-    for m in self.memory:
+        for m in self.memory:
 
-        emb = np.array(m["embedding"])
+            if "embedding" not in m:
+                continue
 
-        score = np.dot(q_embed, emb) / (
-            np.linalg.norm(q_embed) *
-            np.linalg.norm(emb)
-        )
+            emb = np.array(m["embedding"])
 
-        scores.append((score, m))
+            score = np.dot(q_embed, emb) / (
+                np.linalg.norm(q_embed) *
+                np.linalg.norm(emb)
+            )
 
-    # tri sécurisé
-    scores = sorted(scores, key=lambda x: x[0], reverse=True)
+            scores.append((score, m))
 
-    return [m for score, m in scores[:top_k]]
+        scores = sorted(scores, key=lambda x: x[0], reverse=True)
 
-    # --------------------------------------------------
+        return [m for score, m in scores[:top_k]]
+
+    # =====================================================
     # CONCEPT SEARCH
-    # --------------------------------------------------
+    # =====================================================
 
     def concept_search(self, question):
 
@@ -256,9 +263,9 @@ class OracleEngine:
 
         return results
 
-    # --------------------------------------------------
-    # REASONING ENGINE
-    # --------------------------------------------------
+    # =====================================================
+    # REASONING
+    # =====================================================
 
     def reason(self, question):
 
@@ -285,9 +292,9 @@ class OracleEngine:
 
         return "\n\n".join(texts[:3])
 
-    # --------------------------------------------------
+    # =====================================================
     # REPORT
-    # --------------------------------------------------
+    # =====================================================
 
     def report(self):
 
@@ -298,7 +305,7 @@ class OracleEngine:
 
             texts.append(m["text"])
 
-            sources.append(m.get("source","unknown"))
+            sources.append(m.get("source", "unknown"))
 
         words = " ".join(texts).split()
 
