@@ -13,24 +13,35 @@ Architecture cognitive expérimentale
 
 Capacités :
 
-• mémoire vectorielle
-• raisonnement multi-concept
-• apprentissage documentaire
-• mémoire persistante GitHub
-• analyse cognitive
+• mémoire vectorielle  
+• raisonnement multi-concept  
+• apprentissage documentaire  
+• mémoire persistante GitHub  
+• analyse cognitive  
 """)
 
-if "oracle" not in st.session_state:
+# =====================================================
+# INITIALISATION
+# =====================================================
 
+if "oracle" not in st.session_state:
     st.session_state.oracle = OracleEngine()
 
 oracle = st.session_state.oracle
+
+# =====================================================
+# STATS
+# =====================================================
 
 st.metric("Souvenirs enregistrés", oracle.stats())
 
 st.divider()
 
-st.subheader("💬 Dialogue")
+# =====================================================
+# QUESTION
+# =====================================================
+
+st.subheader("💬 Dialogue avec ORACLE")
 
 question = st.text_area("Pose une question")
 
@@ -40,26 +51,55 @@ if st.button("Interroger ORACLE"):
 
     st.write(response)
 
+# =====================================================
+# APPRENTISSAGE TEXTE
+# =====================================================
+
 st.divider()
 
-st.subheader("📚 Apprentissage")
+st.subheader("🧠 Ajouter connaissance")
 
-text = st.text_area("Ajouter connaissance")
+text = st.text_area("Entrer un texte à apprendre")
 
-if st.button("Apprendre"):
+if st.button("Apprendre texte"):
 
     blocks = oracle.learn(text)
 
     st.success(f"{blocks} souvenirs ajoutés")
 
+# =====================================================
+# APPRENTISSAGE DOCUMENT
+# =====================================================
+
 st.divider()
 
-st.subheader("📊 Analyse mémoire")
+st.subheader("📚 Nourriture cérébrale")
 
-if st.button("Rapport mémoire"):
+uploaded = st.file_uploader(
+    "Importer document",
+    type=["txt","pdf","docx","csv"]
+)
 
-    r = oracle.report()
+if uploaded:
 
-    st.write("Souvenirs :", r["souvenirs_totaux"])
+    learned = oracle.learn_document(uploaded)
 
-    st.write("Concepts :", r["concepts"])
+    st.success(f"{learned} blocs de connaissance ajoutés")
+
+# =====================================================
+# ANALYSE
+# =====================================================
+
+st.divider()
+
+st.subheader("📊 Analyse cognitive")
+
+if st.button("Analyser mémoire"):
+
+    report = oracle.report()
+
+    st.write("Souvenirs :", report["souvenirs_totaux"])
+
+    st.write("Sources :", report["sources"])
+
+    st.write("Concepts dominants :", report["concepts"])
