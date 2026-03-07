@@ -2,11 +2,11 @@ import streamlit as st
 from oracle_engine import OracleEngine
 
 st.set_page_config(
-    page_title="ORACLE V15 Ω COSMOS",
+    page_title="ORACLE V15.5 Ω COSMOS",
     layout="wide"
 )
 
-st.title("🧠 ORACLE V15 Ω COSMOS")
+st.title("🧠 ORACLE V15.5 Ω COSMOS")
 
 st.markdown("""
 Architecture cognitive expérimentale
@@ -14,32 +14,26 @@ Architecture cognitive expérimentale
 Capacités :
 
 • mémoire vectorielle  
-• raisonnement multi-concept  
+• graph de connaissances  
+• raisonnement multi-souvenirs  
 • apprentissage documentaire  
 • mémoire persistante GitHub  
 • analyse cognitive  
 """)
 
-# =====================================================
 # INITIALISATION
-# =====================================================
 
 if "oracle" not in st.session_state:
+
     st.session_state.oracle = OracleEngine()
 
 oracle = st.session_state.oracle
-
-# =====================================================
-# STATS
-# =====================================================
 
 st.metric("Souvenirs enregistrés", oracle.stats())
 
 st.divider()
 
-# =====================================================
 # QUESTION
-# =====================================================
 
 st.subheader("💬 Dialogue avec ORACLE")
 
@@ -51,15 +45,13 @@ if st.button("Interroger ORACLE"):
 
     st.write(response)
 
-# =====================================================
 # APPRENTISSAGE TEXTE
-# =====================================================
 
 st.divider()
 
 st.subheader("🧠 Ajouter connaissance")
 
-text = st.text_area("Entrer un texte à apprendre")
+text = st.text_area("Texte à apprendre")
 
 if st.button("Apprendre texte"):
 
@@ -67,13 +59,11 @@ if st.button("Apprendre texte"):
 
     st.success(f"{blocks} souvenirs ajoutés")
 
-# =====================================================
-# APPRENTISSAGE DOCUMENT
-# =====================================================
+# DOCUMENT
 
 st.divider()
 
-st.subheader("📚 Nourriture cérébrale")
+st.subheader("📚 Apprentissage documentaire")
 
 uploaded = st.file_uploader(
     "Importer document",
@@ -86,13 +76,11 @@ if uploaded:
 
     st.success(f"{learned} blocs de connaissance ajoutés")
 
-# =====================================================
 # ANALYSE
-# =====================================================
 
 st.divider()
 
-st.subheader("📊 Analyse cognitive")
+st.subheader("📊 Analyse mémoire")
 
 if st.button("Analyser mémoire"):
 
