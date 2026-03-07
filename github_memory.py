@@ -1,30 +1,10 @@
-from github import Github
-import os
+import subprocess
 
-def backup_memory(token,repo_name,folder):
 
-    g=Github(token)
+def push_memory():
 
-    repo=g.get_repo(repo_name)
+    subprocess.run(["git","add","oracle_memory/"])
 
-    for root,dirs,files in os.walk(folder):
+    subprocess.run(["git","commit","-m","oracle memory update"])
 
-        for f in files:
-
-            path=os.path.join(root,f)
-
-            with open(path,"rb") as file:
-
-                content=file.read()
-
-            try:
-
-                repo.create_file(
-                f"{folder}/{f}",
-                "oracle memory backup",
-                content,
-                branch="main"
-                )
-
-            except:
-                pass
+    subprocess.run(["git","push"])
