@@ -14,10 +14,11 @@ if not os.path.exists(DB_FOLDER):
 def init_db():
 
     conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
 
-    conn.execute("""
+    c.execute("""
     CREATE TABLE IF NOT EXISTS memories(
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT,
     vector TEXT,
     source TEXT,
@@ -25,7 +26,7 @@ def init_db():
     )
     """)
 
-    conn.execute("""
+    c.execute("""
     CREATE TABLE IF NOT EXISTS trigrams(
     w1 TEXT,
     w2 TEXT,
@@ -42,7 +43,6 @@ init_db()
 def text_vector(text):
 
     words=text.lower().split()
-
     counts=Counter(words)
 
     vector=[]
@@ -50,11 +50,9 @@ def text_vector(text):
     for w in counts:
 
         h=int(hashlib.md5(w.encode()).hexdigest(),16)%1000
-
         vector.append(h*counts[w])
 
     return vector
-
 
 def cosine(a,b):
 
@@ -80,26 +78,43 @@ class OracleEngine:
 
         self.conn=sqlite3.connect(DB_PATH,check_same_thread=False)
 
+    # =================================================
+    # APPRENTISSAGE
+    # =================================================
+
     def learn(self,text,source="user"):
+
+        if not text:
+            return
 
         vec=text_vector(text)
 
-        self.conn.execute(
-        "INSERT INTO memories(text,vector,source,timestamp) VALUES(?,?,?,?)",
-        (text,str(vec),source,datetime.now().isoformat())
-        )
+        try:
 
-        self.conn.commit()
+            self.conn.execute(
+            "INSERT INTO memories(text,vector,source,timestamp) VALUES(?,?,?,?)",
+            (text,str(vec),source,datetime.now().isoformat())
+            )
 
-        self.learn_trigram(text)
+            self.conn.commit()
+
+            self.learn_trigram(text)
+
+        except Exception as e:
+
+            print("Learn error:",e)
+
+    # =================================================
+    # TRIGRAM LANGUAGE
+    # =================================================
 
     def learn_trigram(self,text):
 
-        w=text.lower().split()
+        words=text.lower().split()
 
-        for i in range(len(w)-2):
+        for i in range(len(words)-2):
 
-            w1,w2,w3=w[i],w[i+1],w[i+2]
+            w1,w2,w3=words[i],words[i+1],words[i+2]
 
             cur=self.conn.execute(
             "SELECT count FROM trigrams WHERE w1=? AND w2=? AND w3=?",
@@ -122,76 +137,105 @@ class OracleEngine:
 
         self.conn.commit()
 
-    def search(self,text):
+    # =================================================
+    # RECHERCHE SEMANTIQUE
+    # =================================================
 
-        vec=text_vector(text)
+    def search_memory(self,question):
 
-        cur=self.conn.execute("SELECT text,vector FROM memories")
+        qvec=text_vector(question)
 
-        best=""
-        best_score=0
+        cur=self.conn.execute("SELECT text,vector,source FROM memories")
 
-        for r in cur.fetchall():
+        best=[]
+        
+        for row in cur.fetchall():
 
-            v=eval(r[1])
+            mem=row[0]
+            vec=eval(row[1])
+            source=row[2]
 
-            s=cosine(vec,v)
+            score=cosine(qvec,vec)
 
-            if s>best_score:
+            if score>0.2:
 
-                best_score=s
-                best=r[0]
+                best.append((score,mem,source))
 
-        return best,best_score
+        best.sort(reverse=True)
 
-    def generate(self,text):
+        return best[:5]
 
-        w=text.lower().split()
+    # =================================================
+    # GENERATION
+    # =================================================
 
-        if len(w)<2:
-            return text
+    def generate(self,question):
 
-        w1,w2=w[-2],w[-1]
+        words=question.lower().split()
+
+        if len(words)<2:
+            return question
+
+        w1,w2=words[-2],words[-1]
 
         cur=self.conn.execute(
-        "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 5",
+        "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 3",
         (w1,w2)
         )
 
         r=cur.fetchall()
 
         if not r:
-            return text
+            return question
 
-        return text+" "+r[0][0]
+        return question+" "+r[0][0]
 
-    def reason(self,text):
+    # =================================================
+    # RAISONNEMENT ARGUMENTATIF
+    # =================================================
 
-        mem,score=self.search(text)
+    def reason(self,question):
 
-        gen=self.generate(text)
+        memories=self.search_memory(question)
 
-        answer=f"""
-Analyse ORACLE
+        generated=self.generate(question)
 
-Question : {text}
+        response="Analyse de la question : "+question+"\n\n"
 
-Hypothèse générée :
-{gen}
+        response+="Informations pertinentes trouvées dans la mémoire :\n\n"
 
-Mémoire associée (score {round(score,3)}) :
+        if memories:
 
-{mem}
+            for s,m,src in memories:
 
-Conclusion :
+                response+=f"- Source ({src}) : {m[:300]}\n\n"
 
-La réponse est basée sur la mémoire interne et l'analyse statistique des concepts.
-"""
+        else:
 
-        return answer
+            response+="Aucune information pertinente trouvée.\n\n"
+
+        response+="Interprétation et réponse :\n\n"
+
+        response+=generated+"\n\n"
+
+        response+="Conclusion :\n"
+
+        response+="La réponse est basée sur l'analyse des documents appris et sur la mémoire interne du système."
+
+        return response
+
+    # =================================================
+    # STATS
+    # =================================================
 
     def stats(self):
 
-        n=self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        try:
 
-        return n
+            n=self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+
+            return n
+
+        except:
+
+            return 0
