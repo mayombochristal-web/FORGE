@@ -1,8 +1,3 @@
-# ============================================================
-# ORACLE V16 Ω COSMOS
-# Interface Streamlit
-# ============================================================
-
 import streamlit as st
 from oracle_engine_v16 import OracleEngine
 
