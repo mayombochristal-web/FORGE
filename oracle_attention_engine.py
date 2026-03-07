@@ -1,15 +1,11 @@
-class OracleAttentionEngine:
+class AttentionEngine:
 
-    def __init__(self):
+    def score(self,tokens):
 
-        self.threshold = 12
+        unique=len(set(tokens))
 
-    def score(self, text):
+        length=len(tokens)
 
-        length_score = len(text) / 100
-
-        concept_score = text.count("concept")
-
-        score = length_score + concept_score
+        score=(unique*0.5)+(length*0.2)
 
         return score
