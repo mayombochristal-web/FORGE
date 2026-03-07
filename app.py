@@ -6,26 +6,26 @@
 import streamlit as st
 from oracle_engine_v15 import OracleEngine
 
-oracle = OracleEngine()
-
-st.set_page_config(
-    page_title="ORACLE V15 Ω COSMOS",
-    layout="wide"
-)
+st.set_page_config(page_title="ORACLE V15 Ω COSMOS", layout="wide")
 
 st.title("🧠 ORACLE V15 Ω COSMOS")
 
-st.markdown(
-"""
-Moteur cognitif expérimental
+st.markdown("""
+Architecture cognitive expérimentale
 
-Architecture :
-- Mémoire vectorielle
-- Raisonnement trigram
-- Analyse documentaire
-- Apprentissage continu
-"""
-)
+Capacités :
+
+• mémoire vectorielle  
+• raisonnement multi-concept  
+• apprentissage documentaire  
+• mémoire persistante  
+• analyse cognitive
+""")
+
+if "oracle" not in st.session_state:
+    st.session_state.oracle = OracleEngine()
+
+oracle = st.session_state.oracle
 
 # ============================================================
 # STAT
@@ -52,7 +52,7 @@ if st.button("Interroger ORACLE"):
     st.write(response)
 
 # ============================================================
-# DOCUMENT
+# DOCUMENT INGESTION
 # ============================================================
 
 st.divider()
@@ -60,15 +60,13 @@ st.divider()
 st.subheader("📚 Nourriture cérébrale")
 
 uploaded = st.file_uploader(
-    "Importer un fichier",
-    type=["txt"]
+    "Importer un document",
+    type=["txt","pdf","docx","csv"]
 )
 
 if uploaded:
 
-    text = uploaded.read().decode("utf-8")
-
-    learned = oracle.learn_document(text)
+    learned = oracle.learn_document(uploaded)
 
     st.success(f"{learned} blocs de connaissance ajoutés")
 
@@ -85,7 +83,5 @@ if st.button("Analyser mémoire"):
     report = oracle.report()
 
     st.write("Souvenirs :", report["souvenirs_totaux"])
-
     st.write("Sources :", report["sources"])
-
     st.write("Concepts dominants :", report["concepts"])
