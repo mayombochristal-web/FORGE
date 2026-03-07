@@ -1,6 +1,5 @@
 import os
 import json
-from collections import defaultdict
 from memory_storage import INDEX_PATH
 
 def _load_index():
@@ -14,9 +13,8 @@ def _save_index(idx):
         json.dump(idx, f, ensure_ascii=False)
 
 def update_index(text, filepath):
-    """Ajoute le fichier à l'index (mots -> liste de fichiers)"""
     idx = _load_index()
-    words = set(text.lower().split())  # simplification
+    words = set(text.lower().split())
     for w in words:
         if w not in idx:
             idx[w] = []
@@ -25,14 +23,11 @@ def update_index(text, filepath):
     _save_index(idx)
 
 def search_index(query_vector, max_candidates=20):
-    """Retourne une liste de chemins candidats pour la requête"""
     idx = _load_index()
-    # Prend les mots de la requête (clés du vecteur)
     words = list(query_vector.keys())
     paths = []
     for w in words:
         if w in idx:
             paths.extend(idx[w])
-    # Élimine les doublons et limite
     unique_paths = list(set(paths))
     return unique_paths[:max_candidates]
