@@ -1,22 +1,21 @@
-# ============================================================
-# ORACLE V15 Ω COSMOS
-# Moteur Cognitif
-# ============================================================
-
-import json
 import re
 import math
 from collections import Counter
+
 from oracle_memory_manager import MemoryManager
-import pdfplumber
-import docx
-import csv
+from oracle_attention_engine import AttentionEngine
+from reasoning_engine import ReasoningEngine
+from concept_graph import ConceptGraph
+from analytics_engine import AnalyticsEngine
+from ttu_file_scanner import scan_file
+
 
 STOPWORDS = {
 "les","des","une","dans","pour","avec",
 "qui","que","est","sur","pas","plus",
 "par","comme","mais","donc","car"
 }
+
 
 def tokenize(text):
 
@@ -62,50 +61,35 @@ class OracleEngine:
 
         self.memory=MemoryManager()
 
+        self.attention=AttentionEngine()
+
+        self.reasoner=ReasoningEngine()
+
+        self.graph=ConceptGraph()
+
+        self.analytics=AnalyticsEngine()
+
     # -----------------------------------------------------
 
     def learn(self,text):
 
         tokens=tokenize(text)
 
-        if len(tokens)>3:
+        score=self.attention.score(tokens)
+
+        if score>3:
 
             vector=vectorize(tokens)
 
             self.memory.store(text,vector,"user")
 
+            self.graph.update(tokens)
+
     # -----------------------------------------------------
 
     def learn_document(self,file):
 
-        name=file.name
-
-        text=""
-
-        if name.endswith(".txt"):
-
-            text=file.read().decode()
-
-        elif name.endswith(".pdf"):
-
-            with pdfplumber.open(file) as pdf:
-
-                for p in pdf.pages:
-                    text+=p.extract_text()
-
-        elif name.endswith(".docx"):
-
-            doc=docx.Document(file)
-
-            for p in doc.paragraphs:
-                text+=p.text
-
-        elif name.endswith(".csv"):
-
-            reader=csv.reader(file.read().decode().splitlines())
-
-            for r in reader:
-                text+=" ".join(r)
+        text=scan_file(file)
 
         words=text.split()
 
@@ -130,6 +114,8 @@ class OracleEngine:
 
                 self.memory.store(c,vector,"document")
 
+                self.graph.update(tokens)
+
                 learned+=1
 
         return learned
@@ -144,37 +130,9 @@ class OracleEngine:
 
         results=self.memory.search(qvec)
 
-        response=[]
+        reasoning=self.reasoner.build_reasoning(question,results)
 
-        response.append("ANALYSE DE LA QUESTION")
-        response.append(question)
-
-        response.append("\nCONNAISSANCES ASSOCIÉES")
-
-        for score,text in results:
-
-            response.append(f"- {text[:200]}")
-
-        response.append("\nRAISONNEMENT")
-
-        if results:
-
-            response.append(
-            "Les informations stockées suggèrent que la réponse est liée aux éléments ci-dessus."
-            )
-
-        else:
-
-            response.append(
-            "Aucune connaissance pertinente trouvée dans la mémoire actuelle."
-            )
-
-        response.append("\nCONCLUSION")
-
-        if results:
-            response.append(results[0][1])
-
-        return "\n".join(response)
+        return reasoning
 
     # -----------------------------------------------------
 
@@ -189,6 +147,7 @@ class OracleEngine:
         rows=self.memory.all()
 
         sources=Counter()
+
         concepts=Counter()
 
         for r in rows:
