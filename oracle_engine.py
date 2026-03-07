@@ -218,24 +218,25 @@ class OracleEngine:
 
     def vector_search(self, question, top_k=5):
 
-        q_embed = self.model.encode(question)
+    q_embed = self.model.encode(question)
 
-        scores = []
+    scores = []
 
-        for m in self.memory:
+    for m in self.memory:
 
-            emb = np.array(m["embedding"])
+        emb = np.array(m["embedding"])
 
-            score = np.dot(q_embed, emb) / (
-                np.linalg.norm(q_embed) *
-                np.linalg.norm(emb)
-            )
+        score = np.dot(q_embed, emb) / (
+            np.linalg.norm(q_embed) *
+            np.linalg.norm(emb)
+        )
 
-            scores.append((score, m))
+        scores.append((score, m))
 
-        scores.sort(reverse=True)
+    # tri sécurisé
+    scores = sorted(scores, key=lambda x: x[0], reverse=True)
 
-        return [m for _, m in scores[:top_k]]
+    return [m for score, m in scores[:top_k]]
 
     # --------------------------------------------------
     # CONCEPT SEARCH
