@@ -1,289 +1,407 @@
-import sqlite3
+# ============================================================
+# ORACLE V15 Ω cosmos 
+# Mini LLM Cognitif Expérimental
+# ============================================================
+
 import os
+import sqlite3
+import json
 import math
-import hashlib
+import re
 from datetime import datetime
-from collections import Counter
+from collections import defaultdict
 
-BASE_FOLDER="oracle_memory"
+# ============================================================
+# CONFIG
+# ============================================================
 
-CORE_DB=os.path.join(BASE_FOLDER,"oracle_core.db")
-DOC_DB=os.path.join(BASE_FOLDER,"oracle_documents.db")
-DICT_DB=os.path.join(BASE_FOLDER,"oracle_dictionary.db")
+MEMORY_FOLDER = "oracle_memory"
+DB_PATH = os.path.join(MEMORY_FOLDER, "oracle_vector_memory.db")
 
-if not os.path.exists(BASE_FOLDER):
-    os.makedirs(BASE_FOLDER)
+if not os.path.exists(MEMORY_FOLDER):
+    os.makedirs(MEMORY_FOLDER)
 
-# =====================================================
-# STOPWORDS
-# =====================================================
+# ============================================================
+# TOKENIZER
+# ============================================================
 
-STOP_WORDS=set([
-"le","la","les","de","des","du","un","une","et","ou",
-"a","à","en","dans","sur","pour","par","est","sont",
-"que","qui","quoi","comment"
-])
+def tokenize(text):
 
-# =====================================================
-# NETTOYAGE TEXTE
-# =====================================================
+    text = text.lower()
 
-def clean_words(text):
+    tokens = re.findall(r'\b[a-zàâéèêîôûç]+\b', text)
 
-    words=text.lower().split()
+    return tokens
 
-    return [w for w in words if w not in STOP_WORDS]
 
-# =====================================================
-# EXTRACTION CONCEPTS
-# =====================================================
+# ============================================================
+# VECTOR EMBEDDING SIMPLE
+# ============================================================
 
-def extract_concepts(text):
+def text_vector(tokens):
 
-    words=clean_words(text)
+    vector = defaultdict(int)
 
-    counts=Counter(words)
+    for t in tokens:
+        vector[t] += 1
 
-    concepts=[w for w,c in counts.most_common(5)]
+    return vector
 
-    return concepts
 
-# =====================================================
-# VECTOR
-# =====================================================
+def cosine_similarity(v1, v2):
 
-def text_vector(text):
+    intersection = set(v1.keys()) & set(v2.keys())
 
-    words=clean_words(text)
+    num = sum(v1[x] * v2[x] for x in intersection)
 
-    counts=Counter(words)
+    sum1 = sum(v**2 for v in v1.values())
+    sum2 = sum(v**2 for v in v2.values())
 
-    vec=[]
+    denom = math.sqrt(sum1) * math.sqrt(sum2)
 
-    for w in counts:
-
-        h=int(hashlib.md5(w.encode()).hexdigest(),16)%1000
-        vec.append(h*counts[w])
-
-    return vec
-
-# =====================================================
-# COSINE
-# =====================================================
-
-def cosine(a,b):
-
-    if not a or not b:
+    if denom == 0:
         return 0
 
-    n=min(len(a),len(b))
+    return float(num) / denom
 
-    dot=sum(a[i]*b[i] for i in range(n))
 
-    na=math.sqrt(sum(x*x for x in a))
-    nb=math.sqrt(sum(x*x for x in b))
+# ============================================================
+# VECTOR MEMORY DATABASE
+# ============================================================
 
-    if na==0 or nb==0:
-        return 0
-
-    return dot/(na*nb)
-
-# =====================================================
-# INIT DATABASE
-# =====================================================
-
-def init_db():
-
-    conn=sqlite3.connect(CORE_DB)
-
-    c=conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS memories(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT,
-    vector TEXT,
-    source TEXT,
-    timestamp TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-    conn=sqlite3.connect(DOC_DB)
-
-    c=conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS documents(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT,
-    vector TEXT,
-    source TEXT,
-    timestamp TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =====================================================
-# ORACLE ENGINE
-# =====================================================
-
-class OracleEngine:
+class VectorMemory:
 
     def __init__(self):
 
-        self.core=sqlite3.connect(CORE_DB,check_same_thread=False)
-        self.docs=sqlite3.connect(DOC_DB,check_same_thread=False)
+        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 
-    # =================================================
-    # LEARN
-    # =================================================
+        self.create_table()
 
-    def learn(self,text,source="user"):
+    def create_table(self):
 
-        vec=text_vector(text)
+        self.conn.execute("""
 
-        self.core.execute(
-        "INSERT INTO memories(text,vector,source,timestamp) VALUES(?,?,?,?)",
-        (text,str(vec),source,datetime.now().isoformat())
+        CREATE TABLE IF NOT EXISTS memory(
+
+        id INTEGER PRIMARY KEY,
+        text TEXT,
+        vector TEXT,
+        source TEXT,
+        date TEXT
+
         )
 
-        self.core.commit()
+        """)
 
-    def learn_document(self,text,source="document"):
+        self.conn.commit()
 
-        vec=text_vector(text)
+    def add(self, text, source="user"):
 
-        self.docs.execute(
-        "INSERT INTO documents(text,vector,source,timestamp) VALUES(?,?,?,?)",
-        (text,str(vec),source,datetime.now().isoformat())
+        tokens = tokenize(text)
+
+        vector = text_vector(tokens)
+
+        self.conn.execute(
+
+            "INSERT INTO memory(text,vector,source,date) VALUES(?,?,?,?)",
+
+            (
+                text,
+                json.dumps(vector),
+                source,
+                str(datetime.now())
+            )
+
         )
 
-        self.docs.commit()
+        self.conn.commit()
 
-    # =================================================
-    # RECHERCHE INTELLIGENTE
-    # =================================================
+    def search(self, query, top_k=5):
 
-    def search(self,question,conn,table):
+        tokens = tokenize(query)
 
-        qvec=text_vector(question)
+        q_vector = text_vector(tokens)
 
-        qwords=set(clean_words(question))
+        rows = self.conn.execute(
 
-        qconcepts=set(extract_concepts(question))
+            "SELECT text,vector FROM memory"
 
-        rows=conn.execute(f"SELECT text,vector,source FROM {table}")
+        ).fetchall()
 
-        best=[]
+        results = []
 
-        for r in rows.fetchall():
+        for text, vector_json in rows:
 
-            try:
+            vector = json.loads(vector_json)
 
-                text=r[0]
-                vec=eval(r[1])
-                source=r[2]
+            score = cosine_similarity(q_vector, vector)
 
-                score_cos=cosine(qvec,vec)
+            results.append((score, text))
 
-                mem_words=set(clean_words(text))
+        results.sort(reverse=True)
 
-                overlap=len(qwords & mem_words)
-
-                mem_concepts=set(extract_concepts(text))
-
-                concept_match=len(qconcepts & mem_concepts)
-
-                score=(score_cos*0.5)+(overlap*0.3)+(concept_match*0.2)
-
-                if score>0.1:
-
-                    best.append((score,text,source))
-
-            except:
-
-                continue
-
-        best.sort(reverse=True)
-
-        return best[:7]
-
-    # =================================================
-    # FUSION CONNAISSANCE
-    # =================================================
-
-    def synthesize(self,memories):
-
-        if not memories:
-            return None
-
-        texts=[m[1] for m in memories[:3]]
-
-        combined=" ".join(texts)
-
-        return combined[:500]
-
-    # =================================================
-    # RAISONNEMENT
-    # =================================================
-
-    def reason(self,question):
-
-        mem=self.search(question,self.core,"memories")
-
-        docs=self.search(question,self.docs,"documents")
-
-        knowledge=mem+docs
-
-        synthesis=self.synthesize(knowledge)
-
-        response="ANALYSE DE LA QUESTION\n\n"
-
-        response+=question+"\n\n"
-
-        response+="CONNAISSANCES IDENTIFIÉES\n\n"
-
-        for s,t,src in knowledge[:5]:
-
-            response+=f"- ({src}) {t[:200]}\n\n"
-
-        response+="RAISONNEMENT\n\n"
-
-        if synthesis:
-
-            response+=synthesis+"\n\n"
-
-        else:
-
-            response+="Aucune connaissance suffisante pour répondre.\n\n"
-
-        response+="CONCLUSION\n\n"
-
-        response+="La réponse est construite à partir des connaissances apprises par l'ORACLE."
-
-        return response
-
-    # =================================================
-    # STATS
-    # =================================================
+        return results[:top_k]
 
     def stats(self):
 
-        try:
+        count = self.conn.execute(
 
-            n=self.core.execute(
-            "SELECT COUNT(*) FROM memories"
-            ).fetchone()[0]
+            "SELECT COUNT(*) FROM memory"
 
-            return n
+        ).fetchone()[0]
 
-        except:
+        return {"entries": count}
 
-            return 0
+
+# ============================================================
+# DOCUMENT SEGMENTATION
+# ============================================================
+
+def split_document(text, chunk_size=120):
+
+    words = text.split()
+
+    chunks = []
+
+    for i in range(0, len(words), chunk_size):
+
+        chunk = " ".join(words[i:i+chunk_size])
+
+        chunks.append(chunk)
+
+    return chunks
+
+
+# ============================================================
+# MULTI CONCEPT REASONER
+# ============================================================
+
+class MultiConceptReasoner:
+
+    def extract_concepts(self, text):
+
+        tokens = tokenize(text)
+
+        concepts = []
+
+        for t in tokens:
+
+            if len(t) > 3:
+                concepts.append(t)
+
+        return list(set(concepts))
+
+    def reasoning(self, question, memories):
+
+        concepts = self.extract_concepts(question)
+
+        links = []
+
+        for m in memories:
+
+            for c in concepts:
+
+                if c in m.lower():
+
+                    links.append((c, m))
+
+        return links
+
+
+# ============================================================
+# QUESTION ANALYSIS
+# ============================================================
+
+class SpectralAnalysis:
+
+    def analyze(self, question):
+
+        tokens = tokenize(question)
+
+        analysis = {
+
+            "tokens": tokens,
+            "longueur": len(tokens),
+            "complexite": len(set(tokens)),
+            "type": "information"
+
+        }
+
+        if "pourquoi" in tokens:
+
+            analysis["type"] = "causal"
+
+        if "comment" in tokens:
+
+            analysis["type"] = "explication"
+
+        return analysis
+
+
+# ============================================================
+# ANSWER GENERATOR
+# ============================================================
+
+class AnswerGenerator:
+
+    def generate(self, question, memories, reasoning, analysis):
+
+        answer = []
+
+        answer.append("ANALYSE DE LA QUESTION")
+        answer.append(json.dumps(analysis, indent=2))
+
+        answer.append("\nCONNAISSANCES TROUVÉES")
+
+        for m in memories:
+
+            answer.append("- " + m)
+
+        answer.append("\nRAISONNEMENT")
+
+        for concept, mem in reasoning:
+
+            answer.append(f"Concept '{concept}' relié à : {mem}")
+
+        answer.append("\nCONCLUSION")
+
+        if memories:
+
+            answer.append(memories[0])
+
+        else:
+
+            answer.append(
+                "Aucune connaissance pertinente trouvée dans la mémoire."
+            )
+
+        return "\n".join(answer)
+
+
+# ============================================================
+# DOCUMENT ANALYSIS REPORT
+# ============================================================
+
+def document_report(text):
+
+    words = len(text.split())
+
+    sentences = len(text.split("."))
+
+    report = {
+
+        "mots": words,
+        "phrases": sentences,
+        "longueur": len(text),
+        "concepts_estimes": words // 6
+
+    }
+
+    return report
+
+
+# ============================================================
+# ORACLE BRAIN V16
+# ============================================================
+
+class OracleBrainV16:
+
+    def __init__(self):
+
+        self.memory = VectorMemory()
+
+        self.reasoner = MultiConceptReasoner()
+
+        self.analysis = SpectralAnalysis()
+
+        self.generator = AnswerGenerator()
+
+    # ========================================================
+    # APPRENTISSAGE TEXTE
+    # ========================================================
+
+    def learn(self, text, source="user"):
+
+        if len(text.strip()) > 10:
+
+            self.memory.add(text, source)
+
+    # ========================================================
+    # APPRENTISSAGE DOCUMENT
+    # ========================================================
+
+    def learn_document(self, text, source="document"):
+
+        chunks = split_document(text)
+
+        for c in chunks:
+
+            if len(c.strip()) > 30:
+
+                self.learn(c, source)
+
+        return len(chunks)
+
+    # ========================================================
+    # QUESTION
+    # ========================================================
+
+    def ask(self, question):
+
+        analysis = self.analysis.analyze(question)
+
+        results = self.memory.search(question)
+
+        memories = [r[1] for r in results]
+
+        reasoning = self.reasoner.reasoning(question, memories)
+
+        answer = self.generator.generate(
+
+            question,
+            memories,
+            reasoning,
+            analysis
+        )
+
+        return answer
+
+    # ========================================================
+    # RAPPORT MEMOIRE
+    # ========================================================
+
+    def memory_report(self):
+
+        stats = self.memory.stats()
+
+        report = {
+
+            "entrees_memoire": stats["entries"],
+            "date": str(datetime.now())
+
+        }
+
+        return report
+
+
+# ============================================================
+# TEST LOCAL
+# ============================================================
+
+if __name__ == "__main__":
+
+    oracle = OracleBrainV16()
+
+    print("\nORACLE V15 Ω INITIALISÉ\n")
+
+    while True:
+
+        q = input("QUESTION : ")
+
+        if q == "exit":
+
+            break
+
+        r = oracle.ask(q)
+
+        print("\n", r)
