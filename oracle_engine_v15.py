@@ -1,38 +1,47 @@
 # ============================================================
-# ORACLE V15 Ω cosmos 
-# Mini LLM Cognitif Expérimental
+# ORACLE V15 Ω COSMOS
+# Moteur Cognitif Expérimental
 # ============================================================
 
 import os
 import sqlite3
 import json
-import math
 import re
+import math
 from datetime import datetime
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 # ============================================================
 # CONFIG
 # ============================================================
 
 MEMORY_FOLDER = "oracle_memory"
-DB_PATH = os.path.join(MEMORY_FOLDER, "oracle_vector_memory.db")
+DB_PATH = os.path.join(MEMORY_FOLDER, "cosmos_memory.db")
 
 if not os.path.exists(MEMORY_FOLDER):
     os.makedirs(MEMORY_FOLDER)
 
 # ============================================================
-# TOKENIZER
+# TOKENIZER PROPRE
 # ============================================================
+
+STOPWORDS = {
+    "les","des","une","dans","pour","avec",
+    "qui","que","est","sur","pas","plus",
+    "par","comme","mais","donc","car",
+    "nous","vous","ils","elle","elles",
+    "aux","ces","ses","leur","leurs"
+}
 
 def tokenize(text):
 
     text = text.lower()
 
-    tokens = re.findall(r'\b[a-zàâéèêîôûç]+\b', text)
+    tokens = re.findall(r"[a-zàâéèêëîïôûùüç]{3,}", text)
+
+    tokens = [t for t in tokens if t not in STOPWORDS]
 
     return tokens
-
 
 # ============================================================
 # VECTOR EMBEDDING SIMPLE
@@ -42,8 +51,8 @@ def text_vector(tokens):
 
     vector = defaultdict(int)
 
-    for t in tokens:
-        vector[t] += 1
+    for token in tokens:
+        vector[token] += 1
 
     return vector
 
@@ -52,18 +61,36 @@ def cosine_similarity(v1, v2):
 
     intersection = set(v1.keys()) & set(v2.keys())
 
-    num = sum(v1[x] * v2[x] for x in intersection)
+    numerator = sum(v1[x] * v2[x] for x in intersection)
 
     sum1 = sum(v**2 for v in v1.values())
     sum2 = sum(v**2 for v in v2.values())
 
-    denom = math.sqrt(sum1) * math.sqrt(sum2)
+    denominator = math.sqrt(sum1) * math.sqrt(sum2)
 
-    if denom == 0:
+    if denominator == 0:
         return 0
 
-    return float(num) / denom
+    return numerator / denominator
 
+# ============================================================
+# SEGMENTATION DOCUMENT
+# ============================================================
+
+def split_document(text, chunk_size=120):
+
+    words = text.split()
+
+    chunks = []
+
+    for i in range(0, len(words), chunk_size):
+
+        chunk = " ".join(words[i:i+chunk_size])
+
+        if len(chunk) > 80:
+            chunks.append(chunk)
+
+    return chunks
 
 # ============================================================
 # VECTOR MEMORY DATABASE
@@ -83,7 +110,7 @@ class VectorMemory:
 
         CREATE TABLE IF NOT EXISTS memory(
 
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         text TEXT,
         vector TEXT,
         source TEXT,
@@ -142,77 +169,57 @@ class VectorMemory:
 
         return results[:top_k]
 
-    def stats(self):
+    def all(self):
 
-        count = self.conn.execute(
+        rows = self.conn.execute(
 
-            "SELECT COUNT(*) FROM memory"
+            "SELECT source,text FROM memory"
 
-        ).fetchone()[0]
+        ).fetchall()
 
-        return {"entries": count}
-
-
-# ============================================================
-# DOCUMENT SEGMENTATION
-# ============================================================
-
-def split_document(text, chunk_size=120):
-
-    words = text.split()
-
-    chunks = []
-
-    for i in range(0, len(words), chunk_size):
-
-        chunk = " ".join(words[i:i+chunk_size])
-
-        chunks.append(chunk)
-
-    return chunks
-
+        return rows
 
 # ============================================================
-# MULTI CONCEPT REASONER
+# RAISONNEMENT TRIGRAM
 # ============================================================
 
-class MultiConceptReasoner:
+class TrigramReasoner:
 
-    def extract_concepts(self, text):
+    def generate_trigrams(self, tokens):
 
-        tokens = tokenize(text)
+        trigrams = []
 
-        concepts = []
+        for i in range(len(tokens)-2):
 
-        for t in tokens:
+            trigrams.append(
+                (tokens[i], tokens[i+1], tokens[i+2])
+            )
 
-            if len(t) > 3:
-                concepts.append(t)
-
-        return list(set(concepts))
+        return trigrams
 
     def reasoning(self, question, memories):
 
-        concepts = self.extract_concepts(question)
+        tokens = tokenize(question)
+
+        trigrams = self.generate_trigrams(tokens)
 
         links = []
 
-        for m in memories:
+        for mem in memories:
 
-            for c in concepts:
+            for tri in trigrams:
 
-                if c in m.lower():
+                if tri[0] in mem and tri[1] in mem:
 
-                    links.append((c, m))
+                    links.append((tri, mem))
 
         return links
 
-
 # ============================================================
-# QUESTION ANALYSIS
+# ANALYSE QUESTION
 # ============================================================
 
-class SpectralAnalysis:
+class QuestionAnalyzer:
 
     def analyze(self, question):
 
@@ -221,74 +228,108 @@ class SpectralAnalysis:
         analysis = {
 
             "tokens": tokens,
-            "longueur": len(tokens),
+            "nombre_tokens": len(tokens),
             "complexite": len(set(tokens)),
-            "type": "information"
+            "type_question": "information"
 
         }
 
         if "pourquoi" in tokens:
 
-            analysis["type"] = "causal"
+            analysis["type_question"] = "causale"
 
         if "comment" in tokens:
 
-            analysis["type"] = "explication"
+            analysis["type_question"] = "explication"
 
         return analysis
 
-
 # ============================================================
-# ANSWER GENERATOR
+# GENERATEUR REPONSE
 # ============================================================
 
 class AnswerGenerator:
 
     def generate(self, question, memories, reasoning, analysis):
 
-        answer = []
+        response = []
 
-        answer.append("ANALYSE DE LA QUESTION")
-        answer.append(json.dumps(analysis, indent=2))
+        response.append("ANALYSE DE LA QUESTION")
+        response.append(json.dumps(analysis, indent=2))
 
-        answer.append("\nCONNAISSANCES TROUVÉES")
+        response.append("\nCONNAISSANCES TROUVÉES")
 
         for m in memories:
 
-            answer.append("- " + m)
+            response.append("- " + m)
 
-        answer.append("\nRAISONNEMENT")
+        response.append("\nRAISONNEMENT")
 
-        for concept, mem in reasoning:
+        for tri, mem in reasoning:
 
-            answer.append(f"Concept '{concept}' relié à : {mem}")
+            response.append(
+                f"Trigram {tri} relié à : {mem[:120]}"
+            )
 
-        answer.append("\nCONCLUSION")
+        response.append("\nCONCLUSION")
 
         if memories:
 
-            answer.append(memories[0])
+            response.append(memories[0])
 
         else:
 
-            answer.append(
-                "Aucune connaissance pertinente trouvée dans la mémoire."
+            response.append(
+                "Aucune connaissance pertinente trouvée."
             )
 
-        return "\n".join(answer)
-
+        return "\n".join(response)
 
 # ============================================================
-# DOCUMENT ANALYSIS REPORT
+# RAPPORT ANALYTIQUE
 # ============================================================
 
-def document_report(text):
+def generate_memory_report(memory):
+
+    rows = memory.all()
+
+    sources = Counter()
+
+    concepts = Counter()
+
+    for source,text in rows:
+
+        sources[source] += 1
+
+        tokens = tokenize(text)
+
+        for t in tokens:
+
+            concepts[t] += 1
+
+    return {
+
+        "souvenirs_totaux": len(rows),
+
+        "sources": dict(sources),
+
+        "concepts_dominants": dict(
+            concepts.most_common(20)
+        )
+
+    }
+
+# ============================================================
+# ANALYSE DOCUMENT
+# ============================================================
+
+def document_analysis(text):
 
     words = len(text.split())
 
     sentences = len(text.split("."))
 
-    report = {
+    return {
 
         "mots": words,
         "phrases": sentences,
@@ -297,22 +338,19 @@ def document_report(text):
 
     }
 
-    return report
-
-
 # ============================================================
-# ORACLE BRAIN V16
+# ORACLE BRAIN
 # ============================================================
 
-class OracleBrainV16:
+class OracleBrain:
 
     def __init__(self):
 
         self.memory = VectorMemory()
 
-        self.reasoner = MultiConceptReasoner()
+        self.reasoner = TrigramReasoner()
 
-        self.analysis = SpectralAnalysis()
+        self.analyzer = QuestionAnalyzer()
 
         self.generator = AnswerGenerator()
 
@@ -330,17 +368,23 @@ class OracleBrainV16:
     # APPRENTISSAGE DOCUMENT
     # ========================================================
 
-    def learn_document(self, text, source="document"):
+    def learn_document(self, text):
 
         chunks = split_document(text)
 
+        learned = 0
+
         for c in chunks:
 
-            if len(c.strip()) > 30:
+            tokens = tokenize(c)
 
-                self.learn(c, source)
+            if len(tokens) > 5:
 
-        return len(chunks)
+                self.memory.add(c, "document")
+
+                learned += 1
+
+        return learned
 
     # ========================================================
     # QUESTION
@@ -348,7 +392,7 @@ class OracleBrainV16:
 
     def ask(self, question):
 
-        analysis = self.analysis.analyze(question)
+        analysis = self.analyzer.analyze(question)
 
         results = self.memory.search(question)
 
@@ -367,21 +411,12 @@ class OracleBrainV16:
         return answer
 
     # ========================================================
-    # RAPPORT MEMOIRE
+    # RAPPORT IA
     # ========================================================
 
-    def memory_report(self):
+    def report(self):
 
-        stats = self.memory.stats()
-
-        report = {
-
-            "entrees_memoire": stats["entries"],
-            "date": str(datetime.now())
-
-        }
-
-        return report
+        return generate_memory_report(self.memory)
 
 
 # ============================================================
@@ -390,9 +425,9 @@ class OracleBrainV16:
 
 if __name__ == "__main__":
 
-    oracle = OracleBrainV16()
+    oracle = OracleBrain()
 
-    print("\nORACLE V15 Ω INITIALISÉ\n")
+    print("\n🧠 ORACLE V15 Ω COSMOS INITIALISÉ\n")
 
     while True:
 
@@ -402,6 +437,4 @@ if __name__ == "__main__":
 
             break
 
-        r = oracle.ask(q)
-
-        print("\n", r)
+        print("\n", oracle.ask(q))
