@@ -1,6 +1,7 @@
 # ============================================================
-# ORACLE V14 Ω TTU
+# ORACLE V15 Ω COSMOS
 # Interface Streamlit
+# Evolution stable de ORACLE V14 Ω TTU
 # ============================================================
 
 import streamlit as st
@@ -8,6 +9,7 @@ import os
 
 from oracle_engine_v15 import OracleEngine
 from ttu_file_scanner import scan_file
+
 from analytics_engine import (
     export_csv,
     export_json,
@@ -16,6 +18,7 @@ from analytics_engine import (
     graph_progress,
     graph_sources
 )
+
 from github_memory import backup_memory
 
 # ============================================================
@@ -24,43 +27,76 @@ from github_memory import backup_memory
 
 oracle = OracleEngine()
 
-st.set_page_config(page_title="ORACLE V14 Ω", layout="wide")
+st.set_page_config(
+    page_title="ORACLE V15 Ω COSMOS",
+    layout="wide"
+)
 
-st.title("🧠 ORACLE V14 Ω TTU")
+st.title("🧠 ORACLE V15 Ω COSMOS")
 
-st.markdown("**Moteur cognitif expérimental**")
+st.markdown(
+"""
+**Moteur cognitif expérimental**
+
+Architecture :
+- Mémoire vectorielle
+- Raisonnement trigram
+- Analyse documentaire
+- Apprentissage continu
+- Rapports analytiques
+"""
+)
 
 # ============================================================
 # STATISTIQUES
 # ============================================================
 
-st.metric("Souvenirs", oracle.stats())
+try:
+
+    memories_count = oracle.stats()
+
+except:
+
+    memories_count = 0
+
+st.metric("Souvenirs enregistrés", memories_count)
 
 st.divider()
 
 # ============================================================
-# DIALOGUE
+# DIALOGUE ORACLE
 # ============================================================
 
-st.subheader("Dialogue avec Oracle")
+st.subheader("💬 Dialogue avec ORACLE")
 
-text = st.text_area("Pose ta question")
+text = st.text_area(
+    "Pose ta question",
+    height=120
+)
 
-if st.button("Envoyer"):
+if st.button("Interroger ORACLE"):
 
     if text.strip() != "":
 
-        oracle.learn(text)
+        try:
 
-        r = oracle.reason(text)
+            # apprentissage question
+            oracle.learn(text)
 
-        st.success("Réponse ORACLE")
+            # raisonnement
+            response = oracle.reason(text)
 
-        st.write(r)
+            st.success("Réponse générée")
+
+            st.write(response)
+
+        except Exception as e:
+
+            st.error(f"Erreur moteur ORACLE : {e}")
 
     else:
 
-        st.warning("Veuillez écrire une question")
+        st.warning("Veuillez écrire une question.")
 
 # ============================================================
 # NOURRITURE CÉRÉBRALE
@@ -68,11 +104,11 @@ if st.button("Envoyer"):
 
 st.divider()
 
-st.subheader("Nourriture cérébrale")
+st.subheader("📚 Nourriture cérébrale")
 
 uploaded = st.file_uploader(
-    "Glissez-déposez un fichier",
-    type=["txt","pdf","docx","csv","json"]
+    "Importer un fichier pour nourrir l'ORACLE",
+    type=["txt", "pdf", "docx", "csv", "json"]
 )
 
 if uploaded:
@@ -83,9 +119,9 @@ if uploaded:
 
         if content.strip() != "":
 
-            oracle.learn(content, "document")
+            oracle.learn_document(content)
 
-            st.success("Document analysé et appris")
+            st.success("Document analysé et mémorisé")
 
         else:
 
@@ -96,18 +132,18 @@ if uploaded:
         st.error(f"Erreur analyse fichier : {e}")
 
 # ============================================================
-# EXPORT RAPPORTS
+# RAPPORTS IA
 # ============================================================
 
 st.divider()
 
-st.subheader("Rapports IA")
+st.subheader("📊 Rapports IA")
 
-if st.button("Générer rapports"):
+if st.button("Générer rapports analytiques"):
 
     try:
 
-        df = export_csv("oracle_memory/oracle.db")
+        df = export_csv("oracle_memory/oracle_core.db")
 
         export_json(df)
         export_txt(df)
@@ -115,82 +151,94 @@ if st.button("Générer rapports"):
         st.success("Rapports générés")
 
         # CSV
-        with open("oracle_report.csv","rb") as f:
+        with open("oracle_report.csv", "rb") as f:
 
             st.download_button(
-                "Télécharger CSV",
-                f,
+                label="Télécharger CSV",
+                data=f,
                 file_name="oracle_report.csv",
                 mime="text/csv"
             )
 
         # JSON
-        with open("oracle_report.json","rb") as f:
+        with open("oracle_report.json", "rb") as f:
 
             st.download_button(
-                "Télécharger JSON",
-                f,
+                label="Télécharger JSON",
+                data=f,
                 file_name="oracle_report.json",
                 mime="application/json"
             )
 
         # TXT
-        with open("oracle_report.txt","rb") as f:
+        with open("oracle_report.txt", "rb") as f:
 
             st.download_button(
-                "Télécharger TXT",
-                f,
+                label="Télécharger TXT",
+                data=f,
                 file_name="oracle_report.txt",
                 mime="text/plain"
             )
 
     except Exception as e:
 
-        st.error(f"Erreur export : {e}")
+        st.error(f"Erreur export rapports : {e}")
 
 # ============================================================
-# ANALYSE DES SOUVENIRS
-# ============================================================
-
-st.divider()
-
-st.subheader("Analyse cognitive")
-
-if st.button("Analyser souvenirs"):
-
-    stats = analyze_memories()
-
-    st.write("🧠 Souvenirs totaux :", stats["total_memories"])
-
-    st.write("📚 Sources :", stats["sources"])
-
-    st.write("🔑 Concepts dominants :", stats["top_words"])
-
-    img = graph_sources()
-
-    if img and os.path.exists(img):
-
-        st.image(img)
-
-# ============================================================
-# GRAPH PROGRESSION
+# ANALYSE COGNITIVE
 # ============================================================
 
 st.divider()
 
-st.subheader("Progression IA")
+st.subheader("🧠 Analyse cognitive")
 
-if st.button("Graph évolution"):
+if st.button("Analyser la mémoire ORACLE"):
 
-    img = graph_progress("oracle_memory/oracle.db")
+    try:
 
-    if img and os.path.exists(img):
+        stats = analyze_memories()
 
-        st.image(img)
+        st.write("🧠 Souvenirs totaux :", stats["total_memories"])
 
-    else:
+        st.write("📚 Sources :", stats["sources"])
 
-        st.warning("Pas assez de données pour générer le graphique")
+        st.write("🔑 Concepts dominants :", stats["top_words"])
+
+        img = graph_sources()
+
+        if img and os.path.exists(img):
+
+            st.image(img)
+
+    except Exception as e:
+
+        st.error(f"Erreur analyse : {e}")
+
+# ============================================================
+# PROGRESSION IA
+# ============================================================
+
+st.divider()
+
+st.subheader("📈 Progression cognitive")
+
+if st.button("Afficher évolution IA"):
+
+    try:
+
+        img = graph_progress("oracle_memory/oracle_core.db")
+
+        if img and os.path.exists(img):
+
+            st.image(img)
+
+        else:
+
+            st.warning("Pas assez de données pour générer le graphique")
+
+    except Exception as e:
+
+        st.error(f"Erreur graphique : {e}")
 
 # ============================================================
 # BACKUP GITHUB
@@ -198,9 +246,9 @@ if st.button("Graph évolution"):
 
 st.divider()
 
-st.subheader("Sauvegarde")
+st.subheader("☁️ Sauvegarde GitHub")
 
-if st.button("Backup GitHub"):
+if st.button("Sauvegarder mémoire ORACLE"):
 
     try:
 
@@ -215,3 +263,11 @@ if st.button("Backup GitHub"):
     except Exception as e:
 
         st.error(f"Erreur backup : {e}")
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption("ORACLE V15 Ω COSMOS — Architecture cognitive expérimentale")
