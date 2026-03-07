@@ -1,9 +1,3 @@
-# ============================================================
-# ORACLE V14 Ω ULTRA STABLE
-# TTU Cognitive Engine
-# Vector Memory + Multi Concept Reasoning
-# ============================================================
-
 import sqlite3
 import os
 import math
@@ -11,39 +5,32 @@ import hashlib
 from datetime import datetime
 from collections import Counter
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-DB_FOLDER = "oracle_memory"
-DB_PATH = os.path.join(DB_FOLDER, "oracle.db")
+DB_FOLDER="oracle_memory"
+DB_PATH=os.path.join(DB_FOLDER,"oracle.db")
 
 if not os.path.exists(DB_FOLDER):
     os.makedirs(DB_FOLDER)
 
-# ============================================================
-# DATABASE INITIALISATION
-# ============================================================
-
 def init_db():
 
-    conn = sqlite3.connect(DB_PATH)
+    conn=sqlite3.connect(DB_PATH)
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS memories(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        text TEXT,
-        vector TEXT,
-        timestamp TEXT
+    id INTEGER PRIMARY KEY,
+    text TEXT,
+    vector TEXT,
+    source TEXT,
+    timestamp TEXT
     )
     """)
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS trigrams(
-        w1 TEXT,
-        w2 TEXT,
-        w3 TEXT,
-        count INTEGER
+    w1 TEXT,
+    w2 TEXT,
+    w3 TEXT,
+    count INTEGER
     )
     """)
 
@@ -52,183 +39,159 @@ def init_db():
 
 init_db()
 
-# ============================================================
-# VECTOR EMBEDDING SIMPLIFIÉ
-# ============================================================
+def text_vector(text):
 
-def text_to_vector(text):
+    words=text.lower().split()
 
-    words = text.lower().split()
-    counts = Counter(words)
+    counts=Counter(words)
 
-    vector = []
+    vector=[]
 
     for w in counts:
-        h = int(hashlib.md5(w.encode()).hexdigest(),16)%1000
-        vector.append(h * counts[w])
+
+        h=int(hashlib.md5(w.encode()).hexdigest(),16)%1000
+
+        vector.append(h*counts[w])
 
     return vector
 
-def cosine_similarity(a,b):
+
+def cosine(a,b):
 
     if not a or not b:
         return 0
 
-    min_len=min(len(a),len(b))
+    n=min(len(a),len(b))
 
-    dot=sum(a[i]*b[i] for i in range(min_len))
-    normA=math.sqrt(sum(x*x for x in a))
-    normB=math.sqrt(sum(x*x for x in b))
+    dot=sum(a[i]*b[i] for i in range(n))
 
-    if normA==0 or normB==0:
+    na=math.sqrt(sum(x*x for x in a))
+    nb=math.sqrt(sum(x*x for x in b))
+
+    if na==0 or nb==0:
         return 0
 
-    return dot/(normA*normB)
+    return dot/(na*nb)
 
-# ============================================================
-# ORACLE ENGINE
-# ============================================================
 
 class OracleEngine:
 
     def __init__(self):
 
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self.conn=sqlite3.connect(DB_PATH,check_same_thread=False)
 
-    # ========================================================
-    # MEMORY
-    # ========================================================
+    def learn(self,text,source="user"):
 
-    def store(self,text):
-
-        vector=text_to_vector(text)
+        vec=text_vector(text)
 
         self.conn.execute(
-            "INSERT INTO memories(text,vector,timestamp) VALUES(?,?,?)",
-            (text,str(vector),datetime.now().isoformat())
+        "INSERT INTO memories(text,vector,source,timestamp) VALUES(?,?,?,?)",
+        (text,str(vec),source,datetime.now().isoformat())
         )
 
         self.conn.commit()
 
-        self.learn_trigrams(text)
+        self.learn_trigram(text)
 
-    # ========================================================
-    # TRIGRAM LEARNING
-    # ========================================================
+    def learn_trigram(self,text):
 
-    def learn_trigrams(self,text):
+        w=text.lower().split()
 
-        words=text.lower().split()
+        for i in range(len(w)-2):
 
-        for i in range(len(words)-2):
-
-            w1,w2,w3=words[i],words[i+1],words[i+2]
+            w1,w2,w3=w[i],w[i+1],w[i+2]
 
             cur=self.conn.execute(
-                "SELECT count FROM trigrams WHERE w1=? AND w2=? AND w3=?",
-                (w1,w2,w3)
+            "SELECT count FROM trigrams WHERE w1=? AND w2=? AND w3=?",
+            (w1,w2,w3)
             ).fetchone()
 
             if cur:
 
                 self.conn.execute(
-                    "UPDATE trigrams SET count=count+1 WHERE w1=? AND w2=? AND w3=?",
-                    (w1,w2,w3)
+                "UPDATE trigrams SET count=count+1 WHERE w1=? AND w2=? AND w3=?",
+                (w1,w2,w3)
                 )
 
             else:
 
                 self.conn.execute(
-                    "INSERT INTO trigrams VALUES(?,?,?,1)",
-                    (w1,w2,w3)
+                "INSERT INTO trigrams VALUES(?,?,?,1)",
+                (w1,w2,w3)
                 )
 
         self.conn.commit()
 
-    # ========================================================
-    # VECTOR SEARCH
-    # ========================================================
+    def search(self,text):
 
-    def search_memory(self,text):
-
-        vector=text_to_vector(text)
+        vec=text_vector(text)
 
         cur=self.conn.execute("SELECT text,vector FROM memories")
 
+        best=""
         best_score=0
-        best_text=""
 
-        for row in cur.fetchall():
+        for r in cur.fetchall():
 
-            mem=row[0]
-            vec=eval(row[1])
+            v=eval(r[1])
 
-            score=cosine_similarity(vector,vec)
+            s=cosine(vec,v)
 
-            if score>best_score:
+            if s>best_score:
 
-                best_score=score
-                best_text=mem
+                best_score=s
+                best=r[0]
 
-        return best_text
+        return best,best_score
 
-    # ========================================================
-    # TRIGRAM GENERATION
-    # ========================================================
+    def generate(self,text):
 
-    def generate(self,seed):
+        w=text.lower().split()
 
-        words=seed.lower().split()
+        if len(w)<2:
+            return text
 
-        if len(words)<2:
-            return seed
-
-        w1,w2=words[-2],words[-1]
+        w1,w2=w[-2],w[-1]
 
         cur=self.conn.execute(
-            "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 5",
-            (w1,w2)
+        "SELECT w3,count FROM trigrams WHERE w1=? AND w2=? ORDER BY count DESC LIMIT 5",
+        (w1,w2)
         )
 
-        options=cur.fetchall()
+        r=cur.fetchall()
 
-        if not options:
-            return seed
+        if not r:
+            return text
 
-        next_word=options[0][0]
-
-        return seed+" "+next_word
-
-    # ========================================================
-    # MULTI CONCEPT REASONING
-    # ========================================================
+        return text+" "+r[0][0]
 
     def reason(self,text):
 
-        memory=self.search_memory(text)
+        mem,score=self.search(text)
 
-        generated=self.generate(text)
+        gen=self.generate(text)
 
-        if memory:
+        answer=f"""
+Analyse ORACLE
 
-            return f"{generated}\n\nConcept associé : {memory}"
+Question : {text}
 
-        return generated
+Hypothèse générée :
+{gen}
 
-    # ========================================================
-    # STATS
-    # ========================================================
+Mémoire associée (score {round(score,3)}) :
 
-    def memory_size(self):
+{mem}
 
-        try:
+Conclusion :
 
-            n=self.conn.execute(
-                "SELECT COUNT(*) FROM memories"
-            ).fetchone()[0]
+La réponse est basée sur la mémoire interne et l'analyse statistique des concepts.
+"""
 
-            return n
+        return answer
 
-        except:
+    def stats(self):
 
-            return 0
+        n=self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+
+        return n
