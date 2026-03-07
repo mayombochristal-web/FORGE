@@ -1,139 +1,95 @@
-# =====================================================
-# ORACLE V14 Ω INTERFACE
-# =====================================================
+# ============================================================
+# ORACLE V14 Ω STREAMLIT INTERFACE
+# ============================================================
 
 import streamlit as st
-import pandas as pd
-import json
-from oracle_engine_v14 import OracleBrain
+from oracle_engine_v14 import OracleEngine
+from github import Github
+import os
 
-st.set_page_config(
-    page_title="ORACLE Ω V14",
-    layout="wide",
-    page_icon="🧠"
-)
+# ============================================================
+# CONFIG
+# ============================================================
 
-# =====================================================
-# INITIALISATION
-# =====================================================
+st.set_page_config(page_title="ORACLE V14 Ω",layout="wide")
 
-if "oracle" not in st.session_state:
-    st.session_state.oracle = OracleBrain()
+oracle=OracleEngine()
 
-oracle = st.session_state.oracle
+# ============================================================
+# GITHUB CONFIG
+# ============================================================
 
-# =====================================================
-# SIDEBAR — ETAT TTU
-# =====================================================
+try:
 
-with st.sidebar:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    GITHUB_REPO = st.secrets["GITHUB_REPO"]
+    GITHUB_MEMORY_DIR = st.secrets["GITHUB_MEMORY_DIR"]
+    GITHUB_BRANCH = st.secrets["GITHUB_BRANCH"]
 
-    st.title("TTU Cognitive State")
+    github=Github(GITHUB_TOKEN)
+    repo=github.get_repo(GITHUB_REPO)
 
-    phi = oracle.phi
+except:
 
-    st.metric("Φ mémoire", f"{phi['phi_m']:.3f}")
-    st.progress(phi["phi_m"])
+    github=None
 
-    st.metric("Φ cohérence", f"{phi['phi_c']:.3f}")
-    st.progress(phi["phi_c"])
+# ============================================================
+# HEADER
+# ============================================================
 
-    st.metric("Φ dissipation", f"{phi['phi_d']:.3f}")
-    st.progress(phi["phi_d"])
+st.title("🧠 ORACLE V14 Ω")
 
-    st.divider()
+col1,col2=st.columns(2)
 
-    st.metric("Distance attracteur", f"{oracle.distance():.4f}")
+with col1:
+    st.metric("Memories",oracle.memory_size())
 
-    st.metric("Concepts", oracle.memory_size())
+with col2:
+    st.metric("Status","ACTIVE")
 
-    st.metric("Age", oracle.age)
+# ============================================================
+# INPUT
+# ============================================================
 
-    st.divider()
+user_input=st.text_area("Dialogue avec ORACLE")
 
-    if st.button("🌙 Sleep cycle"):
-        oracle.sleep_cycle()
-        st.success("Consolidation mémoire")
+if st.button("Envoyer"):
 
-# =====================================================
-# DIALOGUE
-# =====================================================
+    if user_input:
 
-st.header("Dialogue")
+        oracle.store(user_input)
 
-user = st.text_input("Parlez à l'Oracle")
+        response=oracle.reason(user_input)
 
-if user:
+        st.success(response)
 
-    oracle.learn(user)
+# ============================================================
+# GITHUB SAVE
+# ============================================================
 
-    answer = oracle.think(user)
+if st.button("Sauvegarde mémoire GitHub"):
 
-    st.write("### Oracle")
-    st.write(answer)
+    if github:
 
-# =====================================================
-# ANALYSE DOCUMENT
-# =====================================================
+        for root,dirs,files in os.walk("oracle_memory"):
 
-st.header("Analyse de documents")
+            for f in files:
 
-files = st.file_uploader(
-    "Importer fichiers",
-    accept_multiple_files=True,
-    type=["pdf","docx","txt","csv","json","xlsx"]
-)
+                path=os.path.join(root,f)
 
-if files:
+                with open(path,"rb") as file:
 
-    for file in files:
+                    content=file.read()
 
-        text = oracle.read_document(file)
+                repo.create_file(
+                    f"{GITHUB_MEMORY_DIR}/{f}",
+                    "memory backup",
+                    content,
+                    branch=GITHUB_BRANCH
+                )
 
-        if text:
+        st.success("Mémoire sauvegardée sur GitHub")
 
-            stats = oracle.analyze_document(text)
+    else:
 
-            st.success(file.name)
-
-            st.write(stats)
-
-            response = oracle.think(text)
-
-            st.write("Réponse Oracle")
-            st.write(response)
-
-# =====================================================
-# VISUALISATION CONCEPTUELLE
-# =====================================================
-
-st.header("Carte Conceptuelle")
-
-if st.button("Afficher carte"):
-
-    fig = oracle.visualize()
-
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-
-# =====================================================
-# EXPORT DONNEES
-# =====================================================
-
-st.header("Export")
-
-if st.button("Exporter concepts"):
-
-    df = oracle.export_concepts()
-
-    st.download_button(
-        "Télécharger CSV",
-        df.to_csv(index=False),
-        "oracle_concepts.csv"
-    )
-
-    st.download_button(
-        "Télécharger JSON",
-        df.to_json(orient="records"),
-        "oracle_concepts.json"
-    )
+        st.warning("GitHub non configuré")
