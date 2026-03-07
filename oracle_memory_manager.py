@@ -1,27 +1,23 @@
 import os
 import json
 import math
-from memory_storage import save, load_all, count_memories
+from memory_storage import save, load_all_metadata, count_memories
 from memory_compressor import compress_old
 from memory_index import update_index, search_index
 
 class MemoryManager:
     def __init__(self):
-        # Assurer que les dossiers existent
         from memory_storage import init
         init()
 
     def store(self, text, vector, source):
         path = save(text, vector, source)
-        # Mise à jour de l'index
         update_index(text, path)
-        # Compression automatique si trop de souvenirs
         if count_memories() > 100:
             compress_old()
 
     def search(self, query_vector, top_k=5):
-        # Utilise l'index pour obtenir les chemins candidats
-        candidate_paths = search_index(query_vector, top_k*2)
+        candidate_paths = search_index(query_vector, top_k * 2)
         results = []
         from memory_storage import load_vector
         for path in candidate_paths:
@@ -31,12 +27,10 @@ class MemoryManager:
             score = self._cosine(query_vector, vec)
             if score > 0:
                 results.append((score, text))
-        # Trier par score décroissant
         results.sort(key=lambda x: -x[0])
         return results[:top_k]
 
     def all(self):
-        from memory_storage import load_all_metadata
         return load_all_metadata()
 
     def count(self):
