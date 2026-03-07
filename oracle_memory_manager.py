@@ -1,23 +1,53 @@
-from memory_storage import save_memory
-from memory_compressor import compress_memory
+import os
+import json
+import math
+from memory_storage import save, load_all, count_memories
+from memory_compressor import compress_old
+from memory_index import update_index, search_index
 
-
-class OracleMemoryManager:
-
+class MemoryManager:
     def __init__(self):
+        # Assurer que les dossiers existent
+        from memory_storage import init
+        init()
 
-        self.attention_threshold = 12
+    def store(self, text, vector, source):
+        path = save(text, vector, source)
+        # Mise à jour de l'index
+        update_index(text, path)
+        # Compression automatique si trop de souvenirs
+        if count_memories() > 100:
+            compress_old()
 
-    def evaluate_memory(self, text_score, content):
+    def search(self, query_vector, top_k=5):
+        # Utilise l'index pour obtenir les chemins candidats
+        candidate_paths = search_index(query_vector, top_k*2)
+        results = []
+        from memory_storage import load_vector
+        for path in candidate_paths:
+            vec, text = load_vector(path)
+            if vec is None:
+                continue
+            score = self._cosine(query_vector, vec)
+            if score > 0:
+                results.append((score, text))
+        # Trier par score décroissant
+        results.sort(key=lambda x: -x[0])
+        return results[:top_k]
 
-        if text_score >= self.attention_threshold:
+    def all(self):
+        from memory_storage import load_all_metadata
+        return load_all_metadata()
 
-            path = save_memory(content, text_score)
+    def count(self):
+        return count_memories()
 
-            compressed = compress_memory(path)
-
-            print("Memory stored:", compressed)
-
-            return compressed
-
-        return None
+    def _cosine(self, v1, v2):
+        inter = set(v1) & set(v2)
+        num = sum(v1[x] * v2[x] for x in inter)
+        s1 = sum(v**2 for v in v1.values())
+        s2 = sum(v**2 for v in v2.values())
+        denom = math.sqrt(s1) * math.sqrt(s2)
+        if denom == 0:
+            return 0
+        return num / denom
