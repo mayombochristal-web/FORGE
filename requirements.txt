@@ -1,2 +1,9 @@
-streamlit
-requests
+numpy
+pandas
+sentence-transformers
+PyGithub
+PyPDF2
+python-docx
+flask
+openpyxl
+xlrd
