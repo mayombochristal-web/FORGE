@@ -1,9 +1,6 @@
 streamlit
-sentence-transformers
-numpy
+requests
 pandas
-PyPDF2
 python-docx
-PyGithub
-scikit-learn
+PyPDF2
 openpyxl
