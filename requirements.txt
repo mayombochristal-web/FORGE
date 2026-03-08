@@ -1,10 +1,11 @@
+streamlit
+flask
 numpy
 pandas
 sentence-transformers
 PyGithub
 PyPDF2
 python-docx
-flask
 openpyxl
 xlrd
 requests
