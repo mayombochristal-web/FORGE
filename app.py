@@ -1,10 +1,15 @@
 import os
 import tempfile
+import sys
+import pathlib
 
+# Ajoute le dossier contenant app.py au PYTHONPATH
+ROOT_DIR = pathlib.Path(__file__).resolve().parent
+sys.path.append(str(ROOT_DIR))
+from oracle_engine import OracleEngine
 from flask import Flask, request, jsonify, render_template_string
 from werkzeug.utils import secure_filename
 
-from oracle_engine import OracleEngine
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
