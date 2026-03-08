@@ -1,138 +1,243 @@
 import streamlit as st
-from oracle_engine import OracleEngine
+from oracle_engine_v20 import OracleEngine
 
-# =====================================================
+# ============================================================
 # CONFIGURATION PAGE
-# =====================================================
+# ============================================================
 
 st.set_page_config(
-    page_title="ORACLE V19",
+    page_title="ORACLE V20",
     layout="wide"
 )
 
-st.title("🧠 ORACLE V19 — Moteur cognitif hiérarchique")
-
-st.markdown("""
-Architecture cognitive expérimentale
-
-Capacités :
-
-• mémoire linguistique hiérarchique  
-• mémoire vectorielle indexée  
-• transformateur sémantique simplifié  
-• raisonnement multi-concepts  
-• base de connaissances dynamique  
-• sauvegarde mémoire automatique GitHub
-""")
-
-# =====================================================
-# CHARGEMENT ORACLE
-# =====================================================
+# ============================================================
+# INITIALISATION MOTEUR
+# ============================================================
 
 @st.cache_resource
-def load_oracle():
-
+def load_engine():
     return OracleEngine()
 
-oracle = load_oracle()
+oracle = load_engine()
 
-# =====================================================
+# ============================================================
+# HEADER
+# ============================================================
+
+st.title("🧠 ORACLE V20")
+st.caption("Moteur cognitif expérimental")
+
+# ============================================================
 # MENU
-# =====================================================
+# ============================================================
 
 menu = st.sidebar.selectbox(
     "Navigation",
     [
-        "Interroger ORACLE",
+        "Accueil",
         "Apprentissage document",
+        "Question ORACLE",
         "Statistiques mémoire",
+        "Exploration mémoire",
         "Architecture mémoire"
     ]
 )
 
-# =====================================================
-# QUESTION
-# =====================================================
+# ============================================================
+# ACCUEIL
+# ============================================================
 
-if menu == "Interroger ORACLE":
+if menu == "Accueil":
 
-    st.subheader("Poser une question")
+    st.subheader("Présentation")
 
-    question = st.text_input(
-        "Pose une question à ORACLE"
-    )
+    st.markdown(
+"""
+ORACLE est un moteur cognitif expérimental basé sur une mémoire linguistique hiérarchique.
 
-    if st.button("Interroger"):
+Fonctionnalités :
 
-        if question:
+• apprentissage de documents  
+• mémoire vectorielle  
+• graphe conceptuel  
+• raisonnement linguistique  
+• sauvegarde mémoire  
 
-            with st.spinner("ORACLE réfléchit..."):
+Architecture :
 
-                response = oracle.reason(question)
+Document  
+↓  
+Paragraphe  
+↓  
+Phrase  
+↓  
+Mot  
+↓  
+Syllabe  
+↓  
+Caractère
+"""
+)
 
-            st.markdown("### Réponse")
-            st.write(response)
-
-# =====================================================
+# ============================================================
 # APPRENTISSAGE DOCUMENT
-# =====================================================
+# ============================================================
 
-if menu == "Apprentissage document":
+elif menu == "Apprentissage document":
 
-    st.subheader("Ajouter un document à la mémoire")
+    st.subheader("Importer un document")
 
-    uploaded_file = st.file_uploader(
-        "Importer un fichier",
-        type=["txt","pdf","docx","csv","xlsx"]
+    file = st.file_uploader(
+        "Choisir un fichier texte",
+        type=["txt","md"]
     )
 
-    if uploaded_file:
+    if file:
 
         if st.button("Apprendre le document"):
 
-            with st.spinner("Analyse linguistique en cours..."):
+            with st.spinner("Analyse et indexation..."):
 
-                n = oracle.learn_document(uploaded_file)
+                count = oracle.learn_document(file)
 
-            st.success(f"{n} phrases apprises")
+            st.success(f"{count} phrases apprises")
 
-            st.info("""
-            Le document a été analysé et intégré dans la mémoire hiérarchique :
+# ============================================================
+# QUESTION ORACLE
+# ============================================================
 
-            caractères → syllabes → mots → phrases → paragraphes → contextes
-            """)
+elif menu == "Question ORACLE":
 
-# =====================================================
+    st.subheader("Poser une question")
+
+    question = st.text_input("Question")
+
+    if question:
+
+        if st.button("Interroger ORACLE"):
+
+            with st.spinner("Raisonnement en cours..."):
+
+                answer = oracle.reason(question)
+
+            st.markdown(answer)
+
+# ============================================================
 # STATISTIQUES
-# =====================================================
+# ============================================================
 
-if menu == "Statistiques mémoire":
+elif menu == "Statistiques mémoire":
 
-    st.subheader("Statistiques de la mémoire ORACLE")
+    st.subheader("Statistiques")
 
     stats = oracle.stats()
 
-    col1, col2 = st.columns(2)
+    col1,col2,col3 = st.columns(3)
 
-    col1.metric(
-        "Souvenirs (phrases)",
-        stats["souvenirs"]
-    )
+    col1.metric("Documents",stats["documents"])
+    col2.metric("Souvenirs (phrases)",stats["souvenirs"])
+    col3.metric("Mots",stats["mots"])
 
-    col2.metric(
-        "Sources (documents)",
-        stats["sources"]
-    )
+# ============================================================
+# EXPLORATION MEMOIRE
+# ============================================================
 
-# =====================================================
-# ARCHITECTURE
-# =====================================================
+elif menu == "Exploration mémoire":
 
-if menu == "Architecture mémoire":
+    st.subheader("Recherche mémoire")
+
+    query = st.text_input("Recherche phrase")
+
+    if query:
+
+        results = oracle.search_sentences(query)
+
+        for r in results:
+
+            st.write("Score:",round(r[0],3))
+            st.write(r[1])
+            st.divider()
+
+# ============================================================
+# ARCHITECTURE MEMOIRE
+# ============================================================
+
+elif menu == "Architecture mémoire":
 
     st.subheader("Architecture cognitive ORACLE")
 
-    st.markdown("""
+    st.markdown(
+"""
 ### Mémoire linguistique hiérarchique
 
 La mémoire d'ORACLE est organisée selon plusieurs couches linguistiques :
+
+Document  
+↓  
+Contexte  
+↓  
+Paragraphes  
+↓  
+Phrases  
+↓  
+Mots  
+↓  
+Syllabes  
+↓  
+Caractères  
+
+Chaque couche est indexée séparément et reliée aux autres.
+
+---
+
+### Structure réelle de la mémoire
+
+oracle_memory/
+
+characters.db  
+syllables.db  
+words.db  
+sentences.db  
+paragraphs.db  
+contexts.db  
+documents.db  
+concept_graph.db  
+
+---
+
+### Processus d'apprentissage
+
+Lorsqu'un document est importé :
+
+1. extraction texte  
+2. découpage paragraphes  
+3. découpage phrases  
+4. extraction mots  
+5. segmentation syllabes  
+6. indexation caractères  
+
+---
+
+### Raisonnement ORACLE
+
+Question  
+↓  
+Analyse linguistique  
+↓  
+Embedding sémantique  
+↓  
+Recherche phrases proches  
+↓  
+Scoring d'attention  
+↓  
+Croisement graphe conceptuel  
+↓  
+Génération de réponse  
+
+---
+
+### Sauvegarde mémoire
+
+La mémoire est automatiquement sauvegardée sur GitHub.
+"""
+)
