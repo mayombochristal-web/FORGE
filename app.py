@@ -1,156 +1,105 @@
 import streamlit as st
-from oracle_engine_v20 import OracleEngine
+from oracle_engine import OracleEngine
 
-# ============================================================
-# CONFIGURATION PAGE
-# ============================================================
-
-st.set_page_config(
-    page_title="ORACLE V20",
-    layout="wide"
-)
-
-# ============================================================
-# INITIALISATION MOTEUR
-# ============================================================
+st.set_page_config(page_title="ORACLE V20.1",layout="wide")
 
 @st.cache_resource
 def load_engine():
     return OracleEngine()
 
-oracle = load_engine()
+oracle=load_engine()
 
-# ============================================================
-# HEADER
-# ============================================================
+st.title("🧠 ORACLE V20.1")
 
-st.title("🧠 ORACLE V20")
-st.caption("Moteur cognitif expérimental")
-
-# ============================================================
-# MENU
-# ============================================================
-
-menu = st.sidebar.selectbox(
-    "Navigation",
-    [
-        "Accueil",
-        "Apprentissage document",
-        "Question ORACLE",
-        "Statistiques mémoire",
-        "Exploration mémoire",
-        "Architecture mémoire"
-    ]
+menu=st.sidebar.selectbox(
+"Menu",
+[
+"Accueil",
+"Apprentissage document",
+"Question ORACLE",
+"Statistiques mémoire",
+"Exploration mémoire",
+"Architecture mémoire"
+]
 )
 
 # ============================================================
 # ACCUEIL
 # ============================================================
 
-if menu == "Accueil":
+if menu=="Accueil":
 
-    st.subheader("Présentation")
-
-    st.markdown(
-"""
-ORACLE est un moteur cognitif expérimental basé sur une mémoire linguistique hiérarchique.
+    st.markdown("""
+ORACLE V20.1 est un moteur cognitif expérimental.
 
 Fonctionnalités :
 
-• apprentissage de documents  
-• mémoire vectorielle  
+• mémoire linguistique hiérarchique  
+• vector search  
 • graphe conceptuel  
 • raisonnement linguistique  
-• sauvegarde mémoire  
-
-Architecture :
-
-Document  
-↓  
-Paragraphe  
-↓  
-Phrase  
-↓  
-Mot  
-↓  
-Syllabe  
-↓  
-Caractère
-"""
-)
+• migration automatique V19  
+""")
 
 # ============================================================
-# APPRENTISSAGE DOCUMENT
+# LEARNING
 # ============================================================
 
-elif menu == "Apprentissage document":
+elif menu=="Apprentissage document":
 
-    st.subheader("Importer un document")
-
-    file = st.file_uploader(
-        "Choisir un fichier texte",
-        type=["txt","md"]
-    )
+    file=st.file_uploader("Importer document",type=["txt","md"])
 
     if file:
 
-        if st.button("Apprendre le document"):
+        if st.button("Apprendre"):
 
-            with st.spinner("Analyse et indexation..."):
+            with st.spinner("Analyse en cours..."):
 
-                count = oracle.learn_document(file)
+                count=oracle.learn_document(file)
 
             st.success(f"{count} phrases apprises")
 
 # ============================================================
-# QUESTION ORACLE
+# QUESTION
 # ============================================================
 
-elif menu == "Question ORACLE":
+elif menu=="Question ORACLE":
 
-    st.subheader("Poser une question")
-
-    question = st.text_input("Question")
+    question=st.text_input("Question")
 
     if question:
 
-        if st.button("Interroger ORACLE"):
+        if st.button("Interroger"):
 
-            with st.spinner("Raisonnement en cours..."):
-
-                answer = oracle.reason(question)
+            answer=oracle.reason(question)
 
             st.markdown(answer)
 
 # ============================================================
-# STATISTIQUES
+# STATS
 # ============================================================
 
-elif menu == "Statistiques mémoire":
+elif menu=="Statistiques mémoire":
 
-    st.subheader("Statistiques")
+    stats=oracle.stats()
 
-    stats = oracle.stats()
-
-    col1,col2,col3 = st.columns(3)
+    col1,col2,col3=st.columns(3)
 
     col1.metric("Documents",stats["documents"])
-    col2.metric("Souvenirs (phrases)",stats["souvenirs"])
+    col2.metric("Phrases",stats["souvenirs"])
     col3.metric("Mots",stats["mots"])
 
 # ============================================================
-# EXPLORATION MEMOIRE
+# SEARCH
 # ============================================================
 
-elif menu == "Exploration mémoire":
+elif menu=="Exploration mémoire":
 
-    st.subheader("Recherche mémoire")
-
-    query = st.text_input("Recherche phrase")
+    query=st.text_input("Recherche")
 
     if query:
 
-        results = oracle.search_sentences(query)
+        results=oracle.search_sentences(query)
 
         for r in results:
 
@@ -159,18 +108,13 @@ elif menu == "Exploration mémoire":
             st.divider()
 
 # ============================================================
-# ARCHITECTURE MEMOIRE
+# ARCHITECTURE
 # ============================================================
 
-elif menu == "Architecture mémoire":
+elif menu=="Architecture mémoire":
 
-    st.subheader("Architecture cognitive ORACLE")
-
-    st.markdown(
-"""
-### Mémoire linguistique hiérarchique
-
-La mémoire d'ORACLE est organisée selon plusieurs couches linguistiques :
+    st.markdown("""
+### Architecture mémoire ORACLE
 
 Document  
 ↓  
@@ -184,13 +128,9 @@ Mots
 ↓  
 Syllabes  
 ↓  
-Caractères  
+Caractères
 
-Chaque couche est indexée séparément et reliée aux autres.
-
----
-
-### Structure réelle de la mémoire
+### Bases de données
 
 oracle_memory/
 
@@ -201,43 +141,17 @@ sentences.db
 paragraphs.db  
 contexts.db  
 documents.db  
-concept_graph.db  
+concept_graph.db
 
----
-
-### Processus d'apprentissage
-
-Lorsqu'un document est importé :
-
-1. extraction texte  
-2. découpage paragraphes  
-3. découpage phrases  
-4. extraction mots  
-5. segmentation syllabes  
-6. indexation caractères  
-
----
-
-### Raisonnement ORACLE
+### Pipeline cognitif
 
 Question  
 ↓  
-Analyse linguistique  
+Embedding  
 ↓  
-Embedding sémantique  
-↓  
-Recherche phrases proches  
-↓  
-Scoring d'attention  
+Recherche vectorielle  
 ↓  
 Croisement graphe conceptuel  
 ↓  
-Génération de réponse  
-
----
-
-### Sauvegarde mémoire
-
-La mémoire est automatiquement sauvegardée sur GitHub.
-"""
-)
+Génération réponse
+""")
