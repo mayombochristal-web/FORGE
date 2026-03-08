@@ -132,7 +132,75 @@ if menu == "Architecture mémoire":
 
     st.subheader("Architecture cognitive ORACLE")
 
-    st.markdown("""
+    st.markdown(
+"""
 ### Mémoire linguistique hiérarchique
 
 La mémoire d'ORACLE est organisée selon plusieurs couches linguistiques :
+
+Document  
+↓  
+Contexte  
+↓  
+Paragraphes  
+↓  
+Phrases  
+↓  
+Mots  
+↓  
+Syllabes  
+↓  
+Caractères  
+
+Chaque couche est indexée séparément et reliée aux autres.
+
+---
+
+### Structure réelle de la mémoire
+
+oracle_memory/
+
+characters.db  
+syllables.db  
+words.db  
+sentences.db  
+paragraphs.db  
+contexts.db  
+documents.db  
+
+---
+
+### Processus d'apprentissage
+
+Lorsqu'un document est importé :
+
+1. extraction texte  
+2. découpage paragraphes  
+3. découpage phrases  
+4. extraction mots  
+5. segmentation syllabes  
+6. indexation caractères  
+
+---
+
+### Raisonnement ORACLE
+
+Question  
+↓  
+Analyse linguistique  
+↓  
+Embedding sémantique  
+↓  
+Recherche phrases proches  
+↓  
+Croisement des connaissances  
+↓  
+Génération de réponse  
+
+---
+
+### Sauvegarde mémoire
+
+La mémoire est automatiquement sauvegardée sur GitHub.
+"""
+    )
