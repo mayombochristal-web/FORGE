@@ -1,15 +1,10 @@
 import os
 import tempfile
-import sys
-import pathlib
 
-# Ajoute le dossier contenant app.py au PYTHONPATH
-ROOT_DIR = pathlib.Path(__file__).resolve().parent
-sys.path.append(str(ROOT_DIR))
-from oracle_engine import OracleEngine
 from flask import Flask, request, jsonify, render_template_string
 from werkzeug.utils import secure_filename
 
+from oracle_engine import OracleEngine  # oracle_engine.py est dans le même dossier
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
@@ -128,4 +123,5 @@ def query():
 
 
 if __name__ == "__main__":
+    # En local : python app.py
     app.run(host="0.0.0.0", port=5000, debug=True)
