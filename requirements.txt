@@ -7,3 +7,4 @@ python-docx
 flask
 openpyxl
 xlrd
+requests
