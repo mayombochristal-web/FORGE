@@ -1,347 +1,372 @@
 import os
-import json
-import uuid
+import sqlite3
+import hashlib
 import datetime
-import numpy as np
 import re
-import pandas as pd
-from collections import Counter, defaultdict
+import requests
 
-from sentence_transformers import SentenceTransformer
-from github import Github
+# ==========================================
+# CONFIGURATION
+# ==========================================
 
-import PyPDF2
-import docx
+MEMORY_FOLDER = "oracle_memory"
 
-MEMORY_PATH = "oracle_memory"
+DB_FILES = {
+    "characters": "characters.db",
+    "syllables": "syllables.db",
+    "words": "words.db",
+    "sentences": "sentences.db",
+    "paragraphs": "paragraphs.db",
+    "contexts": "contexts.db",
+    "documents": "documents.db"
+}
 
+GITHUB_REPO = os.getenv("ORACLE_GITHUB_REPO")
+GITHUB_TOKEN = os.getenv("ORACLE_GITHUB_TOKEN")
+
+
+# ==========================================
+# UTILITIES
+# ==========================================
+
+def ensure_folder():
+
+    if not os.path.exists(MEMORY_FOLDER):
+        os.makedirs(MEMORY_FOLDER)
+
+
+def hash_text(text):
+
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def simple_embedding(text):
+
+    h = hashlib.sha256(text.encode()).hexdigest()
+
+    return [int(h[i:i+4],16)/65535 for i in range(0,64,4)]
+
+
+def cosine_similarity(v1, v2):
+
+    dot = sum(a*b for a,b in zip(v1,v2))
+    n1 = sum(a*a for a in v1) ** 0.5
+    n2 = sum(a*a for a in v2) ** 0.5
+
+    if n1 == 0 or n2 == 0:
+        return 0
+
+    return dot/(n1*n2)
+
+
+# ==========================================
+# SYLLABLE SPLITTER
+# ==========================================
+
+def split_syllables(word):
+
+    return re.findall(r'[^aeiouy]*[aeiouy]+(?:[^aeiouy]|$)', word.lower())
+
+
+# ==========================================
+# DOCUMENT PARSER
+# ==========================================
+
+def split_sentences(text):
+
+    return re.split(r'[.!?]\s+', text)
+
+
+def split_paragraphs(text):
+
+    return text.split("\n\n")
+
+
+def split_words(text):
+
+    return re.findall(r'\b\w+\b', text.lower())
+
+
+# ==========================================
+# GITHUB SYNC
+# ==========================================
+
+def push_file_to_github(path):
+
+    if not GITHUB_REPO or not GITHUB_TOKEN:
+        return
+
+    with open(path,"rb") as f:
+        content = f.read()
+
+    b64 = content.encode("base64")
+
+    filename = os.path.basename(path)
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}"
+    }
+
+    data = {
+        "message": "oracle memory update",
+        "content": b64
+    }
+
+    requests.put(url,json=data,headers=headers)
+
+
+# ==========================================
+# ORACLE ENGINE
+# ==========================================
 
 class OracleEngine:
 
     def __init__(self):
 
-        # ===============================
-        # MODEL EMBEDDINGS
-        # ===============================
+        ensure_folder()
 
-        self.model = SentenceTransformer(
-            "paraphrase-multilingual-MiniLM-L12-v2"
+        self.dbs = {}
+
+        for k,f in DB_FILES.items():
+
+            path = os.path.join(MEMORY_FOLDER,f)
+
+            conn = sqlite3.connect(path,check_same_thread=False)
+
+            self.dbs[k] = conn
+
+        self.init_tables()
+
+
+# ==========================================
+# INIT TABLES
+# ==========================================
+
+    def init_tables(self):
+
+        self.dbs["characters"].execute("""
+        CREATE TABLE IF NOT EXISTS characters(
+        id TEXT PRIMARY KEY,
+        char TEXT,
+        source TEXT
+        )
+        """)
+
+        self.dbs["syllables"].execute("""
+        CREATE TABLE IF NOT EXISTS syllables(
+        id TEXT PRIMARY KEY,
+        syllable TEXT,
+        word TEXT
+        )
+        """)
+
+        self.dbs["words"].execute("""
+        CREATE TABLE IF NOT EXISTS words(
+        id TEXT PRIMARY KEY,
+        word TEXT,
+        frequency INTEGER,
+        source TEXT
+        )
+        """)
+
+        self.dbs["sentences"].execute("""
+        CREATE TABLE IF NOT EXISTS sentences(
+        id TEXT PRIMARY KEY,
+        text TEXT,
+        embedding TEXT,
+        source TEXT
+        )
+        """)
+
+        self.dbs["paragraphs"].execute("""
+        CREATE TABLE IF NOT EXISTS paragraphs(
+        id TEXT PRIMARY KEY,
+        text TEXT,
+        embedding TEXT,
+        source TEXT
+        )
+        """)
+
+        self.dbs["contexts"].execute("""
+        CREATE TABLE IF NOT EXISTS contexts(
+        id TEXT PRIMARY KEY,
+        topic TEXT
+        )
+        """)
+
+        self.dbs["documents"].execute("""
+        CREATE TABLE IF NOT EXISTS documents(
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        timestamp TEXT
+        )
+        """)
+
+        for db in self.dbs.values():
+            db.commit()
+
+
+# ==========================================
+# LEARN DOCUMENT
+# ==========================================
+
+    def learn_document(self,file):
+
+        text = file.read().decode("utf8","ignore")
+
+        doc_id = hash_text(text)
+
+        self.dbs["documents"].execute(
+            "INSERT OR IGNORE INTO documents VALUES(?,?,?)",
+            (doc_id,file.name,str(datetime.datetime.now()))
         )
 
-        # ===============================
-        # GITHUB STORAGE
-        # ===============================
+        paragraphs = split_paragraphs(text)
 
-        try:
-            self.github = Github(os.getenv("GITHUB_TOKEN"))
-            self.repo = self.github.get_repo(os.getenv("GITHUB_REPO"))
-        except:
-            self.repo = None
+        count = 0
 
-        self.memory = []
-        self.embeddings_matrix = None
+        for p in paragraphs:
 
-        self.concept_index = defaultdict(list)
+            pid = hash_text(p)
 
-        self.load_memory()
-        self.build_embedding_matrix()
-        self.build_concept_index()
+            emb = simple_embedding(p)
 
-    # =====================================================
-    # LOAD MEMORY
-    # =====================================================
-
-    def load_memory(self):
-
-        if self.repo is None:
-            return
-
-        try:
-
-            files = self.repo.get_contents(MEMORY_PATH)
-
-            for f in files:
-
-                content = self.repo.get_contents(f.path)
-
-                data = json.loads(content.decoded_content)
-
-                if "source" not in data:
-                    data["source"] = "legacy"
-
-                self.memory.append(data)
-
-        except:
-            pass
-
-    # =====================================================
-    # BUILD EMBEDDING MATRIX (V18 OPTIMIZATION)
-    # =====================================================
-
-    def build_embedding_matrix(self):
-
-        vectors = []
-
-        for m in self.memory:
-
-            if "embedding" in m:
-                vectors.append(m["embedding"])
-
-        if vectors:
-
-            self.embeddings_matrix = np.array(vectors)
-
-            norms = np.linalg.norm(self.embeddings_matrix, axis=1)
-
-            self.embeddings_matrix = (
-                self.embeddings_matrix / norms[:, None]
+            self.dbs["paragraphs"].execute(
+                "INSERT OR IGNORE INTO paragraphs VALUES(?,?,?,?)",
+                (pid,p,str(emb),doc_id)
             )
 
-    # =====================================================
-    # SAVE MEMORY
-    # =====================================================
+            sentences = split_sentences(p)
 
-    def save_memory(self, data):
+            for s in sentences:
 
-        if self.repo is None:
-            return
+                sid = hash_text(s)
 
-        uid = data["id"]
+                semb = simple_embedding(s)
 
-        filename = f"{MEMORY_PATH}/{uid}.json"
+                self.dbs["sentences"].execute(
+                    "INSERT OR IGNORE INTO sentences VALUES(?,?,?,?)",
+                    (sid,s,str(semb),doc_id)
+                )
 
-        content = json.dumps(data, indent=2, ensure_ascii=False)
+                words = split_words(s)
 
-        try:
+                for w in words:
 
-            self.repo.create_file(
-                filename,
-                f"oracle memory {uid}",
-                content
-            )
+                    wid = hash_text(w)
 
-        except:
-            pass
+                    self.dbs["words"].execute(
+                        "INSERT OR IGNORE INTO words VALUES(?,?,?,?)",
+                        (wid,w,1,doc_id)
+                    )
 
-    # =====================================================
-    # CONCEPT EXTRACTION
-    # =====================================================
+                    syllables = split_syllables(w)
 
-    def extract_concepts(self, text):
+                    for sy in syllables:
 
-        words = re.findall(r"\b\w+\b", text.lower())
+                        syid = hash_text(sy)
 
-        stop = {
-            "le","la","les","de","des","du",
-            "un","une","et","en","dans",
-            "est","pour","que"
-        }
+                        self.dbs["syllables"].execute(
+                            "INSERT OR IGNORE INTO syllables VALUES(?,?,?)",
+                            (syid,sy,w)
+                        )
 
-        concepts = [w for w in words if w not in stop and len(w) > 4]
+                    for c in w:
 
-        return list(set(concepts))
+                        cid = hash_text(c)
 
-    # =====================================================
-    # BUILD CONCEPT INDEX
-    # =====================================================
+                        self.dbs["characters"].execute(
+                            "INSERT OR IGNORE INTO characters VALUES(?,?,?)",
+                            (cid,c,w)
+                        )
 
-    def build_concept_index(self):
+                count += 1
 
-        self.concept_index = defaultdict(list)
+        for db in self.dbs.values():
+            db.commit()
 
-        for m in self.memory:
+        self.github_backup()
 
-            concepts = self.extract_concepts(m["text"])
+        return count
 
-            for c in concepts:
-                self.concept_index[c].append(m)
 
-    # =====================================================
-    # TEXT SEGMENTATION
-    # =====================================================
+# ==========================================
+# MEMORY SEARCH
+# ==========================================
 
-    def semantic_split(self, text):
+    def search_sentences(self,query):
 
-        sections = re.split(r"\n\s*\d+\s*—|\n\n", text)
-
-        chunks = []
-
-        for s in sections:
-
-            s = s.strip()
-
-            if len(s) > 200:
-                chunks.append(s)
-
-        return chunks
-
-    # =====================================================
-    # LEARN TEXT
-    # =====================================================
-
-    def learn(self, text, source="text"):
-
-        blocks = self.semantic_split(text)
-
-        for block in blocks:
-
-            embedding = self.model.encode(block)
-
-            data = {
-
-                "id": str(uuid.uuid4()),
-                "timestamp": str(datetime.datetime.now()),
-                "text": block,
-                "embedding": embedding.tolist(),
-                "source": source
-
-            }
-
-            self.memory.append(data)
-
-            self.save_memory(data)
-
-        self.build_embedding_matrix()
-        self.build_concept_index()
-
-        return len(blocks)
-
-    # =====================================================
-    # DOCUMENT EXTRACTION
-    # =====================================================
-
-    def extract_text(self, file):
-
-        text = ""
-
-        if file.type == "text/plain":
-
-            text = file.read().decode("utf-8")
-
-        elif file.type == "application/pdf":
-
-            pdf = PyPDF2.PdfReader(file)
-
-            for page in pdf.pages:
-
-                content = page.extract_text()
-
-                if content:
-                    text += content + "\n"
-
-        elif "word" in file.type:
-
-            doc = docx.Document(file)
-
-            for p in doc.paragraphs:
-                text += p.text + "\n"
-
-        elif "csv" in file.type:
-
-            df = pd.read_csv(file)
-
-            text = df.to_string()
-
-        elif "excel" in file.type:
-
-            df = pd.read_excel(file)
-
-            text = df.to_string()
-
-        return text
-
-    # =====================================================
-    # LEARN DOCUMENT
-    # =====================================================
-
-    def learn_document(self, file):
-
-        text = self.extract_text(file)
-
-        return self.learn(text, source=file.name)
-
-    # =====================================================
-    # VECTOR SEARCH (FAST V18)
-    # =====================================================
-
-    def vector_search(self, question, top_k=5):
-
-        if self.embeddings_matrix is None:
-            return []
-
-        q_embed = self.model.encode(question)
-
-        q_embed = q_embed / np.linalg.norm(q_embed)
-
-        scores = np.dot(self.embeddings_matrix, q_embed)
-
-        top_idx = np.argsort(scores)[::-1][:top_k]
+        qemb = simple_embedding(query)
 
         results = []
 
-        for idx in top_idx:
+        rows = self.dbs["sentences"].execute(
+            "SELECT text,embedding FROM sentences"
+        ).fetchall()
 
-            results.append(self.memory[idx])
+        for r in rows:
 
-        return results
+            emb = eval(r[1])
 
-    # =====================================================
-    # CONCEPT SEARCH
-    # =====================================================
+            score = cosine_similarity(qemb,emb)
 
-    def concept_search(self, question):
+            results.append((score,r[0]))
 
-        concepts = self.extract_concepts(question)
+        results.sort(reverse=True)
 
-        results = []
+        return results[:5]
 
-        for c in concepts:
 
-            if c in self.concept_index:
+# ==========================================
+# REASONING
+# ==========================================
 
-                results.extend(self.concept_index[c])
+    def reason(self,question):
 
-        return results
+        sentences = self.search_sentences(question)
 
-    # =====================================================
-    # REASONING
-    # =====================================================
+        answer = "Réponse basée sur la mémoire :\n\n"
 
-    def reason(self, question):
+        for s in sentences:
 
-        vector_results = self.vector_search(question)
+            answer += "- " + s[1] + "\n"
 
-        concept_results = self.concept_search(question)
+        return answer
 
-        combined = vector_results + concept_results
 
-        seen = set()
-        texts = []
-
-        for m in combined:
-
-            if m["id"] not in seen:
-
-                texts.append(m["text"])
-                seen.add(m["id"])
-
-        if not texts:
-
-            return "Aucune connaissance pertinente trouvée."
-
-        return "\n\n".join(texts[:3])
-
-    # =====================================================
-    # STATS
-    # =====================================================
+# ==========================================
+# STATS
+# ==========================================
 
     def stats(self):
 
-        sources = Counter(
-            [m.get("source","unknown") for m in self.memory]
-        )
+        souvenirs = self.dbs["sentences"].execute(
+            "SELECT COUNT(*) FROM sentences"
+        ).fetchone()[0]
+
+        sources = self.dbs["documents"].execute(
+            "SELECT COUNT(*) FROM documents"
+        ).fetchone()[0]
 
         return {
-            "souvenirs": len(self.memory),
-            "sources": dict(sources)
+            "souvenirs": souvenirs,
+            "sources": sources
         }
+
+
+# ==========================================
+# GITHUB BACKUP
+# ==========================================
+
+    def github_backup(self):
+
+        if not GITHUB_REPO:
+            return
+
+        for f in DB_FILES.values():
+
+            path = os.path.join(MEMORY_FOLDER,f)
+
+            push_file_to_github(path)
