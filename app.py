@@ -1,206 +1,107 @@
-import streamlit as st
+import os
+import tempfile
+from flask import Flask, request, jsonify, render_template_string
+from werkzeug.utils import secure_filename
+
+# Importer la classe OracleEngine depuis le module où elle est définie
+# (supposé être dans oracle_engine.py dans le même dossier)
 from oracle_engine import OracleEngine
 
-# =====================================================
-# CONFIGURATION PAGE
-# =====================================================
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB max
 
-st.set_page_config(
-    page_title="ORACLE V19",
-    layout="wide"
-)
+# Initialisation du moteur Oracle (unique pour toute l'application)
+engine = OracleEngine()
 
-st.title("🧠 ORACLE V19 — Moteur cognitif hiérarchique")
+# Page d'accueil simple (facultative)
+INDEX_HTML = '''
+<!doctype html>
+<title>Oracle Mémoire</title>
+<h1>Oracle Memory Engine</h1>
+<ul>
+    <li><a href="/stats">Statistiques</a></li>
+    <li><form action="/learn" method="post">
+        <h3>Apprendre un texte</h3>
+        <textarea name="text" rows="5" cols="40"></textarea><br>
+        <input type="submit" value="Apprendre">
+    </form></li>
+    <li><form action="/upload" method="post" enctype="multipart/form-data">
+        <h3>Uploader un document</h3>
+        <input type="file" name="file"><br>
+        <input type="submit" value="Uploader">
+    </form></li>
+    <li><form action="/query" method="post">
+        <h3>Posez une question</h3>
+        <input type="text" name="question" size="40"><br>
+        <input type="submit" value="Questionner">
+    </form></li>
+</ul>
+'''
 
-st.markdown("""
-Architecture cognitive expérimentale
+@app.route('/')
+def index():
+    return render_template_string(INDEX_HTML)
 
-Capacités :
+@app.route('/stats', methods=['GET'])
+def stats():
+    """Retourne les statistiques du moteur."""
+    stats_data = engine.stats()
+    return jsonify(stats_data)
 
-• mémoire linguistique hiérarchique  
-• mémoire vectorielle indexée  
-• transformateur sémantique simplifié  
-• raisonnement multi-concepts  
-• base de connaissances dynamique  
-• sauvegarde mémoire automatique GitHub
-""")
+@app.route('/learn', methods=['POST'])
+def learn():
+    """Apprend un texte envoyé dans le formulaire."""
+    text = request.form.get('text', '')
+    if not text:
+        return jsonify({'error': 'Aucun texte fourni'}), 400
+    nb_blocks = engine.learn(text, source='web_form')
+    return jsonify({'message': f'{nb_blocks} bloc(s) appris avec succès'})
 
-# =====================================================
-# CHARGEMENT ORACLE
-# =====================================================
+@app.route('/upload', methods=['POST'])
+def upload():
+    """Apprend un fichier uploadé."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'Aucun fichier fourni'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'Nom de fichier vide'}), 400
 
-@st.cache_resource
-def load_oracle():
+    # Sauvegarder temporairement pour que l'engine puisse le lire (simuler un objet fichier)
+    # Mais notre engine utilise déjà file.read() directement, donc on peut passer l'objet file
+    # Cependant, pour les types comme PDF, l'objet file doit être seekable ?
+    # On va créer un fichier temporaire pour garantir la compatibilité avec PyPDF2, docx, etc.
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        file.save(tmp.name)
+        tmp_path = tmp.name
 
-    return OracleEngine()
+    try:
+        # On rouvre le fichier en mode binaire pour le passer à la méthode
+        with open(tmp_path, 'rb') as f:
+            # On a besoin de simuler un objet avec .type et .name
+            class FakeFile:
+                def __init__(self, fileobj, filename, content_type):
+                    self.fileobj = fileobj
+                    self.name = filename
+                    self.type = content_type
+                def read(self, *args, **kwargs):
+                    return self.fileobj.read(*args, **kwargs)
+            content_type = file.content_type or 'application/octet-stream'
+            fake_file = FakeFile(f, file.filename, content_type)
+            nb_blocks = engine.learn_document(fake_file)
+    finally:
+        os.unlink(tmp_path)
 
-oracle = load_oracle()
+    return jsonify({'message': f'{nb_blocks} bloc(s) appris depuis le fichier {file.filename}'})
 
-# =====================================================
-# MENU
-# =====================================================
+@app.route('/query', methods=['POST'])
+def query():
+    """Pose une question et retourne la réponse du moteur."""
+    question = request.form.get('question', '')
+    if not question:
+        return jsonify({'error': 'Aucune question fournie'}), 400
+    answer = engine.reason(question)
+    return jsonify({'question': question, 'answer': answer})
 
-menu = st.sidebar.selectbox(
-    "Navigation",
-    [
-        "Interroger ORACLE",
-        "Apprentissage document",
-        "Statistiques mémoire",
-        "Architecture mémoire"
-    ]
-)
-
-# =====================================================
-# QUESTION
-# =====================================================
-
-if menu == "Interroger ORACLE":
-
-    st.subheader("Poser une question")
-
-    question = st.text_input(
-        "Pose une question à ORACLE"
-    )
-
-    if st.button("Interroger"):
-
-        if question:
-
-            with st.spinner("ORACLE réfléchit..."):
-
-                response = oracle.reason(question)
-
-            st.markdown("### Réponse")
-            st.write(response)
-
-# =====================================================
-# APPRENTISSAGE DOCUMENT
-# =====================================================
-
-if menu == "Apprentissage document":
-
-    st.subheader("Ajouter un document à la mémoire")
-
-    uploaded_file = st.file_uploader(
-        "Importer un fichier",
-        type=["txt","pdf","docx","csv","xlsx"]
-    )
-
-    if uploaded_file:
-
-        if st.button("Apprendre le document"):
-
-            with st.spinner("Analyse linguistique en cours..."):
-
-                n = oracle.learn_document(uploaded_file)
-
-            st.success(f"{n} phrases apprises")
-
-            st.info("""
-            Le document a été analysé et intégré dans la mémoire hiérarchique :
-
-            caractères → syllabes → mots → phrases → paragraphes → contextes
-            """)
-
-# =====================================================
-# STATISTIQUES
-# =====================================================
-
-if menu == "Statistiques mémoire":
-
-    st.subheader("Statistiques de la mémoire ORACLE")
-
-    stats = oracle.stats()
-
-    col1, col2 = st.columns(2)
-
-    col1.metric(
-        "Souvenirs (phrases)",
-        stats["souvenirs"]
-    )
-
-    col2.metric(
-        "Sources (documents)",
-        stats["sources"]
-    )
-
-# =====================================================
-# ARCHITECTURE
-# =====================================================
-
-if menu == "Architecture mémoire":
-
-    st.subheader("Architecture cognitive ORACLE")
-
-    st.markdown(
-"""
-### Mémoire linguistique hiérarchique
-
-La mémoire d'ORACLE est organisée selon plusieurs couches linguistiques :
-
-Document  
-↓  
-Contexte  
-↓  
-Paragraphes  
-↓  
-Phrases  
-↓  
-Mots  
-↓  
-Syllabes  
-↓  
-Caractères  
-
-Chaque couche est indexée séparément et reliée aux autres.
-
----
-
-### Structure réelle de la mémoire
-
-oracle_memory/
-
-characters.db  
-syllables.db  
-words.db  
-sentences.db  
-paragraphs.db  
-contexts.db  
-documents.db  
-
----
-
-### Processus d'apprentissage
-
-Lorsqu'un document est importé :
-
-1. extraction texte  
-2. découpage paragraphes  
-3. découpage phrases  
-4. extraction mots  
-5. segmentation syllabes  
-6. indexation caractères  
-
----
-
-### Raisonnement ORACLE
-
-Question  
-↓  
-Analyse linguistique  
-↓  
-Embedding sémantique  
-↓  
-Recherche phrases proches  
-↓  
-Croisement des connaissances  
-↓  
-Génération de réponse  
-
----
-
-### Sauvegarde mémoire
-
-La mémoire est automatiquement sauvegardée sur GitHub.
-"""
-    )
+if __name__ == '__main__':
+    # Lancer l'application sur le port 5000 par défaut
+    app.run(host='0.0.0.0', port=5000, debug=True)
