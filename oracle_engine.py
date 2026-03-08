@@ -3,11 +3,13 @@ import sqlite3
 import hashlib
 import datetime
 import re
+import base64
 import requests
+from collections import defaultdict
 
-# ==========================================
+# ============================================================
 # CONFIGURATION
-# ==========================================
+# ============================================================
 
 MEMORY_FOLDER = "oracle_memory"
 
@@ -18,16 +20,16 @@ DB_FILES = {
     "sentences": "sentences.db",
     "paragraphs": "paragraphs.db",
     "contexts": "contexts.db",
-    "documents": "documents.db"
+    "documents": "documents.db",
+    "concept_graph": "concept_graph.db"
 }
 
 GITHUB_REPO = os.getenv("ORACLE_GITHUB_REPO")
 GITHUB_TOKEN = os.getenv("ORACLE_GITHUB_TOKEN")
 
-
-# ==========================================
+# ============================================================
 # UTILITIES
-# ==========================================
+# ============================================================
 
 def ensure_folder():
 
@@ -47,39 +49,29 @@ def simple_embedding(text):
     return [int(h[i:i+4],16)/65535 for i in range(0,64,4)]
 
 
-def cosine_similarity(v1, v2):
+def cosine_similarity(v1,v2):
 
     dot = sum(a*b for a,b in zip(v1,v2))
-    n1 = sum(a*a for a in v1) ** 0.5
-    n2 = sum(a*a for a in v2) ** 0.5
+    n1 = sum(a*a for a in v1)**0.5
+    n2 = sum(a*a for a in v2)**0.5
 
     if n1 == 0 or n2 == 0:
         return 0
 
     return dot/(n1*n2)
 
-
-# ==========================================
-# SYLLABLE SPLITTER
-# ==========================================
-
-def split_syllables(word):
-
-    return re.findall(r'[^aeiouy]*[aeiouy]+(?:[^aeiouy]|$)', word.lower())
-
-
-# ==========================================
-# DOCUMENT PARSER
-# ==========================================
-
-def split_sentences(text):
-
-    return re.split(r'[.!?]\s+', text)
-
+# ============================================================
+# TEXT PARSER
+# ============================================================
 
 def split_paragraphs(text):
 
     return text.split("\n\n")
+
+
+def split_sentences(text):
+
+    return re.split(r'[.!?]\s+', text)
 
 
 def split_words(text):
@@ -87,9 +79,13 @@ def split_words(text):
     return re.findall(r'\b\w+\b', text.lower())
 
 
-# ==========================================
-# GITHUB SYNC
-# ==========================================
+def split_syllables(word):
+
+    return re.findall(r'[^aeiouy]*[aeiouy]+(?:[^aeiouy]|$)', word.lower())
+
+# ============================================================
+# GITHUB BACKUP
+# ============================================================
 
 def push_file_to_github(path):
 
@@ -99,7 +95,7 @@ def push_file_to_github(path):
     with open(path,"rb") as f:
         content = f.read()
 
-    b64 = content.encode("base64")
+    encoded = base64.b64encode(content).decode()
 
     filename = os.path.basename(path)
 
@@ -111,15 +107,14 @@ def push_file_to_github(path):
 
     data = {
         "message": "oracle memory update",
-        "content": b64
+        "content": encoded
     }
 
     requests.put(url,json=data,headers=headers)
 
-
-# ==========================================
+# ============================================================
 # ORACLE ENGINE
-# ==========================================
+# ============================================================
 
 class OracleEngine:
 
@@ -139,44 +134,17 @@ class OracleEngine:
 
         self.init_tables()
 
-
-# ==========================================
-# INIT TABLES
-# ==========================================
+# ============================================================
+# DATABASE STRUCTURE
+# ============================================================
 
     def init_tables(self):
 
-        self.dbs["characters"].execute("""
-        CREATE TABLE IF NOT EXISTS characters(
+        self.dbs["documents"].execute("""
+        CREATE TABLE IF NOT EXISTS documents(
         id TEXT PRIMARY KEY,
-        char TEXT,
-        source TEXT
-        )
-        """)
-
-        self.dbs["syllables"].execute("""
-        CREATE TABLE IF NOT EXISTS syllables(
-        id TEXT PRIMARY KEY,
-        syllable TEXT,
-        word TEXT
-        )
-        """)
-
-        self.dbs["words"].execute("""
-        CREATE TABLE IF NOT EXISTS words(
-        id TEXT PRIMARY KEY,
-        word TEXT,
-        frequency INTEGER,
-        source TEXT
-        )
-        """)
-
-        self.dbs["sentences"].execute("""
-        CREATE TABLE IF NOT EXISTS sentences(
-        id TEXT PRIMARY KEY,
-        text TEXT,
-        embedding TEXT,
-        source TEXT
+        name TEXT,
+        timestamp TEXT
         )
         """)
 
@@ -185,7 +153,42 @@ class OracleEngine:
         id TEXT PRIMARY KEY,
         text TEXT,
         embedding TEXT,
-        source TEXT
+        document_id TEXT
+        )
+        """)
+
+        self.dbs["sentences"].execute("""
+        CREATE TABLE IF NOT EXISTS sentences(
+        id TEXT PRIMARY KEY,
+        text TEXT,
+        embedding TEXT,
+        paragraph_id TEXT,
+        document_id TEXT
+        )
+        """)
+
+        self.dbs["words"].execute("""
+        CREATE TABLE IF NOT EXISTS words(
+        id TEXT PRIMARY KEY,
+        word TEXT,
+        frequency INTEGER,
+        sentence_id TEXT
+        )
+        """)
+
+        self.dbs["syllables"].execute("""
+        CREATE TABLE IF NOT EXISTS syllables(
+        id TEXT PRIMARY KEY,
+        syllable TEXT,
+        word_id TEXT
+        )
+        """)
+
+        self.dbs["characters"].execute("""
+        CREATE TABLE IF NOT EXISTS characters(
+        id TEXT PRIMARY KEY,
+        char TEXT,
+        word_id TEXT
         )
         """)
 
@@ -196,21 +199,56 @@ class OracleEngine:
         )
         """)
 
-        self.dbs["documents"].execute("""
-        CREATE TABLE IF NOT EXISTS documents(
+        self.dbs["concept_graph"].execute("""
+        CREATE TABLE IF NOT EXISTS relations(
         id TEXT PRIMARY KEY,
-        name TEXT,
-        timestamp TEXT
+        concept1 TEXT,
+        concept2 TEXT,
+        weight INTEGER
         )
         """)
 
         for db in self.dbs.values():
             db.commit()
 
+# ============================================================
+# CONTEXT EXTRACTION
+# ============================================================
 
-# ==========================================
-# LEARN DOCUMENT
-# ==========================================
+    def extract_context(self,text):
+
+        words = split_words(text)
+
+        freq = defaultdict(int)
+
+        for w in words:
+            freq[w]+=1
+
+        top = sorted(freq.items(),key=lambda x:x[1],reverse=True)[:3]
+
+        return " ".join([t[0] for t in top])
+
+# ============================================================
+# CONCEPT GRAPH
+# ============================================================
+
+    def update_concept_graph(self,words):
+
+        for i in range(len(words)-1):
+
+            c1 = words[i]
+            c2 = words[i+1]
+
+            rid = hash_text(c1+c2)
+
+            self.dbs["concept_graph"].execute(
+            "INSERT OR IGNORE INTO relations VALUES(?,?,?,?)",
+            (rid,c1,c2,1)
+            )
+
+# ============================================================
+# LEARNING ENGINE
+# ============================================================
 
     def learn_document(self,file):
 
@@ -219,8 +257,17 @@ class OracleEngine:
         doc_id = hash_text(text)
 
         self.dbs["documents"].execute(
-            "INSERT OR IGNORE INTO documents VALUES(?,?,?)",
-            (doc_id,file.name,str(datetime.datetime.now()))
+        "INSERT OR IGNORE INTO documents VALUES(?,?,?)",
+        (doc_id,file.name,str(datetime.datetime.now()))
+        )
+
+        context = self.extract_context(text)
+
+        cid = hash_text(context)
+
+        self.dbs["contexts"].execute(
+        "INSERT OR IGNORE INTO contexts VALUES(?,?)",
+        (cid,context)
         )
 
         paragraphs = split_paragraphs(text)
@@ -234,8 +281,8 @@ class OracleEngine:
             emb = simple_embedding(p)
 
             self.dbs["paragraphs"].execute(
-                "INSERT OR IGNORE INTO paragraphs VALUES(?,?,?,?)",
-                (pid,p,str(emb),doc_id)
+            "INSERT OR IGNORE INTO paragraphs VALUES(?,?,?,?)",
+            (pid,p,str(emb),doc_id)
             )
 
             sentences = split_sentences(p)
@@ -247,19 +294,21 @@ class OracleEngine:
                 semb = simple_embedding(s)
 
                 self.dbs["sentences"].execute(
-                    "INSERT OR IGNORE INTO sentences VALUES(?,?,?,?)",
-                    (sid,s,str(semb),doc_id)
+                "INSERT OR IGNORE INTO sentences VALUES(?,?,?,?,?)",
+                (sid,s,str(semb),pid,doc_id)
                 )
 
                 words = split_words(s)
+
+                self.update_concept_graph(words)
 
                 for w in words:
 
                     wid = hash_text(w)
 
                     self.dbs["words"].execute(
-                        "INSERT OR IGNORE INTO words VALUES(?,?,?,?)",
-                        (wid,w,1,doc_id)
+                    "INSERT OR IGNORE INTO words VALUES(?,?,?,?)",
+                    (wid,w,1,sid)
                     )
 
                     syllables = split_syllables(w)
@@ -269,8 +318,8 @@ class OracleEngine:
                         syid = hash_text(sy)
 
                         self.dbs["syllables"].execute(
-                            "INSERT OR IGNORE INTO syllables VALUES(?,?,?)",
-                            (syid,sy,w)
+                        "INSERT OR IGNORE INTO syllables VALUES(?,?,?)",
+                        (syid,sy,wid)
                         )
 
                     for c in w:
@@ -278,11 +327,11 @@ class OracleEngine:
                         cid = hash_text(c)
 
                         self.dbs["characters"].execute(
-                            "INSERT OR IGNORE INTO characters VALUES(?,?,?)",
-                            (cid,c,w)
+                        "INSERT OR IGNORE INTO characters VALUES(?,?,?)",
+                        (cid,c,wid)
                         )
 
-                count += 1
+                count+=1
 
         for db in self.dbs.values():
             db.commit()
@@ -291,10 +340,9 @@ class OracleEngine:
 
         return count
 
-
-# ==========================================
+# ============================================================
 # MEMORY SEARCH
-# ==========================================
+# ============================================================
 
     def search_sentences(self,query):
 
@@ -303,7 +351,7 @@ class OracleEngine:
         results = []
 
         rows = self.dbs["sentences"].execute(
-            "SELECT text,embedding FROM sentences"
+        "SELECT text,embedding FROM sentences"
         ).fetchall()
 
         for r in rows:
@@ -318,47 +366,72 @@ class OracleEngine:
 
         return results[:5]
 
+# ============================================================
+# ATTENTION SCORING
+# ============================================================
 
-# ==========================================
+    def attention_score(self,query,sentence):
+
+        qw = set(split_words(query))
+        sw = set(split_words(sentence))
+
+        common = len(qw.intersection(sw))
+
+        return common
+
+# ============================================================
 # REASONING
-# ==========================================
+# ============================================================
 
     def reason(self,question):
 
         sentences = self.search_sentences(question)
 
-        answer = "Réponse basée sur la mémoire :\n\n"
+        ranked = []
 
         for s in sentences:
 
-            answer += "- " + s[1] + "\n"
+            score = self.attention_score(question,s[1])
+
+            ranked.append((score,s[1]))
+
+        ranked.sort(reverse=True)
+
+        answer = "Réponse basée sur la mémoire ORACLE :\n\n"
+
+        for r in ranked:
+
+            answer += "- "+r[1]+"\n"
 
         return answer
 
-
-# ==========================================
+# ============================================================
 # STATS
-# ==========================================
+# ============================================================
 
     def stats(self):
 
         souvenirs = self.dbs["sentences"].execute(
-            "SELECT COUNT(*) FROM sentences"
+        "SELECT COUNT(*) FROM sentences"
         ).fetchone()[0]
 
-        sources = self.dbs["documents"].execute(
-            "SELECT COUNT(*) FROM documents"
+        docs = self.dbs["documents"].execute(
+        "SELECT COUNT(*) FROM documents"
+        ).fetchone()[0]
+
+        words = self.dbs["words"].execute(
+        "SELECT COUNT(*) FROM words"
         ).fetchone()[0]
 
         return {
-            "souvenirs": souvenirs,
-            "sources": sources
+        "documents":docs,
+        "souvenirs":souvenirs,
+        "mots":words
         }
 
-
-# ==========================================
+# ============================================================
 # GITHUB BACKUP
-# ==========================================
+# ============================================================
 
     def github_backup(self):
 
