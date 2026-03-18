@@ -1,22 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Oracle Memory Engine TTU-MC³
-Fusion complète : Flask + OracleEngine (version unifiée)
-
-Auteur : Mayombo Idiedie Christ Aldo & Scott Brooz
-Date : 21 février 2026
-
-Fonctionnalités :
-- Apprentissage de textes bruts, fichiers (PDF, DOCX, CSV, Excel, TXT)
-- Segmentation sémantique, embeddings multilingues
-- Stockage SQLite avec tables fines (paragraphes, phrases, mots, syllabes, caractères, concepts)
-- Recherche vectorielle + recherche par concepts
-- Réponse contextuelle (top 3 passages)
-- Statistiques et sauvegarde automatique sur GitHub (optionnel)
-"""
-
+import streamlit as st
 import os
 import json
 import uuid
@@ -30,9 +12,6 @@ from collections import Counter, defaultdict
 
 import numpy as np
 import pandas as pd
-import requests
-from flask import Flask, request, jsonify, render_template_string
-from werkzeug.utils import secure_filename
 from sentence_transformers import SentenceTransformer
 import PyPDF2
 import docx
@@ -42,10 +21,6 @@ import docx
 # ==========================================
 MEMORY_FOLDER = "oracle_memory"
 DB_PATH = os.path.join(MEMORY_FOLDER, "oracle.db")
-GITHUB_REPO = os.getenv("ORACLE_GITHUB_REPO")      # optionnel
-GITHUB_TOKEN = os.getenv("ORACLE_GITHUB_TOKEN")    # optionnel
-SATURATION_THRESHOLD = 0.45  # pour le diagramme de phase (non utilisé ici, mais gardé)
-DT = 0.01                     # pas de temps (réserve)
 
 if not os.path.exists(MEMORY_FOLDER):
     os.makedirs(MEMORY_FOLDER)
@@ -57,7 +32,7 @@ def hash_text(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 def split_syllables(word):
-    """Découpe un mot en syllabes (approximatif pour le français/anglais)."""
+    """Découpe un mot en syllabes (approximatif)."""
     return re.findall(r'[^aeiouy]*[aeiouy]+(?:[^aeiouy]|$)', word.lower())
 
 def split_sentences(text):
@@ -65,28 +40,12 @@ def split_sentences(text):
     return [s.strip() for s in re.split(r'[.!?]\s+', text) if s.strip()]
 
 def split_paragraphs(text):
-    """Découpe un texte en paragraphes (séparés par double saut de ligne)."""
+    """Découpe un texte en paragraphes."""
     return [p.strip() for p in text.split("\n\n") if p.strip()]
 
 def split_words(text):
-    """Extrait les mots d'un texte (minuscules)."""
+    """Extrait les mots d'un texte."""
     return re.findall(r'\b\w+\b', text.lower())
-
-def push_db_to_github():
-    """Pousse le fichier SQLite vers GitHub (si configuré)."""
-    if not GITHUB_REPO or not GITHUB_TOKEN:
-        return
-    with open(DB_PATH, "rb") as f:
-        content = f.read()
-    b64 = base64.b64encode(content).decode()
-    filename = os.path.basename(DB_PATH)
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    data = {"message": "oracle memory update", "content": b64}
-    try:
-        requests.put(url, json=data, headers=headers)
-    except Exception as e:
-        print(f"GitHub push failed: {e}")
 
 # ==========================================
 # CLASSE PRINCIPALE ORACLE ENGINE
@@ -101,8 +60,8 @@ class OracleEngine:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.init_tables()
         
-        # Cache mémoire (pour les recherches)
-        self.memory = []          # liste de dicts {id, timestamp, text, embedding, source, parent...}
+        # Cache mémoire
+        self.memory = []          # liste de dicts
         self.embeddings_matrix = None
         self.concept_index = defaultdict(list)
         
@@ -130,7 +89,7 @@ class OracleEngine:
             id TEXT PRIMARY KEY,
             doc_id TEXT,
             text TEXT,
-            embedding TEXT,      # stocké comme JSON
+            embedding TEXT,
             timestamp TEXT,
             FOREIGN KEY(doc_id) REFERENCES documents(id)
         )""")
@@ -144,7 +103,7 @@ class OracleEngine:
             timestamp TEXT,
             FOREIGN KEY(para_id) REFERENCES paragraphs(id)
         )""")
-        # Mots (avec fréquence)
+        # Mots
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS words (
             id TEXT PRIMARY KEY,
@@ -173,8 +132,8 @@ class OracleEngine:
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS concepts (
             concept TEXT,
-            ref_id TEXT,         # id de la phrase ou du paragraphe
-            ref_type TEXT,       # 'sentence' ou 'paragraph'
+            ref_id TEXT,
+            ref_type TEXT,
             PRIMARY KEY (concept, ref_id)
         )""")
         self.conn.commit()
@@ -184,7 +143,7 @@ class OracleEngine:
     # -------------------------------------------------
     def load_memory_from_db(self):
         cursor = self.conn.cursor()
-        # On charge les phrases
+        # Phrases
         cursor.execute("SELECT id, text, embedding, timestamp, para_id FROM sentences")
         for row in cursor.fetchall():
             emb = self._deserialize_embedding(row[2])
@@ -196,7 +155,7 @@ class OracleEngine:
                 "source": "sentence",
                 "parent": row[4]
             })
-        # On charge les paragraphes
+        # Paragraphes
         cursor.execute("SELECT id, text, embedding, timestamp, doc_id FROM paragraphs")
         for row in cursor.fetchall():
             emb = self._deserialize_embedding(row[2])
@@ -210,11 +169,9 @@ class OracleEngine:
             })
 
     def _serialize_embedding(self, emb):
-        """Convertit un numpy array en JSON string."""
         return json.dumps(emb.tolist())
 
     def _deserialize_embedding(self, data):
-        """Reconstruit un numpy array depuis JSON."""
         if data is None:
             return None
         return np.array(json.loads(data))
@@ -223,7 +180,7 @@ class OracleEngine:
     # CONSTRUCTION DES INDEX
     # -------------------------------------------------
     def build_embedding_matrix(self):
-        vectors = [m["embedding"] for m in self.memory if "embedding" in m and m["embedding"] is not None]
+        vectors = [m["embedding"] for m in self.memory if m["embedding"] is not None]
         if vectors:
             self.embeddings_matrix = np.vstack(vectors)
             norms = np.linalg.norm(self.embeddings_matrix, axis=1, keepdims=True)
@@ -249,8 +206,7 @@ class OracleEngine:
     # SEGMENTATION SÉMANTIQUE
     # -------------------------------------------------
     def semantic_split(self, text):
-        """Découpe un long texte en sections significatives (basé sur titres ou doubles sauts)."""
-        # Si le texte contient des titres comme "1. Introduction" ou "—", on coupe.
+        """Découpe un long texte en sections significatives."""
         sections = re.split(r"\n\s*\d+[.)]\s+|\n—|\n\n", text)
         return [s.strip() for s in sections if len(s.strip()) > 50]
 
@@ -258,12 +214,12 @@ class OracleEngine:
     # APPRENTISSAGE
     # -------------------------------------------------
     def learn(self, text, source="text", doc_id=None):
-        """Apprend un texte : segmentation, embedding, stockage SQLite et cache mémoire."""
+        """Apprend un texte : segmentation, embedding, stockage."""
         blocks = self.semantic_split(text)
-        inserted_ids = []
+        if not blocks:
+            blocks = [text[:1000]]  # fallback
         timestamp = str(datetime.datetime.now())
         
-        # Si aucun doc_id fourni, on crée un document factice
         if doc_id is None:
             doc_id = str(uuid.uuid4())
             cursor = self.conn.cursor()
@@ -275,25 +231,24 @@ class OracleEngine:
             embedding = self.model.encode(block)
             mem_id = str(uuid.uuid4())
             
-            # Stockage en mémoire cache
-            data = {
+            # Cache mémoire
+            self.memory.append({
                 "id": mem_id,
                 "timestamp": timestamp,
                 "text": block,
                 "embedding": embedding,
                 "source": source,
                 "doc_id": doc_id
-            }
-            self.memory.append(data)
+            })
             
-            # Insertion dans SQLite (comme paragraphe)
+            # Paragraphe
             cursor = self.conn.cursor()
             cursor.execute(
                 "INSERT INTO paragraphs (id, doc_id, text, embedding, timestamp) VALUES (?,?,?,?,?)",
                 (mem_id, doc_id, block, self._serialize_embedding(embedding), timestamp)
             )
             
-            # Découpage en phrases pour stockage fin
+            # Phrases
             sentences = split_sentences(block)
             for sent in sentences:
                 sent_emb = self.model.encode(sent)
@@ -329,7 +284,7 @@ class OracleEngine:
                             (ch_id, ch, w_id)
                         )
             
-            # Concepts pour ce bloc
+            # Concepts
             concepts = self.extract_concepts(block)
             for c in concepts:
                 cursor.execute(
@@ -338,65 +293,58 @@ class OracleEngine:
                 )
             
             self.conn.commit()
-            inserted_ids.append(mem_id)
         
         # Reconstruction des index
         self.build_embedding_matrix()
         self.build_concept_index()
-        
-        # Sauvegarde GitHub (push du fichier DB)
-        push_db_to_github()
-        
         return len(blocks)
 
     # -------------------------------------------------
     # EXTRACTION TEXTE DEPUIS FICHIER
     # -------------------------------------------------
     def extract_text_from_file(self, file):
-        """Extrait le texte d'un fichier uploadé."""
+        """Extrait le texte d'un fichier uploadé (objet binaire)."""
         text = ""
         filename = file.name.lower()
-        if filename.endswith('.txt') or file.content_type == 'text/plain':
+        if filename.endswith('.txt') or file.type == 'text/plain':
             text = file.read().decode('utf-8')
-        elif filename.endswith('.pdf') or 'pdf' in file.content_type:
+        elif filename.endswith('.pdf') or 'pdf' in file.type:
             pdf = PyPDF2.PdfReader(file)
             for page in pdf.pages:
                 content = page.extract_text()
                 if content:
                     text += content + "\n"
-        elif filename.endswith('.docx') or 'word' in file.content_type:
+        elif filename.endswith('.docx') or 'word' in file.type:
             doc = docx.Document(file)
             for p in doc.paragraphs:
                 text += p.text + "\n"
-        elif filename.endswith('.csv') or 'csv' in file.content_type:
+        elif filename.endswith('.csv') or 'csv' in file.type:
             df = pd.read_csv(file)
             text = df.to_string()
-        elif filename.endswith(('.xls', '.xlsx')) or 'excel' in file.content_type:
+        elif filename.endswith(('.xls', '.xlsx')) or 'excel' in file.type:
             df = pd.read_excel(file)
             text = df.to_string()
         else:
-            # fallback : tenter de lire comme texte
             try:
                 text = file.read().decode('utf-8')
             except:
                 text = ""
         return text
 
-    def learn_document(self, file):
-        """Apprend à partir d'un objet fichier (upload)."""
-        text = self.extract_text_from_file(file)
+    def learn_document(self, uploaded_file):
+        """Apprend à partir d'un fichier uploadé."""
+        text = self.extract_text_from_file(uploaded_file)
         if not text.strip():
             return 0
-        # Création d'une entrée document dans SQLite
         doc_id = str(uuid.uuid4())
         timestamp = str(datetime.datetime.now())
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT INTO documents (id, name, timestamp, source) VALUES (?,?,?,?)",
-            (doc_id, file.name, timestamp, file.content_type or 'unknown')
+            (doc_id, uploaded_file.name, timestamp, uploaded_file.type or 'unknown')
         )
         self.conn.commit()
-        return self.learn(text, source=file.name, doc_id=doc_id)
+        return self.learn(text, source=uploaded_file.name, doc_id=doc_id)
 
     # -------------------------------------------------
     # RECHERCHES
@@ -432,7 +380,7 @@ class OracleEngine:
                 texts.append(m["text"])
                 seen.add(m["id"])
         if not texts:
-            return "Aucune connaissance pertinente trouvée dans la base."
+            return "Aucune connaissance pertinente trouvée."
         return "\n\n".join(texts[:3])
 
     # -------------------------------------------------
@@ -440,139 +388,86 @@ class OracleEngine:
     # -------------------------------------------------
     def stats(self):
         cursor = self.conn.cursor()
-        souvenirs = cursor.execute("SELECT COUNT(*) FROM sentences").fetchone()[0]
-        nb_docs = cursor.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        nb_paragraphs = cursor.execute("SELECT COUNT(*) FROM paragraphs").fetchone()[0]
-        sources = Counter([m.get("source", "unknown") for m in self.memory])
+        sentences = cursor.execute("SELECT COUNT(*) FROM sentences").fetchone()[0]
+        paragraphs = cursor.execute("SELECT COUNT(*) FROM paragraphs").fetchone()[0]
+        documents = cursor.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        words = cursor.execute("SELECT COUNT(*) FROM words").fetchone()[0]
         return {
-            "sentences": souvenirs,
-            "paragraphs": nb_paragraphs,
-            "documents": nb_docs,
-            "sources": dict(sources)
+            "sentences": sentences,
+            "paragraphs": paragraphs,
+            "documents": documents,
+            "words": words
         }
 
-    # -------------------------------------------------
-    # NETTOYAGE
-    # -------------------------------------------------
-    def close(self):
-        self.conn.close()
-
 # ==========================================
-# APPLICATION FLASK
+# APPLICATION STREAMLIT
 # ==========================================
-app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB max
+st.set_page_config(page_title="Oracle TTU-MC³", layout="wide")
 
-# Instance unique du moteur
-engine = OracleEngine()
+# Initialisation du moteur en cache (une seule fois)
+@st.cache_resource
+def get_engine():
+    return OracleEngine()
 
-INDEX_HTML = '''
-<!doctype html>
-<html lang="fr">
-<head>
-    <meta charset="utf-8">
-    <title>Oracle TTU-MC³</title>
-    <style>
-        body { background: #0e1117; color: #00ff41; font-family: 'Courier New', monospace; padding: 20px; }
-        .card { border: 1px solid #00ff41; padding: 15px; margin-bottom: 20px; background: rgba(0,255,65,0.05); }
-        input, textarea, button { background: #000; color: #00ff41; border: 1px solid #00ff41; padding: 8px; margin: 5px 0; width: 100%; }
-        button { background: #00ff41; color: #000; font-weight: bold; cursor: pointer; }
-        hr { border-color: #00ff41; }
-    </style>
-</head>
-<body>
-    <h1>🌌 ORACLE MEMORY ENGINE [TTU-MC³]</h1>
-    <div class="card">
-        <h3>Statistiques</h3>
-        <p><a href="/stats" style="color:#00ff41;">Voir les stats (JSON)</a></p>
-    </div>
-    <div class="card">
-        <h3>Apprendre un texte</h3>
-        <form action="/learn" method="post">
-            <textarea name="text" rows="5" placeholder="Collez votre texte ici..."></textarea>
-            <button type="submit">Apprendre</button>
-        </form>
-    </div>
-    <div class="card">
-        <h3>Uploader un fichier</h3>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file">
-            <button type="submit">Uploader</button>
-        </form>
-    </div>
-    <div class="card">
-        <h3>Poser une question</h3>
-        <form action="/query" method="post">
-            <input type="text" name="question" placeholder="Votre question...">
-            <button type="submit">Questionner</button>
-        </form>
-    </div>
-    <hr>
-    <p><a href="/" style="color:#00ff41;">↻ Accueil</a></p>
-</body>
-</html>
-'''
+engine = get_engine()
 
-@app.route('/')
-def index():
-    return render_template_string(INDEX_HTML)
+# Sidebar avec quelques infos
+st.sidebar.title("🧠 Oracle TTU-MC³")
+st.sidebar.markdown("Mémoire sémantique triadique")
+st.sidebar.markdown("---")
+st.sidebar.write("### Statistiques")
+stats = engine.stats()
+st.sidebar.write(f"**Documents :** {stats['documents']}")
+st.sidebar.write(f"**Paragraphes :** {stats['paragraphs']}")
+st.sidebar.write(f"**Phrases :** {stats['sentences']}")
+st.sidebar.write(f"**Mots :** {stats['words']}")
 
-@app.route('/stats', methods=['GET'])
-def stats():
-    return jsonify(engine.stats())
+# Onglets principaux
+tab1, tab2, tab3 = st.tabs(["📚 Apprentissage", "🔍 Recherche", "📊 Détails"])
 
-@app.route('/learn', methods=['POST'])
-def learn():
-    text = request.form.get('text', '')
-    if not text:
-        return jsonify({'error': 'Aucun texte fourni'}), 400
-    nb_blocks = engine.learn(text, source='web_form')
-    return jsonify({'message': f'{nb_blocks} bloc(s) appris avec succès'})
+with tab1:
+    st.header("Apprentissage")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Texte brut")
+        texte = st.text_area("Entrez un texte à mémoriser", height=200)
+        if st.button("Apprendre le texte"):
+            if texte.strip():
+                nb = engine.learn(texte, source="streamlit_text")
+                st.success(f"{nb} bloc(s) appris !")
+            else:
+                st.warning("Veuillez entrer un texte.")
+    
+    with col2:
+        st.subheader("Upload de fichier")
+        uploaded_file = st.file_uploader("Choisissez un fichier", 
+                                         type=['txt','pdf','docx','csv','xls','xlsx'])
+        if uploaded_file is not None:
+            if st.button("Apprendre le fichier"):
+                nb = engine.learn_document(uploaded_file)
+                st.success(f"{nb} bloc(s) appris depuis {uploaded_file.name}")
 
-@app.route('/upload', methods=['POST'])
-def upload():
-    if 'file' not in request.files:
-        return jsonify({'error': 'Aucun fichier fourni'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'Nom de fichier vide'}), 400
+with tab2:
+    st.header("Recherche contextuelle")
+    question = st.text_input("Posez votre question")
+    if st.button("Interroger l'oracle"):
+        if question.strip():
+            reponse = engine.reason(question)
+            st.markdown("### Réponse")
+            st.write(reponse)
+        else:
+            st.warning("Veuillez entrer une question.")
 
-    # Sauvegarder temporairement pour garantir la compatibilité (certaines bibliothèques ont besoin d'un chemin)
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        file.save(tmp.name)
-        tmp_path = tmp.name
-
-    try:
-        # On rouvre le fichier en mode binaire
-        with open(tmp_path, 'rb') as f:
-            class FakeFile:
-                def __init__(self, fileobj, filename, content_type):
-                    self.fileobj = fileobj
-                    self.name = filename
-                    self.content_type = content_type
-                def read(self, *args, **kwargs):
-                    return self.fileobj.read(*args, **kwargs)
-            content_type = file.content_type or 'application/octet-stream'
-            fake_file = FakeFile(f, file.filename, content_type)
-            nb_blocks = engine.learn_document(fake_file)
-    finally:
-        os.unlink(tmp_path)
-
-    return jsonify({'message': f'{nb_blocks} bloc(s) appris depuis le fichier {file.filename}'})
-
-@app.route('/query', methods=['POST'])
-def query():
-    question = request.form.get('question', '')
-    if not question:
-        return jsonify({'error': 'Aucune question fournie'}), 400
-    answer = engine.reason(question)
-    return jsonify({'question': question, 'answer': answer})
-
-@app.route('/shutdown', methods=['POST'])
-def shutdown():
-    """Ferme proprement la connexion à la base (utile pour certains hébergeurs)."""
-    engine.close()
-    return jsonify({'message': 'Base fermée'})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+with tab3:
+    st.header("Détails de la base")
+    st.json(engine.stats())
+    
+    # Afficher quelques échantillons de la mémoire
+    st.subheader("Échantillon de la mémoire (derniers paragraphes)")
+    cursor = engine.conn.cursor()
+    cursor.execute("SELECT text FROM paragraphs ORDER BY timestamp DESC LIMIT 5")
+    rows = cursor.fetchall()
+    for i, (text,) in enumerate(rows):
+        with st.expander(f"Paragraphe {i+1}"):
+            st.write(text[:500] + "..." if len(text) > 500 else text)
