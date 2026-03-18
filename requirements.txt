@@ -1,11 +1,6 @@
 streamlit
-flask
 numpy
 pandas
 sentence-transformers
-PyGithub
 PyPDF2
 python-docx
-openpyxl
-xlrd
-requests
