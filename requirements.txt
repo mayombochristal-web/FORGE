@@ -1,7 +1,31 @@
-streamlit
-numpy
-pandas
-sentence-transformers
-PyPDF2
-plotly
-python-docx
+# ==========================================
+# ORACLE TTU-MC³ - Dépendances
+# Théorie Triadique Unifiée - Modèle de Cohérence Cubique
+# ==========================================
+
+# Core
+streamlit>=1.28.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Embeddings sémantiques (indispensable)
+sentence-transformers>=2.2.0
+torch>=2.0.0
+
+# Visualisations triadiques
+plotly>=5.17.0
+
+# Extraction de documents
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+
+# Utilitaires
+sqlite3  # Intégré à Python
+json     # Intégré à Python
+uuid     # Intégré à Python
+hashlib  # Intégré à Python
+re       # Intégré à Python
+datetime # Intégré à Python
+collections # Intégré à Python
+typing   # Intégré à Python
+dataclasses # Intégré à Python (Python 3.7+)
