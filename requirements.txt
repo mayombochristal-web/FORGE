@@ -3,4 +3,5 @@ numpy
 pandas
 sentence-transformers
 PyPDF2
+plotly
 python-docx
