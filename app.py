@@ -1,6 +1,5 @@
 """
-ORACLE TTU-MC³ - Version Stable et Robuste
-Avec gestion complète des erreurs et fallbacks
+ORACLE TTU-MC³ - Version Stable avec gestion Plotly robuste
 """
 
 import streamlit as st
@@ -13,10 +12,9 @@ import re
 import sqlite3
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from typing import List, Dict, Tuple, Optional, Any
 
-# Vérification des dépendances
+# Vérification Plotly avec fallback
 try:
     import plotly.graph_objects as go
     PLOTLY_AVAILABLE = True
@@ -28,7 +26,6 @@ try:
     TRANSFORMER_AVAILABLE = True
 except ImportError:
     TRANSFORMER_AVAILABLE = False
-    st.warning("⚠️ Sentence-Transformers non installé. Utilisation du mode fallback.")
 
 # ==========================================
 # CONFIGURATION
@@ -39,9 +36,6 @@ DB_PATH = os.path.join(MEMORY_FOLDER, "ttu_oracle.db")
 if not os.path.exists(MEMORY_FOLDER):
     os.makedirs(MEMORY_FOLDER)
 
-# ==========================================
-# CONSTANTES
-# ==========================================
 class Config:
     CONVERGENCE_THRESHOLD = 1e-6
     ALPHA_M = 0.618
@@ -49,57 +43,22 @@ class Config:
     ALPHA_D = 0.1
     ATTRACTOR_RADIUS = 1.0
     MAX_ITERATIONS = 50
-    EMBEDDING_DIM = 128  # Dimension réduite pour stabilité
+    EMBEDDING_DIM = 64  # Dimension réduite pour performance
 
 # ==========================================
-# CLASSE D'ÉTAT TRIADIQUE SIMPLIFIÉE
+# ÉTAT TRIADIQUE
 # ==========================================
 class TriadicState:
-    """État triadique simplifié avec gestion robuste"""
-    
     def __init__(self, phi_M=None, phi_C=None, phi_D=0.0):
-        # Conversion sécurisée en listes Python (évite les problèmes numpy)
-        if phi_M is None:
-            self.phi_M = [0.0] * Config.EMBEDDING_DIM
-        elif isinstance(phi_M, np.ndarray):
-            self.phi_M = phi_M.tolist()
-        else:
-            self.phi_M = list(phi_M) if phi_M else [0.0] * Config.EMBEDDING_DIM
-            
-        if phi_C is None:
-            self.phi_C = [0.0] * Config.EMBEDDING_DIM
-        elif isinstance(phi_C, np.ndarray):
-            self.phi_C = phi_C.tolist()
-        else:
-            self.phi_C = list(phi_C) if phi_C else [0.0] * Config.EMBEDDING_DIM
-        
+        self.phi_M = list(phi_M) if phi_M else [0.0] * Config.EMBEDDING_DIM
+        self.phi_C = list(phi_C) if phi_C else [0.0] * Config.EMBEDDING_DIM
         self.phi_D = float(phi_D)
         self.timestamp = datetime.datetime.now().timestamp()
         self.stability = 0.0
         self.convergence_history = []
-    
-    def to_dict(self):
-        return {
-            "phi_M": self.phi_M,
-            "phi_C": self.phi_C,
-            "phi_D": self.phi_D,
-            "timestamp": self.timestamp,
-            "stability": self.stability
-        }
-    
-    @classmethod
-    def from_dict(cls, data):
-        state = cls(
-            phi_M=data.get("phi_M", []),
-            phi_C=data.get("phi_C", []),
-            phi_D=data.get("phi_D", 0.0)
-        )
-        state.timestamp = data.get("timestamp", 0)
-        state.stability = data.get("stability", 0.0)
-        return state
 
 # ==========================================
-# FLOT TRIADIQUE ROBUSTE
+# FLOT TRIADIQUE
 # ==========================================
 class TriadicFlow:
     def __init__(self):
@@ -109,14 +68,12 @@ class TriadicFlow:
         self.radius = Config.ATTRACTOR_RADIUS
     
     def _norm(self, vec):
-        """Norme sécurisée"""
         try:
             return np.sqrt(sum(v * v for v in vec))
         except:
             return 0.0
     
     def _normalize(self, vec):
-        """Normalisation sécurisée"""
         norm = self._norm(vec)
         if norm > 1e-6:
             factor = self.radius / norm
@@ -124,9 +81,7 @@ class TriadicFlow:
         return vec
     
     def flow_equations(self, state: TriadicState, dt: float = 0.01) -> TriadicState:
-        """Équations du flot avec calculs sécurisés"""
         try:
-            # Calcul des dérivées
             dM = [-self.alpha_M * m + self.alpha_C * c + self.alpha_D * state.phi_D 
                   for m, c in zip(state.phi_M, state.phi_C)]
             dC = [-self.alpha_C * c + self.alpha_D * state.phi_D + self.alpha_M * m 
@@ -135,21 +90,18 @@ class TriadicFlow:
                   self.alpha_M * sum(state.phi_M)/len(state.phi_M) + 
                   self.alpha_C * sum(state.phi_C)/len(state.phi_C))
             
-            # Mise à jour
             new_M = [m + dt * dm for m, dm in zip(state.phi_M, dM)]
             new_C = [c + dt * dc for c, dc in zip(state.phi_C, dC)]
             new_D = state.phi_D + dt * dD
             
-            # Normalisation
             new_M = self._normalize(new_M)
             new_C = self._normalize(new_C)
             
             return TriadicState(phi_M=new_M, phi_C=new_C, phi_D=new_D)
-        except Exception:
+        except:
             return state
     
     def converge(self, initial_state: TriadicState, max_iter: int = None) -> TriadicState:
-        """Convergence vers l'attracteur"""
         if max_iter is None:
             max_iter = Config.MAX_ITERATIONS
         
@@ -160,23 +112,19 @@ class TriadicFlow:
             try:
                 prev_stability = state.stability
                 state = self.flow_equations(state)
-                
-                # Calcul de stabilité
                 norm_M = self._norm(state.phi_M)
                 norm_C = self._norm(state.phi_C)
                 state.stability = norm_M + norm_C + abs(state.phi_D)
                 history.append(state.stability)
-                
                 if abs(state.stability - prev_stability) < Config.CONVERGENCE_THRESHOLD:
                     break
-            except Exception:
+            except:
                 break
         
         state.convergence_history = history
         return state
     
     def attractor_projection(self, state: TriadicState) -> Tuple[float, float]:
-        """Projection sur l'attracteur"""
         try:
             if state.phi_M and state.phi_C:
                 mag = self._norm(state.phi_M) + self._norm(state.phi_C)
@@ -187,9 +135,8 @@ class TriadicFlow:
                     cos_theta, sin_theta = 0.0, 0.0
             else:
                 cos_theta, sin_theta = 0.0, 0.0
-        except Exception:
+        except:
             cos_theta, sin_theta = 0.0, 0.0
-        
         return (cos_theta, sin_theta)
 
 # ==========================================
@@ -197,7 +144,6 @@ class TriadicFlow:
 # ==========================================
 class TTUOracle:
     def __init__(self):
-        # Modèle d'embedding
         self.model = None
         if TRANSFORMER_AVAILABLE:
             try:
@@ -206,16 +152,11 @@ class TTUOracle:
                 pass
         
         self.flow = TriadicFlow()
-        
-        # Base de données
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         self._init_db()
-        
-        # Mémoire
         self.states: List[TriadicState] = []
         self.cycles: Dict[str, dict] = {}
         self.global_coherence = 0.0
-        
         self._load_memory()
     
     def _init_db(self):
@@ -238,47 +179,39 @@ class TTUOracle:
     def _load_memory(self):
         cursor = self.conn.cursor()
         cursor.execute("SELECT id, phi_M, phi_C, phi_D, attractor_cos, attractor_sin FROM knowledge")
-        
         for row in cursor.fetchall():
             try:
                 phi_M = json.loads(row[1]) if row[1] else []
                 phi_C = json.loads(row[2]) if row[2] else []
                 state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=row[3])
-                
                 self.cycles[row[0]] = {
                     "id": row[0],
                     "state": state,
                     "attractor": (row[4], row[5])
                 }
                 self.states.append(state)
-            except Exception:
+            except:
                 continue
-        
         self._update_coherence()
     
     def _encode_text(self, text: str) -> Tuple[List[float], List[float], float]:
-        """Encode un texte en vecteurs triadiques"""
         try:
             if self.model:
-                # Utiliser le modèle si disponible
                 embedding = self.model.encode(text[:500])
                 if len(embedding) > Config.EMBEDDING_DIM:
                     embedding = embedding[:Config.EMBEDDING_DIM]
                 elif len(embedding) < Config.EMBEDDING_DIM:
                     embedding = np.pad(embedding, (0, Config.EMBEDDING_DIM - len(embedding)))
             else:
-                # Fallback: hash basé
                 hash_val = int(hashlib.sha256(text.encode()).hexdigest(), 16)
                 np.random.seed(hash_val % 2**32)
                 embedding = np.random.randn(Config.EMBEDDING_DIM)
             
-            # Projection triadique
             split = Config.EMBEDDING_DIM // 2
             phi_M = embedding[:split].tolist()
             phi_C = embedding[split:].tolist()
             phi_D = float(np.mean(embedding))
             
-            # Normalisation
             norm_M = np.sqrt(sum(v*v for v in phi_M))
             norm_C = np.sqrt(sum(v*v for v in phi_C))
             if norm_M > 0:
@@ -287,142 +220,85 @@ class TTUOracle:
                 phi_C = [v / norm_C for v in phi_C]
             
             return phi_M, phi_C, phi_D
-            
-        except Exception as e:
-            # Fallback ultime
+        except:
             return [0.0] * (Config.EMBEDDING_DIM // 2), [0.0] * (Config.EMBEDDING_DIM // 2), 0.5
     
-    def learn(self, text: str, source: str = "text") -> str:
-        """Apprentissage triadique"""
+    def learn(self, text: str, source: str = "text") -> Optional[str]:
         try:
-            # Encodage
             phi_M, phi_C, phi_D = self._encode_text(text)
             state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=phi_D)
-            
-            # Convergence
             converged = self.flow.converge(state)
             attractor = self.flow.attractor_projection(converged)
             
-            # Cohérence
-            coherence = 1.0 - abs(attractor[0]) - abs(attractor[1]) + 0.5
+            coherence = 1.0 - abs(attractor[0]) - abs(attractor[1])
             coherence = max(0.0, min(1.0, coherence))
             
-            # Stockage
             cycle_id = str(uuid.uuid4())
-            timestamp = datetime.datetime.now().timestamp()
-            
             cursor = self.conn.cursor()
             cursor.execute("""
                 INSERT INTO knowledge 
                 (id, text, phi_M, phi_C, phi_D, attractor_cos, attractor_sin, coherence, timestamp, source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                cycle_id,
-                text[:2000],
-                json.dumps(converged.phi_M),
-                json.dumps(converged.phi_C),
-                converged.phi_D,
-                attractor[0],
-                attractor[1],
-                coherence,
-                timestamp,
-                source
+                cycle_id, text[:2000],
+                json.dumps(converged.phi_M), json.dumps(converged.phi_C),
+                converged.phi_D, attractor[0], attractor[1], coherence,
+                datetime.datetime.now().timestamp(), source
             ))
             self.conn.commit()
             
-            # Mise à jour mémoire
-            self.cycles[cycle_id] = {
-                "id": cycle_id,
-                "state": converged,
-                "attractor": attractor
-            }
+            self.cycles[cycle_id] = {"id": cycle_id, "state": converged, "attractor": attractor}
             self.states.append(converged)
             self._update_coherence()
-            
             return cycle_id
-            
-        except Exception as e:
+        except:
             return None
     
     def _update_coherence(self):
-        """Met à jour la cohérence globale"""
         if not self.cycles:
             self.global_coherence = 0.0
             return
-        
         coherence_sum = 0.0
         for cycle in self.cycles.values():
-            attractor = cycle["attractor"]
-            coherence = 1.0 - abs(attractor[0]) - abs(attractor[1])
-            coherence = max(0.0, min(1.0, coherence))
-            coherence_sum += coherence
-        
+            coherence = 1.0 - abs(cycle["attractor"][0]) - abs(cycle["attractor"][1])
+            coherence_sum += max(0.0, min(1.0, coherence))
         self.global_coherence = coherence_sum / len(self.cycles)
     
     def search(self, query: str, top_k: int = 3) -> List[dict]:
-        """Recherche triadique"""
         try:
             phi_M_q, phi_C_q, _ = self._encode_text(query)
             q_mag = np.sqrt(sum(v*v for v in phi_M_q) + sum(v*v for v in phi_C_q))
-            
             results = []
             for cycle_id, cycle in self.cycles.items():
                 try:
-                    # Calcul de similarité
                     dot = sum(a*b for a,b in zip(phi_M_q, cycle["state"].phi_M)) + \
                           sum(a*b for a,b in zip(phi_C_q, cycle["state"].phi_C))
-                    
                     mag = self.flow._norm(cycle["state"].phi_M) + self.flow._norm(cycle["state"].phi_C)
-                    if mag > 0 and q_mag > 0:
-                        similarity = dot / (q_mag * mag)
-                    else:
-                        similarity = 0.0
-                    
-                    results.append({
-                        "id": cycle_id,
-                        "similarity": similarity,
-                        "attractor": cycle["attractor"]
-                    })
-                except Exception:
+                    similarity = dot / (q_mag * mag) if (mag > 0 and q_mag > 0) else 0.0
+                    results.append({"id": cycle_id, "similarity": similarity, "attractor": cycle["attractor"]})
+                except:
                     continue
-            
             results.sort(key=lambda x: x["similarity"], reverse=True)
             return results[:top_k]
-            
-        except Exception:
+        except:
             return []
     
     def reason(self, question: str) -> Dict[str, Any]:
-        """Raisonnement triadique"""
         results = self.search(question)
-        
         if not results:
-            return {
-                "response": "Aucune connaissance trouvée.",
-                "coherence": 0.0,
-                "sources": []
-            }
+            return {"response": "Aucune connaissance trouvée.", "coherence": 0.0, "sources": []}
         
-        # Récupération des connaissances
         cursor = self.conn.cursor()
         knowledge = []
-        
         for r in results[:2]:
             cursor.execute("SELECT text, coherence FROM knowledge WHERE id = ?", (r["id"],))
             row = cursor.fetchone()
             if row:
-                knowledge.append({
-                    "text": row[0][:500],
-                    "coherence": row[1],
-                    "similarity": r["similarity"]
-                })
+                knowledge.append({"text": row[0][:500], "coherence": row[1], "similarity": r["similarity"]})
         
-        # Génération de réponse
         coherence = knowledge[0]["coherence"] if knowledge else 0.0
-        response = self._generate_response(question, knowledge, coherence)
-        
         return {
-            "response": response,
+            "response": self._generate_response(question, knowledge, coherence),
             "coherence": coherence,
             "sources": [k["text"][:200] + "..." for k in knowledge]
         }
@@ -430,15 +306,9 @@ class TTUOracle:
     def _generate_response(self, question: str, knowledge: List[dict], coherence: float) -> str:
         if not knowledge:
             return "Aucune connaissance pertinente."
-        
-        parts = []
-        for k in knowledge[:2]:
-            parts.append(k["text"])
-        
+        parts = [k["text"] for k in knowledge[:2]]
         coherence_ind = "✓" if coherence > 0.6 else "⚠" if coherence > 0.3 else "✗"
-        footer = f"\n\n---\n🌀 **Cohérence:** {coherence_ind} {coherence:.2f}"
-        
-        return "\n\n".join(parts) + footer
+        return "\n\n".join(parts) + f"\n\n---\n🌀 **Cohérence:** {coherence_ind} {coherence:.2f}"
     
     def get_stats(self) -> Dict:
         return {
@@ -449,7 +319,7 @@ class TTUOracle:
     
     def get_attractors(self) -> pd.DataFrame:
         data = []
-        for cycle_id, cycle in list(self.cycles.items())[:100]:
+        for cycle_id, cycle in list(self.cycles.items())[:50]:
             data.append({
                 "id": cycle_id[:6],
                 "cos": cycle["attractor"][0],
@@ -461,20 +331,18 @@ class TTUOracle:
     def get_triad_state(self) -> Dict:
         if not self.states:
             return {"M": 0.0, "C": 0.0, "D": 0.0}
-        
-        avg_M = np.mean([s.phi_M[0] if s.phi_M else 0 for s in self.states])
-        avg_C = np.mean([s.phi_C[0] if s.phi_C else 0 for s in self.states])
-        avg_D = np.mean([s.phi_D for s in self.states])
-        
-        return {"M": avg_M, "C": avg_C, "D": avg_D}
+        return {
+            "M": np.mean([s.phi_M[0] if s.phi_M else 0 for s in self.states]),
+            "C": np.mean([s.phi_C[0] if s.phi_C else 0 for s in self.states]),
+            "D": np.mean([s.phi_D for s in self.states])
+        }
 
 # ==========================================
-# APPLICATION STREAMLIT
+# APPLICATION STREAMLIT AVEC GESTION PLOTLY
 # ==========================================
 def main():
     st.set_page_config(page_title="Oracle TTU-MC³", page_icon="🌀", layout="wide")
     
-    # Initialisation
     @st.cache_resource
     def get_oracle():
         return TTUOracle()
@@ -495,7 +363,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar
+    # Sidebar avec gestion des clés uniques
     with st.sidebar:
         st.header("État Triadique")
         stats = oracle.get_stats()
@@ -509,14 +377,25 @@ def main():
             st.metric("Stables", stats["stable"])
             st.metric("Φ_D", f"{triad['D']:.2f}")
         
+        # Graphique avec clé unique pour éviter les conflits DOM
         if PLOTLY_AVAILABLE and stats["cycles"] > 0:
-            fig = go.Figure(data=[go.Bar(
-                x=['Φ_M', 'Φ_C', 'Φ_D'],
-                y=[triad['M'], triad['C'], triad['D']],
-                marker_color=['#4CAF50', '#2196F3', '#FF5722']
-            )])
-            fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=['Φ_M', 'Φ_C', 'Φ_D'],
+                    y=[triad['M'], triad['C'], triad['D']],
+                    marker_color=['#4CAF50', '#2196F3', '#FF5722'],
+                    name="État triadique"
+                ))
+                fig.update_layout(
+                    height=250,
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    showlegend=False
+                )
+                # Utilisation de key unique pour éviter les conflits
+                st.plotly_chart(fig, use_container_width=True, key="sidebar_triad")
+            except Exception as e:
+                st.warning("Graphique temporairement indisponible")
         
         st.divider()
         st.json(stats)
@@ -526,35 +405,27 @@ def main():
     
     with tab1:
         st.header("Apprentissage Triadique")
-        
         texte = st.text_area("Texte à apprendre", height=300, 
-                            placeholder="Entrez votre texte ici...")
+                            placeholder="Entrez votre texte ici...", key="learn_text")
         
-        if st.button("🌀 Apprendre", type="primary"):
+        if st.button("🌀 Apprendre", type="primary", key="learn_btn"):
             if texte.strip():
                 with st.spinner("Convergence vers l'attracteur..."):
                     cycle_id = oracle.learn(texte)
                     if cycle_id:
                         st.success(f"✅ Appris: {cycle_id[:8]}")
                         st.info(f"📊 Cohérence globale: {oracle.global_coherence:.3f}")
+                        st.rerun()
                     else:
                         st.error("Erreur d'apprentissage")
             else:
                 st.warning("Entrez un texte")
-        
-        st.divider()
-        st.caption("""
-        **Flot Triadique:**  
-        Φ_M (Mémoire) ←→ Φ_C (Cohérence) ←→ Φ_D (Dissipation)  
-        Convergence vers l'attracteur circulaire.
-        """)
     
     with tab2:
         st.header("Interrogation Triadique")
+        question = st.text_input("💭 Votre question", key="question_input")
         
-        question = st.text_input("💭 Votre question")
-        
-        if st.button("🌀 Interroger", type="primary"):
+        if st.button("🌀 Interroger", type="primary", key="reason_btn"):
             if question.strip():
                 with st.spinner("Convergence..."):
                     result = oracle.reason(question)
@@ -583,42 +454,55 @@ def main():
         df = oracle.get_attractors()
         
         if not df.empty and PLOTLY_AVAILABLE:
-            fig = go.Figure()
-            
-            # Cercle unité
-            theta = np.linspace(0, 2*np.pi, 100)
-            fig.add_trace(go.Scatter(
-                x=np.cos(theta), y=np.sin(theta),
-                mode='lines', line=dict(color='gray', dash='dash'),
-                name='Attracteur'
-            ))
-            
-            # Points
-            fig.add_trace(go.Scatter(
-                x=df['cos'], y=df['sin'],
-                mode='markers+text',
-                marker=dict(
-                    size=df['coherence'] * 30 + 5,
-                    color=df['coherence'],
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title="Cohérence")
-                ),
-                text=df['id'],
-                textposition="top center",
-                name='Connaissances'
-            ))
-            
-            fig.update_layout(
-                title="Projection sur l'Attracteur Circulaire",
-                xaxis_title="cos θ (Φ_M)", yaxis_title="sin θ (Φ_C)",
-                xaxis=dict(range=[-1.2, 1.2], scaleanchor="y", scaleratio=1),
-                yaxis=dict(range=[-1.2, 1.2]),
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(df)
+            try:
+                fig = go.Figure()
+                
+                # Cercle unité
+                theta = np.linspace(0, 2*np.pi, 100)
+                fig.add_trace(go.Scatter(
+                    x=np.cos(theta), y=np.sin(theta),
+                    mode='lines',
+                    line=dict(color='gray', dash='dash', width=1),
+                    name='Attracteur',
+                    hoverinfo='none'
+                ))
+                
+                # Points de connaissance
+                fig.add_trace(go.Scatter(
+                    x=df['cos'].tolist(),
+                    y=df['sin'].tolist(),
+                    mode='markers+text',
+                    marker=dict(
+                        size=[max(10, min(40, c*30 + 5)) for c in df['coherence']],
+                        color=df['coherence'].tolist(),
+                        colorscale='Viridis',
+                        showscale=True,
+                        colorbar=dict(title="Cohérence", x=1.02),
+                        line=dict(width=1, color='white')
+                    ),
+                    text=df['id'].tolist(),
+                    textposition="top center",
+                    textfont=dict(size=10),
+                    name='Connaissances',
+                    hovertemplate='ID: %{text}<br>Cos: %{x:.2f}<br>Sin: %{y:.2f}<br>Cohérence: %{marker.color:.2f}<extra></extra>'
+                ))
+                
+                fig.update_layout(
+                    title="Projection sur l'Attracteur Circulaire",
+                    xaxis_title="cos θ (Φ_M)",
+                    yaxis_title="sin θ (Φ_C)",
+                    xaxis=dict(range=[-1.2, 1.2], scaleanchor="y", scaleratio=1, gridcolor='#eee'),
+                    yaxis=dict(range=[-1.2, 1.2], gridcolor='#eee'),
+                    height=550,
+                    hovermode='closest',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, key="attractor_map")
+                st.dataframe(df, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Erreur d'affichage: {e}")
         else:
             st.info("Aucune connaissance apprise. Commencez par apprendre des textes.")
     
