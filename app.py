@@ -1,6 +1,6 @@
 """
-ORACLE TTU-MC³ - Version Triadique Complète (CORRIGÉE)
-Avec gestion robuste des types et dimensions
+ORACLE TTU-MC³ - Version Stable et Robuste
+Avec gestion complète des erreurs et fallbacks
 """
 
 import streamlit as st
@@ -14,13 +14,11 @@ import sqlite3
 import numpy as np
 import pandas as pd
 from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional, Any
 
 # Vérification des dépendances
 try:
     import plotly.graph_objects as go
-    import plotly.express as px
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
@@ -30,9 +28,10 @@ try:
     TRANSFORMER_AVAILABLE = True
 except ImportError:
     TRANSFORMER_AVAILABLE = False
+    st.warning("⚠️ Sentence-Transformers non installé. Utilisation du mode fallback.")
 
 # ==========================================
-# CONFIGURATION TRIADIQUE
+# CONFIGURATION
 # ==========================================
 MEMORY_FOLDER = "ttu_oracle_memory"
 DB_PATH = os.path.join(MEMORY_FOLDER, "ttu_oracle.db")
@@ -41,114 +40,134 @@ if not os.path.exists(MEMORY_FOLDER):
     os.makedirs(MEMORY_FOLDER)
 
 # ==========================================
-# CONSTANTES TRIADIQUES
+# CONSTANTES
 # ==========================================
-class TriadicConstants:
+class Config:
     CONVERGENCE_THRESHOLD = 1e-6
-    DISSIPATION_THRESHOLD = 0.1
-    COHERENCE_THRESHOLD = 0.7
     ALPHA_M = 0.618
     ALPHA_C = 0.382
     ALPHA_D = 0.1
     ATTRACTOR_RADIUS = 1.0
-    MAX_ITERATIONS = 100
-    EMBEDDING_DIM = 384  # Dimension par défaut pour les embeddings
+    MAX_ITERATIONS = 50
+    EMBEDDING_DIM = 128  # Dimension réduite pour stabilité
 
 # ==========================================
-# STRUCTURES DE DONNÉES TRIADIQUES
+# CLASSE D'ÉTAT TRIADIQUE SIMPLIFIÉE
 # ==========================================
-@dataclass
 class TriadicState:
-    phi_M: np.ndarray
-    phi_C: np.ndarray
-    phi_D: float
-    timestamp: float = field(default_factory=datetime.datetime.now().timestamp)
-    stability: float = 0.0
-    convergence_history: List[float] = field(default_factory=list)
+    """État triadique simplifié avec gestion robuste"""
     
-    def __post_init__(self):
-        """Assure que les tableaux sont bien des numpy arrays"""
-        if not isinstance(self.phi_M, np.ndarray):
-            self.phi_M = np.array(self.phi_M, dtype=np.float32)
-        if not isinstance(self.phi_C, np.ndarray):
-            self.phi_C = np.array(self.phi_C, dtype=np.float32)
-        if self.phi_M.size == 0:
-            self.phi_M = np.zeros(TriadicConstants.EMBEDDING_DIM // 2, dtype=np.float32)
-        if self.phi_C.size == 0:
-            self.phi_C = np.zeros(TriadicConstants.EMBEDDING_DIM // 2, dtype=np.float32)
-
-@dataclass
-class TriadicCycle:
-    id: str
-    state: TriadicState
-    attractor: Tuple[float, float]
-    phase: int
+    def __init__(self, phi_M=None, phi_C=None, phi_D=0.0):
+        # Conversion sécurisée en listes Python (évite les problèmes numpy)
+        if phi_M is None:
+            self.phi_M = [0.0] * Config.EMBEDDING_DIM
+        elif isinstance(phi_M, np.ndarray):
+            self.phi_M = phi_M.tolist()
+        else:
+            self.phi_M = list(phi_M) if phi_M else [0.0] * Config.EMBEDDING_DIM
+            
+        if phi_C is None:
+            self.phi_C = [0.0] * Config.EMBEDDING_DIM
+        elif isinstance(phi_C, np.ndarray):
+            self.phi_C = phi_C.tolist()
+        else:
+            self.phi_C = list(phi_C) if phi_C else [0.0] * Config.EMBEDDING_DIM
+        
+        self.phi_D = float(phi_D)
+        self.timestamp = datetime.datetime.now().timestamp()
+        self.stability = 0.0
+        self.convergence_history = []
     
-    def is_stable(self) -> bool:
-        return self.state.stability < TriadicConstants.CONVERGENCE_THRESHOLD
+    def to_dict(self):
+        return {
+            "phi_M": self.phi_M,
+            "phi_C": self.phi_C,
+            "phi_D": self.phi_D,
+            "timestamp": self.timestamp,
+            "stability": self.stability
+        }
+    
+    @classmethod
+    def from_dict(cls, data):
+        state = cls(
+            phi_M=data.get("phi_M", []),
+            phi_C=data.get("phi_C", []),
+            phi_D=data.get("phi_D", 0.0)
+        )
+        state.timestamp = data.get("timestamp", 0)
+        state.stability = data.get("stability", 0.0)
+        return state
 
 # ==========================================
-# FLOT TRIADIQUE
+# FLOT TRIADIQUE ROBUSTE
 # ==========================================
 class TriadicFlow:
     def __init__(self):
-        self.alpha_M = TriadicConstants.ALPHA_M
-        self.alpha_C = TriadicConstants.ALPHA_C
-        self.alpha_D = TriadicConstants.ALPHA_D
-        self.radius = TriadicConstants.ATTRACTOR_RADIUS
-        
+        self.alpha_M = Config.ALPHA_M
+        self.alpha_C = Config.ALPHA_C
+        self.alpha_D = Config.ALPHA_D
+        self.radius = Config.ATTRACTOR_RADIUS
+    
+    def _norm(self, vec):
+        """Norme sécurisée"""
+        try:
+            return np.sqrt(sum(v * v for v in vec))
+        except:
+            return 0.0
+    
+    def _normalize(self, vec):
+        """Normalisation sécurisée"""
+        norm = self._norm(vec)
+        if norm > 1e-6:
+            factor = self.radius / norm
+            return [v * factor for v in vec]
+        return vec
+    
     def flow_equations(self, state: TriadicState, dt: float = 0.01) -> TriadicState:
-        """Équations du flot triadique"""
+        """Équations du flot avec calculs sécurisés"""
         try:
             # Calcul des dérivées
-            dM = (-self.alpha_M * state.phi_M + 
-                  self.alpha_C * state.phi_C + 
-                  self.alpha_D * state.phi_D)
-            dC = (-self.alpha_C * state.phi_C + 
-                  self.alpha_D * state.phi_D + 
-                  self.alpha_M * state.phi_M)
+            dM = [-self.alpha_M * m + self.alpha_C * c + self.alpha_D * state.phi_D 
+                  for m, c in zip(state.phi_M, state.phi_C)]
+            dC = [-self.alpha_C * c + self.alpha_D * state.phi_D + self.alpha_M * m 
+                  for m, c in zip(state.phi_M, state.phi_C)]
             dD = (-self.alpha_D * state.phi_D + 
-                  self.alpha_M * np.mean(state.phi_M) + 
-                  self.alpha_C * np.mean(state.phi_C))
+                  self.alpha_M * sum(state.phi_M)/len(state.phi_M) + 
+                  self.alpha_C * sum(state.phi_C)/len(state.phi_C))
             
             # Mise à jour
-            new_M = state.phi_M + dt * dM
-            new_C = state.phi_C + dt * dC
+            new_M = [m + dt * dm for m, dm in zip(state.phi_M, dM)]
+            new_C = [c + dt * dc for c, dc in zip(state.phi_C, dC)]
             new_D = state.phi_D + dt * dD
             
-            # Normalisation vers l'attracteur
-            magnitude = np.sqrt(np.sum(new_M**2) + np.sum(new_C**2))
-            if magnitude > 1e-6:
-                factor = self.radius / magnitude
-                new_M = new_M * factor
-                new_C = new_C * factor
+            # Normalisation
+            new_M = self._normalize(new_M)
+            new_C = self._normalize(new_C)
             
-            return TriadicState(phi_M=new_M, phi_C=new_C, phi_D=float(new_D))
-        except Exception as e:
-            # Fallback en cas d'erreur
+            return TriadicState(phi_M=new_M, phi_C=new_C, phi_D=new_D)
+        except Exception:
             return state
     
     def converge(self, initial_state: TriadicState, max_iter: int = None) -> TriadicState:
-        """Simule la convergence vers l'attracteur"""
+        """Convergence vers l'attracteur"""
         if max_iter is None:
-            max_iter = TriadicConstants.MAX_ITERATIONS
-            
+            max_iter = Config.MAX_ITERATIONS
+        
         state = initial_state
         history = []
         
-        for i in range(max_iter):
+        for _ in range(max_iter):
             try:
                 prev_stability = state.stability
                 state = self.flow_equations(state)
                 
-                # Calcul robuste de la stabilité
-                norm_M = float(np.linalg.norm(state.phi_M)) if state.phi_M.size > 0 else 0.0
-                norm_C = float(np.linalg.norm(state.phi_C)) if state.phi_C.size > 0 else 0.0
-                state.stability = float(norm_M + norm_C + abs(state.phi_D))
-                
+                # Calcul de stabilité
+                norm_M = self._norm(state.phi_M)
+                norm_C = self._norm(state.phi_C)
+                state.stability = norm_M + norm_C + abs(state.phi_D)
                 history.append(state.stability)
                 
-                if abs(state.stability - prev_stability) < TriadicConstants.CONVERGENCE_THRESHOLD:
+                if abs(state.stability - prev_stability) < Config.CONVERGENCE_THRESHOLD:
                     break
             except Exception:
                 break
@@ -157,20 +176,20 @@ class TriadicFlow:
         return state
     
     def attractor_projection(self, state: TriadicState) -> Tuple[float, float]:
-        """Projette l'état sur l'attracteur circulaire"""
+        """Projection sur l'attracteur"""
         try:
-            if state.phi_M.size > 0 and state.phi_C.size > 0:
-                magnitude = np.sqrt(np.sum(state.phi_M**2) + np.sum(state.phi_C**2))
-                if magnitude > 1e-6:
-                    cos_theta = float(state.phi_M[0] / magnitude)
-                    sin_theta = float(state.phi_C[0] / magnitude)
+            if state.phi_M and state.phi_C:
+                mag = self._norm(state.phi_M) + self._norm(state.phi_C)
+                if mag > 1e-6:
+                    cos_theta = state.phi_M[0] / mag if state.phi_M else 0.0
+                    sin_theta = state.phi_C[0] / mag if state.phi_C else 0.0
                 else:
                     cos_theta, sin_theta = 0.0, 0.0
             else:
                 cos_theta, sin_theta = 0.0, 0.0
         except Exception:
             cos_theta, sin_theta = 0.0, 0.0
-            
+        
         return (cos_theta, sin_theta)
 
 # ==========================================
@@ -179,364 +198,275 @@ class TriadicFlow:
 class TTUOracle:
     def __init__(self):
         # Modèle d'embedding
+        self.model = None
         if TRANSFORMER_AVAILABLE:
             try:
                 self.model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-            except Exception:
-                self.model = None
-        else:
-            self.model = None
-            
+            except:
+                pass
+        
         self.flow = TriadicFlow()
         
         # Base de données
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.init_triadic_tables()
+        self._init_db()
         
         # Mémoire
         self.states: List[TriadicState] = []
-        self.cycles: Dict[str, TriadicCycle] = {}
+        self.cycles: Dict[str, dict] = {}
         self.global_coherence = 0.0
-        self.dissipation_rate = 0.0
         
-        self.load_triadic_memory()
+        self._load_memory()
     
-    def init_triadic_tables(self):
+    def _init_db(self):
         cursor = self.conn.cursor()
-        
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS triadic_states (
+        CREATE TABLE IF NOT EXISTS knowledge (
             id TEXT PRIMARY KEY,
-            phi_M TEXT NOT NULL,
-            phi_C TEXT NOT NULL,
-            phi_D REAL NOT NULL,
-            timestamp REAL NOT NULL,
-            stability REAL DEFAULT 0.0,
-            convergence_path TEXT
-        )""")
-        
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS triadic_cycles (
-            id TEXT PRIMARY KEY,
-            state_id TEXT,
-            attractor_cos REAL,
-            attractor_sin REAL,
-            phase INTEGER,
-            convergence_time REAL
-        )""")
-        
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS stabilized_knowledge (
-            id TEXT PRIMARY KEY,
-            text TEXT NOT NULL,
+            text TEXT,
+            phi_M TEXT,
+            phi_C TEXT,
+            phi_D REAL,
             attractor_cos REAL,
             attractor_sin REAL,
             coherence REAL,
             timestamp REAL,
             source TEXT
         )""")
-        
         self.conn.commit()
     
-    def load_triadic_memory(self):
+    def _load_memory(self):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM triadic_states")
+        cursor.execute("SELECT id, phi_M, phi_C, phi_D, attractor_cos, attractor_sin FROM knowledge")
+        
         for row in cursor.fetchall():
             try:
-                phi_M = np.array(json.loads(row[1]), dtype=np.float32)
-                phi_C = np.array(json.loads(row[2]), dtype=np.float32)
-                state = TriadicState(
-                    phi_M=phi_M,
-                    phi_C=phi_C,
-                    phi_D=row[3],
-                    timestamp=row[4],
-                    stability=row[5]
-                )
-                if row[6]:
-                    state.convergence_history = json.loads(row[6])
+                phi_M = json.loads(row[1]) if row[1] else []
+                phi_C = json.loads(row[2]) if row[2] else []
+                state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=row[3])
+                
+                self.cycles[row[0]] = {
+                    "id": row[0],
+                    "state": state,
+                    "attractor": (row[4], row[5])
+                }
                 self.states.append(state)
             except Exception:
                 continue
         
-        cursor.execute("SELECT * FROM triadic_cycles")
-        for row in cursor.fetchall():
-            try:
-                cycle = TriadicCycle(
-                    id=row[0],
-                    state=TriadicState(
-                        phi_M=np.zeros(TriadicConstants.EMBEDDING_DIM // 2),
-                        phi_C=np.zeros(TriadicConstants.EMBEDDING_DIM // 2),
-                        phi_D=0.0
-                    ),
-                    attractor=(row[2], row[3]),
-                    phase=row[4]
-                )
-                self.cycles[row[0]] = cycle
-            except Exception:
-                continue
-        
-        self.update_global_coherence()
+        self._update_coherence()
     
-    def encode_to_triadic(self, text: str) -> TriadicState:
-        """Encode un texte en état triadique avec fallback robuste"""
+    def _encode_text(self, text: str) -> Tuple[List[float], List[float], float]:
+        """Encode un texte en vecteurs triadiques"""
         try:
-            if self.model is not None:
-                embedding = self.model.encode(text[:1000])  # Limite pour performance
-                dim = len(embedding)
-                split = dim // 3 if dim // 3 > 0 else 1
-                
-                phi_M = embedding[:split]
-                phi_C = embedding[split:2*split] if 2*split <= dim else embedding[split:]
-                phi_D = float(np.mean(embedding[2*split:])) if 2*split < dim else 0.1
-                
-                # Normalisation
-                norm_M = np.linalg.norm(phi_M)
-                norm_C = np.linalg.norm(phi_C)
-                if norm_M > 0:
-                    phi_M = phi_M / norm_M * TriadicConstants.ATTRACTOR_RADIUS
-                if norm_C > 0:
-                    phi_C = phi_C / norm_C * TriadicConstants.ATTRACTOR_RADIUS
+            if self.model:
+                # Utiliser le modèle si disponible
+                embedding = self.model.encode(text[:500])
+                if len(embedding) > Config.EMBEDDING_DIM:
+                    embedding = embedding[:Config.EMBEDDING_DIM]
+                elif len(embedding) < Config.EMBEDDING_DIM:
+                    embedding = np.pad(embedding, (0, Config.EMBEDDING_DIM - len(embedding)))
             else:
-                # Fallback basé sur hash
+                # Fallback: hash basé
                 hash_val = int(hashlib.sha256(text.encode()).hexdigest(), 16)
                 np.random.seed(hash_val % 2**32)
-                phi_M = np.random.randn(64).astype(np.float32) / 10
-                phi_C = np.random.randn(64).astype(np.float32) / 10
-                phi_D = 0.5
+                embedding = np.random.randn(Config.EMBEDDING_DIM)
+            
+            # Projection triadique
+            split = Config.EMBEDDING_DIM // 2
+            phi_M = embedding[:split].tolist()
+            phi_C = embedding[split:].tolist()
+            phi_D = float(np.mean(embedding))
+            
+            # Normalisation
+            norm_M = np.sqrt(sum(v*v for v in phi_M))
+            norm_C = np.sqrt(sum(v*v for v in phi_C))
+            if norm_M > 0:
+                phi_M = [v / norm_M for v in phi_M]
+            if norm_C > 0:
+                phi_C = [v / norm_C for v in phi_C]
+            
+            return phi_M, phi_C, phi_D
+            
         except Exception as e:
             # Fallback ultime
-            phi_M = np.zeros(TriadicConstants.EMBEDDING_DIM // 2, dtype=np.float32)
-            phi_C = np.zeros(TriadicConstants.EMBEDDING_DIM // 2, dtype=np.float32)
-            phi_D = 0.5
-        
-        return TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=phi_D)
+            return [0.0] * (Config.EMBEDDING_DIM // 2), [0.0] * (Config.EMBEDDING_DIM // 2), 0.5
     
-    def learn(self, text: str, source: str = "text") -> TriadicCycle:
+    def learn(self, text: str, source: str = "text") -> str:
         """Apprentissage triadique"""
         try:
-            initial_state = self.encode_to_triadic(text)
-            stabilized_state = self.flow.converge(initial_state)
-            attractor = self.flow.attractor_projection(stabilized_state)
-            coherence = self.compute_coherence(stabilized_state)
+            # Encodage
+            phi_M, phi_C, phi_D = self._encode_text(text)
+            state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=phi_D)
             
+            # Convergence
+            converged = self.flow.converge(state)
+            attractor = self.flow.attractor_projection(converged)
+            
+            # Cohérence
+            coherence = 1.0 - abs(attractor[0]) - abs(attractor[1]) + 0.5
+            coherence = max(0.0, min(1.0, coherence))
+            
+            # Stockage
             cycle_id = str(uuid.uuid4())
             timestamp = datetime.datetime.now().timestamp()
             
-            cycle = TriadicCycle(
-                id=cycle_id,
-                state=stabilized_state,
-                attractor=attractor,
-                phase=0
-            )
-            
             cursor = self.conn.cursor()
-            
             cursor.execute("""
-                INSERT INTO triadic_states 
-                (id, phi_M, phi_C, phi_D, timestamp, stability, convergence_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge 
+                (id, text, phi_M, phi_C, phi_D, attractor_cos, attractor_sin, coherence, timestamp, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 cycle_id,
-                json.dumps(stabilized_state.phi_M.tolist()),
-                json.dumps(stabilized_state.phi_C.tolist()),
-                stabilized_state.phi_D,
-                timestamp,
-                stabilized_state.stability,
-                json.dumps(stabilized_state.convergence_history)
-            ))
-            
-            cursor.execute("""
-                INSERT INTO triadic_cycles
-                (id, state_id, attractor_cos, attractor_sin, phase, convergence_time)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                cycle_id,
-                cycle_id,
-                attractor[0],
-                attractor[1],
-                cycle.phase,
-                len(stabilized_state.convergence_history)
-            ))
-            
-            cursor.execute("""
-                INSERT INTO stabilized_knowledge
-                (id, text, attractor_cos, attractor_sin, coherence, timestamp, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                cycle_id,
-                text[:5000],
+                text[:2000],
+                json.dumps(converged.phi_M),
+                json.dumps(converged.phi_C),
+                converged.phi_D,
                 attractor[0],
                 attractor[1],
                 coherence,
                 timestamp,
                 source
             ))
-            
             self.conn.commit()
             
-            self.states.append(stabilized_state)
-            self.cycles[cycle_id] = cycle
-            self.update_global_coherence()
+            # Mise à jour mémoire
+            self.cycles[cycle_id] = {
+                "id": cycle_id,
+                "state": converged,
+                "attractor": attractor
+            }
+            self.states.append(converged)
+            self._update_coherence()
             
-            return cycle
+            return cycle_id
+            
         except Exception as e:
-            # En cas d'erreur, retourner un cycle vide
-            return TriadicCycle(
-                id=str(uuid.uuid4()),
-                state=TriadicState(
-                    phi_M=np.zeros(64), phi_C=np.zeros(64), phi_D=0.5
-                ),
-                attractor=(0.0, 0.0),
-                phase=0
-            )
+            return None
     
-    def compute_coherence(self, state: TriadicState) -> float:
-        """Calcule la cohérence triadique"""
-        try:
-            attractor = self.flow.attractor_projection(state)
-            distance = np.sqrt(attractor[0]**2 + attractor[1]**2)
-            coherence = max(0.0, min(1.0, 1.0 - distance))
-            coherence *= (1.0 - min(1.0, state.phi_D))
-            return float(coherence)
-        except Exception:
-            return 0.0
-    
-    def update_global_coherence(self):
-        if not self.states:
+    def _update_coherence(self):
+        """Met à jour la cohérence globale"""
+        if not self.cycles:
             self.global_coherence = 0.0
-            self.dissipation_rate = 0.0
             return
         
-        coherence_sum = sum(self.compute_coherence(s) for s in self.states)
-        self.global_coherence = coherence_sum / len(self.states)
-        self.dissipation_rate = sum(s.phi_D for s in self.states) / len(self.states)
+        coherence_sum = 0.0
+        for cycle in self.cycles.values():
+            attractor = cycle["attractor"]
+            coherence = 1.0 - abs(attractor[0]) - abs(attractor[1])
+            coherence = max(0.0, min(1.0, coherence))
+            coherence_sum += coherence
+        
+        self.global_coherence = coherence_sum / len(self.cycles)
     
-    def search(self, query: str, top_k: int = 5):
+    def search(self, query: str, top_k: int = 3) -> List[dict]:
         """Recherche triadique"""
-        query_state = self.encode_to_triadic(query)
-        query_attractor = self.flow.attractor_projection(query_state)
-        
-        results = []
-        for cycle_id, cycle in self.cycles.items():
-            cos_q, sin_q = query_attractor
-            cos_c, sin_c = cycle.attractor
-            angle_diff = abs(np.arctan2(sin_q - sin_c, cos_q - cos_c))
-            coherence = self.compute_coherence(cycle.state)
-            score = (1 - angle_diff / np.pi) * coherence * (1 - cycle.state.phi_D)
-            results.append((cycle, score))
-        
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:top_k]
+        try:
+            phi_M_q, phi_C_q, _ = self._encode_text(query)
+            q_mag = np.sqrt(sum(v*v for v in phi_M_q) + sum(v*v for v in phi_C_q))
+            
+            results = []
+            for cycle_id, cycle in self.cycles.items():
+                try:
+                    # Calcul de similarité
+                    dot = sum(a*b for a,b in zip(phi_M_q, cycle["state"].phi_M)) + \
+                          sum(a*b for a,b in zip(phi_C_q, cycle["state"].phi_C))
+                    
+                    mag = self.flow._norm(cycle["state"].phi_M) + self.flow._norm(cycle["state"].phi_C)
+                    if mag > 0 and q_mag > 0:
+                        similarity = dot / (q_mag * mag)
+                    else:
+                        similarity = 0.0
+                    
+                    results.append({
+                        "id": cycle_id,
+                        "similarity": similarity,
+                        "attractor": cycle["attractor"]
+                    })
+                except Exception:
+                    continue
+            
+            results.sort(key=lambda x: x["similarity"], reverse=True)
+            return results[:top_k]
+            
+        except Exception:
+            return []
     
     def reason(self, question: str) -> Dict[str, Any]:
         """Raisonnement triadique"""
-        search_results = self.search(question)
+        results = self.search(question)
         
-        if not search_results:
+        if not results:
             return {
-                "response": "Aucune connaissance cohérente trouvée.",
+                "response": "Aucune connaissance trouvée.",
                 "coherence": 0.0,
-                "convergence_time": 0,
-                "sources": [],
-                "attractor": (0.0, 0.0)
+                "sources": []
             }
         
+        # Récupération des connaissances
         cursor = self.conn.cursor()
-        sources = []
-        knowledge_texts = []
+        knowledge = []
         
-        for cycle, score in search_results[:3]:
-            cursor.execute("SELECT text FROM stabilized_knowledge WHERE id = ?", (cycle.id,))
+        for r in results[:2]:
+            cursor.execute("SELECT text, coherence FROM knowledge WHERE id = ?", (r["id"],))
             row = cursor.fetchone()
             if row:
-                knowledge_texts.append(row[0])
-                sources.append({
-                    "id": cycle.id[:8],
-                    "coherence": score,
-                    "attractor": cycle.attractor
+                knowledge.append({
+                    "text": row[0][:500],
+                    "coherence": row[1],
+                    "similarity": r["similarity"]
                 })
         
-        coherence = search_results[0][1] if search_results else 0.0
-        response = self.generate_response(question, knowledge_texts, coherence)
+        # Génération de réponse
+        coherence = knowledge[0]["coherence"] if knowledge else 0.0
+        response = self._generate_response(question, knowledge, coherence)
         
         return {
             "response": response,
             "coherence": coherence,
-            "convergence_time": len(search_results[0][0].state.convergence_history) if search_results else 0,
-            "sources": sources,
-            "attractor": search_results[0][0].attractor if search_results else (0.0, 0.0)
+            "sources": [k["text"][:200] + "..." for k in knowledge]
         }
     
-    def generate_response(self, question: str, knowledge: List[str], coherence: float) -> str:
+    def _generate_response(self, question: str, knowledge: List[dict], coherence: float) -> str:
         if not knowledge:
-            return "Aucune connaissance pertinente trouvée."
+            return "Aucune connaissance pertinente."
         
-        response_parts = []
-        for text in knowledge[:3]:
-            response_parts.append(text[:500])
+        parts = []
+        for k in knowledge[:2]:
+            parts.append(k["text"])
         
-        coherence_indicator = "✓" if coherence > 0.7 else "⚠" if coherence > 0.3 else "✗"
-        coherence_msg = f"\n\n---\n🌀 **Cohérence triadique:** {coherence_indicator} {coherence:.3f}\n*La réponse a émergé de la convergence vers l'attracteur.*"
+        coherence_ind = "✓" if coherence > 0.6 else "⚠" if coherence > 0.3 else "✗"
+        footer = f"\n\n---\n🌀 **Cohérence:** {coherence_ind} {coherence:.2f}"
         
-        return "\n\n---\n\n".join(response_parts) + coherence_msg
+        return "\n\n".join(parts) + footer
     
-    def get_attractor_map(self) -> pd.DataFrame:
+    def get_stats(self) -> Dict:
+        return {
+            "cycles": len(self.cycles),
+            "coherence": self.global_coherence,
+            "stable": sum(1 for s in self.states if s.stability < 0.1)
+        }
+    
+    def get_attractors(self) -> pd.DataFrame:
         data = []
-        for cycle_id, cycle in self.cycles.items():
+        for cycle_id, cycle in list(self.cycles.items())[:100]:
             data.append({
-                "id": cycle_id[:8],
-                "cos": cycle.attractor[0],
-                "sin": cycle.attractor[1],
-                "coherence": self.compute_coherence(cycle.state),
-                "phase": cycle.phase
+                "id": cycle_id[:6],
+                "cos": cycle["attractor"][0],
+                "sin": cycle["attractor"][1],
+                "coherence": 1.0 - abs(cycle["attractor"][0]) - abs(cycle["attractor"][1])
             })
         return pd.DataFrame(data)
     
-    def get_global_triad(self) -> Dict[str, float]:
+    def get_triad_state(self) -> Dict:
         if not self.states:
-            return {"phi_M": 0.0, "phi_C": 0.0, "phi_D": 0.0, "coherence": 0.0}
+            return {"M": 0.0, "C": 0.0, "D": 0.0}
         
-        phi_M_vals = [float(s.phi_M[0]) if s.phi_M.size > 0 else 0.0 for s in self.states]
-        phi_C_vals = [float(s.phi_C[0]) if s.phi_C.size > 0 else 0.0 for s in self.states]
+        avg_M = np.mean([s.phi_M[0] if s.phi_M else 0 for s in self.states])
+        avg_C = np.mean([s.phi_C[0] if s.phi_C else 0 for s in self.states])
+        avg_D = np.mean([s.phi_D for s in self.states])
         
-        return {
-            "phi_M": float(np.mean(phi_M_vals)) if phi_M_vals else 0.0,
-            "phi_C": float(np.mean(phi_C_vals)) if phi_C_vals else 0.0,
-            "phi_D": self.dissipation_rate,
-            "coherence": self.global_coherence
-        }
-    
-    def stats(self) -> Dict[str, Any]:
-        return {
-            "cycles": len(self.cycles),
-            "states": len(self.states),
-            "global_coherence": self.global_coherence,
-            "dissipation_rate": self.dissipation_rate,
-            "stable_cycles": sum(1 for c in self.cycles.values() if c.is_stable())
-        }
-    
-    def extract_text_from_file(self, file) -> str:
-        text = ""
-        try:
-            text = file.read().decode('utf-8')
-        except Exception:
-            text = str(file.read())
-        return text[:10000]  # Limite pour performance
-    
-    def learn_document(self, uploaded_file) -> List[TriadicCycle]:
-        text = self.extract_text_from_file(uploaded_file)
-        if not text.strip():
-            return []
-        
-        sections = re.split(r'\n\s*\n', text)
-        cycles = []
-        for section in sections[:5]:  # Limite pour performance
-            if len(section.strip()) > 100:
-                cycle = self.learn(section.strip(), source=uploaded_file.name)
-                cycles.append(cycle)
-        
-        return cycles
+        return {"M": avg_M, "C": avg_C, "D": avg_D}
 
 # ==========================================
 # APPLICATION STREAMLIT
@@ -544,134 +474,118 @@ class TTUOracle:
 def main():
     st.set_page_config(page_title="Oracle TTU-MC³", page_icon="🌀", layout="wide")
     
-    if not TRANSFORMER_AVAILABLE:
-        st.error("""
-        ❌ **Sentence-Transformers n'est pas installé**
-        
-        ```bash
-        pip install sentence-transformers
-        ```
-        """)
-        st.stop()
-    
+    # Initialisation
     @st.cache_resource
     def get_oracle():
         return TTUOracle()
     
     oracle = get_oracle()
     
+    # CSS
     st.markdown("""
     <style>
-    .triadic-title { text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white; margin-bottom: 20px; }
-    .coherence-high { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; }
-    .coherence-medium { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; }
-    .coherence-low { background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; }
+    .title { text-align: center; background: linear-gradient(135deg, #667eea, #764ba2); padding: 20px; border-radius: 10px; color: white; margin-bottom: 20px; }
+    .high { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; }
+    .medium { background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; }
+    .low { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; }
     </style>
-    <div class="triadic-title">
+    <div class="title">
         <h1>🌀 Oracle TTU-MC³</h1>
-        <p>Mémoire Triadique | Flot Dynamique | Attracteur Cyclique</p>
-        <p style="font-size: 0.8em;">Φ = (Φ_M, Φ_C, Φ_D) → Cercle Unité</p>
+        <p>Φ = (Φ_M, Φ_C, Φ_D) → Cercle Unité</p>
     </div>
     """, unsafe_allow_html=True)
     
+    # Sidebar
     with st.sidebar:
-        st.header("🌀 État Triadique Global")
-        stats = oracle.stats()
-        triad = oracle.get_global_triad()
+        st.header("État Triadique")
+        stats = oracle.get_stats()
+        triad = oracle.get_triad_state()
         
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Cycles", stats["cycles"])
-            st.metric("Cohérence", f"{triad['coherence']:.3f}")
+            st.metric("Cohérence", f"{stats['coherence']:.2f}")
         with col2:
-            st.metric("Stables", stats["stable_cycles"])
-            st.metric("Dissipation", f"{triad['phi_D']:.3f}")
+            st.metric("Stables", stats["stable"])
+            st.metric("Φ_D", f"{triad['D']:.2f}")
         
         if PLOTLY_AVAILABLE and stats["cycles"] > 0:
             fig = go.Figure(data=[go.Bar(
                 x=['Φ_M', 'Φ_C', 'Φ_D'],
-                y=[triad['phi_M'], triad['phi_C'], triad['phi_D']],
+                y=[triad['M'], triad['C'], triad['D']],
                 marker_color=['#4CAF50', '#2196F3', '#FF5722']
             )])
-            fig.update_layout(height=300, margin=dict(l=20, r=20, t=40, b=20))
+            fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
             st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
-        st.subheader("📊 Statistiques")
         st.json(stats)
     
-    tab1, tab2, tab3 = st.tabs(["🌀 Apprentissage", "🔍 Recherche", "🎯 Attracteurs"])
+    # Tabs
+    tab1, tab2, tab3 = st.tabs(["🌀 Apprentissage", "🔍 Interrogation", "🎯 Carte"])
     
     with tab1:
         st.header("Apprentissage Triadique")
         
-        col1, col2 = st.columns(2)
+        texte = st.text_area("Texte à apprendre", height=300, 
+                            placeholder="Entrez votre texte ici...")
         
-        with col1:
-            texte = st.text_area("📝 Texte à apprendre", height=300)
-            if st.button("🌀 Apprendre", type="primary"):
-                if texte.strip():
-                    with st.spinner("Convergence vers l'attracteur..."):
-                        cycle = oracle.learn(texte)
-                        coherence = oracle.compute_coherence(cycle.state)
-                        st.success(f"✅ Cycle appris: {cycle.id[:8]}")
-                        st.info(f"📊 Cohérence: {coherence:.3f}")
-                        
-                        if cycle.state.convergence_history and PLOTLY_AVAILABLE:
-                            fig = go.Figure(data=[go.Scatter(
-                                y=cycle.state.convergence_history,
-                                mode='lines+markers',
-                                name='Stabilité'
-                            )])
-                            fig.update_layout(title="Convergence", xaxis_title="Itération", yaxis_title="Stabilité")
-                            st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Entrez un texte.")
+        if st.button("🌀 Apprendre", type="primary"):
+            if texte.strip():
+                with st.spinner("Convergence vers l'attracteur..."):
+                    cycle_id = oracle.learn(texte)
+                    if cycle_id:
+                        st.success(f"✅ Appris: {cycle_id[:8]}")
+                        st.info(f"📊 Cohérence globale: {oracle.global_coherence:.3f}")
+                    else:
+                        st.error("Erreur d'apprentissage")
+            else:
+                st.warning("Entrez un texte")
         
-        with col2:
-            uploaded_file = st.file_uploader("📁 Document", type=['txt'])
-            if uploaded_file and st.button("📚 Apprendre le document"):
-                with st.spinner("Apprentissage..."):
-                    cycles = oracle.learn_document(uploaded_file)
-                    st.success(f"✅ {len(cycles)} cycles appris")
+        st.divider()
+        st.caption("""
+        **Flot Triadique:**  
+        Φ_M (Mémoire) ←→ Φ_C (Cohérence) ←→ Φ_D (Dissipation)  
+        Convergence vers l'attracteur circulaire.
+        """)
     
     with tab2:
-        st.header("Recherche Triadique")
-        question = st.text_input("💭 Question")
+        st.header("Interrogation Triadique")
+        
+        question = st.text_input("💭 Votre question")
         
         if st.button("🌀 Interroger", type="primary"):
             if question.strip():
-                with st.spinner("Convergence triadique..."):
+                with st.spinner("Convergence..."):
                     result = oracle.reason(question)
                     
-                    coherence = result["coherence"]
-                    if coherence > 0.7:
-                        st.markdown(f'<div class="coherence-high">📊 Cohérence: {coherence:.3f} (Élevée)</div>', unsafe_allow_html=True)
-                    elif coherence > 0.3:
-                        st.markdown(f'<div class="coherence-medium">📊 Cohérence: {coherence:.3f} (Moyenne)</div>', unsafe_allow_html=True)
+                    coh = result["coherence"]
+                    if coh > 0.6:
+                        st.markdown(f'<div class="high">📊 Cohérence: {coh:.2f}</div>', unsafe_allow_html=True)
+                    elif coh > 0.3:
+                        st.markdown(f'<div class="medium">📊 Cohérence: {coh:.2f}</div>', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'<div class="coherence-low">📊 Cohérence: {coherence:.3f} (Faible)</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="low">📊 Cohérence: {coh:.2f}</div>', unsafe_allow_html=True)
                     
                     st.markdown("### 🌀 Réponse")
                     st.write(result["response"])
                     
-                    with st.expander("📊 Détails triadiques"):
-                        st.write(f"**Attracteur:** cos={result['attractor'][0]:.3f}, sin={result['attractor'][1]:.3f}")
-                        if result["sources"]:
-                            st.write("**Sources:**")
-                            for src in result["sources"][:3]:
-                                st.write(f"- {src['id']} (cohérence: {src['coherence']:.3f})")
+                    if result["sources"]:
+                        with st.expander("Sources"):
+                            for src in result["sources"]:
+                                st.write(f"- {src}")
             else:
-                st.warning("Entrez une question.")
+                st.warning("Entrez une question")
     
     with tab3:
         st.header("Carte des Attracteurs")
         
-        df = oracle.get_attractor_map()
+        df = oracle.get_attractors()
         
         if not df.empty and PLOTLY_AVAILABLE:
             fig = go.Figure()
             
+            # Cercle unité
             theta = np.linspace(0, 2*np.pi, 100)
             fig.add_trace(go.Scatter(
                 x=np.cos(theta), y=np.sin(theta),
@@ -679,17 +593,25 @@ def main():
                 name='Attracteur'
             ))
             
+            # Points
             fig.add_trace(go.Scatter(
                 x=df['cos'], y=df['sin'],
                 mode='markers+text',
-                marker=dict(size=df['coherence'] * 30, color=df['coherence'], colorscale='Viridis', showscale=True),
-                text=df['id'], textposition="top center",
-                name='Cycles'
+                marker=dict(
+                    size=df['coherence'] * 30 + 5,
+                    color=df['coherence'],
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Cohérence")
+                ),
+                text=df['id'],
+                textposition="top center",
+                name='Connaissances'
             ))
             
             fig.update_layout(
-                title="Carte des Attracteurs",
-                xaxis_title="cos θ", yaxis_title="sin θ",
+                title="Projection sur l'Attracteur Circulaire",
+                xaxis_title="cos θ (Φ_M)", yaxis_title="sin θ (Φ_C)",
                 xaxis=dict(range=[-1.2, 1.2], scaleanchor="y", scaleratio=1),
                 yaxis=dict(range=[-1.2, 1.2]),
                 height=500
@@ -698,7 +620,11 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(df)
         else:
-            st.info("Aucun cycle appris. Commencez par apprendre des textes.")
+            st.info("Aucune connaissance apprise. Commencez par apprendre des textes.")
+    
+    # Footer
+    st.divider()
+    st.caption("🌀 Oracle TTU-MC³ - Théorie Triadique Unifiée | Flot Dynamique vers Attracteur")
 
 if __name__ == "__main__":
     main()
