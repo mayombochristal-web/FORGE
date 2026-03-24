@@ -1,5 +1,5 @@
 """
-ORACLE TTU-MC³ - Version Complète avec Analyse Multi-niveaux et Support Multi-formats
+ORACLE TTU-MC³ - Version Stable Sans Erreurs DOM
 Théorie Triadique Unifiée - Modèle de Cohérence Cubique
 """
 
@@ -17,12 +17,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict, Counter
 import tempfile
 
-# Vérification des dépendances
-try:
-    import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
+# Désactiver Plotly complètement pour éviter les erreurs DOM
+PLOTLY_AVAILABLE = False
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -59,80 +55,69 @@ class Config:
     ALPHA_D = 0.1
     ATTRACTOR_RADIUS = 1.0
     MAX_ITERATIONS = 50
-    EMBEDDING_DIM = 128  # Dimension augmentée pour meilleure analyse
-    CHUNK_SIZE = 1000  # Taille des chunks pour l'analyse contextuelle
+    EMBEDDING_DIM = 128
+    CHUNK_SIZE = 1000
 
 # ==========================================
 # ANALYSEUR MULTI-NIVEAUX
 # ==========================================
 class MultiLevelAnalyzer:
-    """Analyse les textes à tous les niveaux : lettre, syllabe, mot, phrase, texte, contexte"""
-    
     def __init__(self):
         self.vowels = set('aeiouyàâäéèêëïîôöùûüÿAEIOUYÀÂÄÉÈÊËÏÎÔÖÙÛÜŸ')
-        self.consonants = set('bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ')
         
     def analyze_letters(self, text: str) -> Dict:
-        """Analyse au niveau des lettres"""
         letters = [c for c in text if c.isalpha()]
         letter_freq = Counter(letters)
+        vowels_count = sum(1 for c in letters if c in self.vowels)
+        consonants_count = len(letters) - vowels_count
         return {
             "total_letters": len(letters),
             "unique_letters": len(letter_freq),
             "letter_frequency": dict(letter_freq.most_common(10)),
-            "vowels": sum(1 for c in letters if c in self.vowels),
-            "consonants": sum(1 for c in letters if c in self.consonants),
-            "vowel_consonant_ratio": sum(1 for c in letters if c in self.vowels) / max(1, sum(1 for c in letters if c in self.consonants))
+            "vowels": vowels_count,
+            "consonants": consonants_count,
+            "vowel_consonant_ratio": vowels_count / max(1, consonants_count)
         }
     
     def analyze_syllables(self, text: str) -> Dict:
-        """Analyse au niveau des syllabes"""
         words = re.findall(r'\b\w+\b', text.lower())
         syllables = []
         for word in words:
             syl = re.findall(r'[aeiouyàâäéèêëïîôöùûüÿ]+[^aeiouyàâäéèêëïîôöùûüÿ]*', word)
             syllables.extend(syl)
-        
         return {
             "total_syllables": len(syllables),
             "unique_syllables": len(set(syllables)),
             "avg_syllables_per_word": len(syllables) / max(1, len(words)),
-            "most_common_syllables": Counter(syllables).most_common(10)
+            "most_common_syllables": dict(Counter(syllables).most_common(10))
         }
     
     def analyze_words(self, text: str) -> Dict:
-        """Analyse au niveau des mots"""
         words = re.findall(r'\b\w+\b', text.lower())
         word_freq = Counter(words)
-        
         return {
             "total_words": len(words),
             "unique_words": len(word_freq),
             "lexical_diversity": len(word_freq) / max(1, len(words)),
-            "most_common_words": word_freq.most_common(20),
+            "most_common_words": dict(word_freq.most_common(20)),
             "avg_word_length": sum(len(w) for w in words) / max(1, len(words))
         }
     
     def analyze_sentences(self, text: str) -> Dict:
-        """Analyse au niveau des phrases"""
         sentences = re.split(r'[.!?]+', text)
         sentences = [s.strip() for s in sentences if s.strip()]
-        
         sentence_lengths = [len(s.split()) for s in sentences]
-        
         return {
             "total_sentences": len(sentences),
             "avg_sentence_length": sum(sentence_lengths) / max(1, len(sentences)),
             "min_sentence_length": min(sentence_lengths) if sentence_lengths else 0,
             "max_sentence_length": max(sentence_lengths) if sentence_lengths else 0,
-            "sentences": sentences[:10]  # Échantillon
+            "sentences": sentences[:10]
         }
     
     def analyze_text_structure(self, text: str) -> Dict:
-        """Analyse au niveau de la structure du texte"""
         paragraphs = re.split(r'\n\s*\n', text)
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
-        
         return {
             "total_paragraphs": len(paragraphs),
             "avg_paragraph_length": sum(len(p) for p in paragraphs) / max(1, len(paragraphs)),
@@ -140,58 +125,42 @@ class MultiLevelAnalyzer:
             "total_lines": text.count('\n') + 1
         }
     
-    def analyze_context(self, text: str, query: str = None) -> Dict:
-        """Analyse contextuelle avec des mots-clés"""
+    def analyze_context(self, text: str) -> Dict:
         words = re.findall(r'\b\w+\b', text.lower())
         word_freq = Counter(words)
-        
-        # Détection des thèmes par fréquence
         themes = word_freq.most_common(15)
-        
-        # Analyse des co-occurrences
-        cooccurrences = defaultdict(int)
-        for i in range(len(words) - 1):
-            cooccurrences[(words[i], words[i+1])] += 1
-        
         return {
             "main_themes": themes,
-            "top_cooccurrences": sorted(cooccurrences.items(), key=lambda x: x[1], reverse=True)[:20],
             "lexical_richness": len(word_freq) / max(1, len(words))
         }
     
-    def full_analysis(self, text: str, query: str = None) -> Dict:
-        """Analyse complète à tous les niveaux"""
+    def full_analysis(self, text: str) -> Dict:
         return {
             "letters": self.analyze_letters(text),
             "syllables": self.analyze_syllables(text),
             "words": self.analyze_words(text),
             "sentences": self.analyze_sentences(text),
             "structure": self.analyze_text_structure(text),
-            "context": self.analyze_context(text, query)
+            "context": self.analyze_context(text)
         }
 
 # ==========================================
-# EXTRACTEUR DE FICHIERS MULTI-FORMATS
+# EXTRACTEUR DE FICHIERS
 # ==========================================
 class FileExtractor:
-    """Extrait le texte de tous types de fichiers"""
-    
     @staticmethod
     def extract_text(file) -> Tuple[str, Dict]:
-        """Extrait le texte et les métadonnées d'un fichier"""
         filename = file.name.lower()
         file_type = "unknown"
         text = ""
-        metadata = {"filename": filename, "size": 0, "pages": 0, "sheets": 0}
+        metadata = {"filename": filename, "size": 0}
         
         try:
-            # TXT
-            if filename.endswith('.txt') or file.type == 'text/plain':
+            if filename.endswith('.txt') or hasattr(file, 'type') and file.type == 'text/plain':
                 text = file.read().decode('utf-8')
                 file_type = "text"
                 metadata["size"] = len(text)
             
-            # PDF
             elif filename.endswith('.pdf') and PDF_AVAILABLE:
                 pdf_reader = PyPDF2.PdfReader(file)
                 metadata["pages"] = len(pdf_reader.pages)
@@ -202,7 +171,6 @@ class FileExtractor:
                 file_type = "pdf"
                 metadata["size"] = len(text)
             
-            # Word
             elif filename.endswith('.docx') and DOCX_AVAILABLE:
                 doc = docx.Document(file)
                 for para in doc.paragraphs:
@@ -210,13 +178,11 @@ class FileExtractor:
                 file_type = "word"
                 metadata["size"] = len(text)
             
-            # Excel/CSV
             elif filename.endswith(('.xlsx', '.xls', '.csv')):
                 if filename.endswith('.csv'):
                     df = pd.read_csv(file)
                 else:
                     df = pd.read_excel(file)
-                metadata["sheets"] = 1 if filename.endswith('.csv') else len(pd.ExcelFile(file).sheet_names)
                 text = df.to_string()
                 file_type = "spreadsheet"
                 metadata["rows"] = len(df)
@@ -224,7 +190,6 @@ class FileExtractor:
                 metadata["size"] = len(text)
             
             else:
-                # Tentative de lecture comme texte
                 try:
                     text = file.read().decode('utf-8')
                     file_type = "text"
@@ -239,11 +204,8 @@ class FileExtractor:
     
     @staticmethod
     def extract_by_chunks(file, chunk_size: int = Config.CHUNK_SIZE) -> List[str]:
-        """Extrait le texte par chunks pour les gros fichiers"""
         text, _ = FileExtractor.extract_text(file)
         chunks = []
-        
-        # Découpage intelligent par paragraphes
         paragraphs = re.split(r'\n\s*\n', text)
         current_chunk = ""
         
@@ -356,7 +318,7 @@ class TriadicFlow:
         return (cos_theta, sin_theta)
 
 # ==========================================
-# ORACLE TTU-MC³ AVEC ANALYSE MULTI-NIVEAUX
+# ORACLE TTU-MC³
 # ==========================================
 class TTUOracle:
     def __init__(self):
@@ -420,7 +382,6 @@ class TTUOracle:
         self._update_coherence()
     
     def _encode_text_with_analysis(self, text: str, analysis: Dict = None) -> Tuple[List[float], List[float], float]:
-        """Encode un texte avec son analyse multi-niveaux"""
         try:
             if self.model:
                 embedding = self.model.encode(text[:500])
@@ -433,7 +394,6 @@ class TTUOracle:
                 np.random.seed(hash_val % 2**32)
                 embedding = np.random.randn(Config.EMBEDDING_DIM)
             
-            # Intégration des features d'analyse dans l'embedding
             if analysis:
                 features = np.array([
                     analysis.get("words", {}).get("lexical_diversity", 0),
@@ -461,13 +421,10 @@ class TTUOracle:
             return [0.0] * (Config.EMBEDDING_DIM // 2), [0.0] * (Config.EMBEDDING_DIM // 2), 0.5
     
     def learn(self, text: str, source: str = "text", analysis: Dict = None) -> Optional[str]:
-        """Apprentissage avec analyse multi-niveaux"""
         try:
-            # Analyse complète si non fournie
             if analysis is None:
-                analysis = self.analyzer.full_analysis(text)
+                analysis = self.analyzer.full_analysis(text[:5000])
             
-            # Encodage avec analyse
             phi_M, phi_C, phi_D = self._encode_text_with_analysis(text, analysis)
             state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=phi_D, analysis=analysis)
             converged = self.flow.converge(state)
@@ -502,32 +459,25 @@ class TTUOracle:
             self._update_coherence()
             return cycle_id
         except Exception as e:
-            print(f"Erreur apprentissage: {e}")
             return None
     
     def learn_document(self, uploaded_file) -> Dict[str, Any]:
-        """Apprentissage complet d'un document avec analyse multi-niveaux"""
         try:
-            # Extraction du texte et métadonnées
             text, metadata = self.extractor.extract_text(uploaded_file)
             
             if not text.strip():
                 return {"success": False, "error": "Texte vide", "cycles": []}
             
-            # Analyse multi-niveaux du document complet
-            full_analysis = self.analyzer.full_analysis(text)
+            full_analysis = self.analyzer.full_analysis(text[:5000])
+            cycle_id = self.learn(text[:5000], source=uploaded_file.name, analysis=full_analysis)
             
-            # Apprentissage du document complet
-            cycle_id = self.learn(text, source=uploaded_file.name, analysis=full_analysis)
-            
-            # Apprentissage par chunks pour une analyse plus fine
             chunks = self.extractor.extract_by_chunks(uploaded_file)
             chunk_cycles = []
             
-            for i, chunk in enumerate(chunks):
+            for i, chunk in enumerate(chunks[:5]):
                 if chunk.strip():
-                    chunk_analysis = self.analyzer.full_analysis(chunk)
-                    chunk_id = self.learn(chunk, source=f"{uploaded_file.name} (chunk {i+1})", analysis=chunk_analysis)
+                    chunk_analysis = self.analyzer.full_analysis(chunk[:5000])
+                    chunk_id = self.learn(chunk[:5000], source=f"{uploaded_file.name} (chunk {i+1})", analysis=chunk_analysis)
                     if chunk_id:
                         chunk_cycles.append(chunk_id)
             
@@ -612,7 +562,8 @@ class TTUOracle:
     def get_stats(self) -> Dict:
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*), SUM(word_count), SUM(sentence_count), SUM(letter_count) FROM knowledge")
-        total, total_words, total_sentences, total_letters = cursor.fetchone()
+        row = cursor.fetchone()
+        total, total_words, total_sentences, total_letters = row if row else (0, 0, 0, 0)
         
         return {
             "cycles": len(self.cycles),
@@ -620,8 +571,7 @@ class TTUOracle:
             "stable": sum(1 for s in self.states if s.stability < 0.1),
             "total_words": total_words or 0,
             "total_sentences": total_sentences or 0,
-            "total_letters": total_letters or 0,
-            "avg_coherence": self.global_coherence
+            "total_letters": total_letters or 0
         }
     
     def get_attractors(self) -> pd.DataFrame:
@@ -639,17 +589,16 @@ class TTUOracle:
         if not self.states:
             return {"M": 0.0, "C": 0.0, "D": 0.0}
         return {
-            "M": np.mean([s.phi_M[0] if s.phi_M else 0 for s in self.states]),
-            "C": np.mean([s.phi_C[0] if s.phi_C else 0 for s in self.states]),
-            "D": np.mean([s.phi_D for s in self.states])
+            "M": float(np.mean([s.phi_M[0] if s.phi_M else 0 for s in self.states])),
+            "C": float(np.mean([s.phi_C[0] if s.phi_C else 0 for s in self.states])),
+            "D": float(np.mean([s.phi_D for s in self.states]))
         }
     
     def analyze_text(self, text: str) -> Dict:
-        """Analyse un texte sans l'apprendre"""
-        return self.analyzer.full_analysis(text)
+        return self.analyzer.full_analysis(text[:5000])
 
 # ==========================================
-# APPLICATION STREAMLIT
+# APPLICATION STREAMLIT SANS PLOTLY
 # ==========================================
 def main():
     st.set_page_config(page_title="Oracle TTU-MC³", page_icon="🌀", layout="wide")
@@ -668,6 +617,7 @@ def main():
     .medium { background: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; }
     .low { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; }
     .stat-card { background: #f0f2f6; padding: 10px; border-radius: 5px; margin: 5px; }
+    .metric { font-size: 24px; font-weight: bold; }
     </style>
     <div class="title">
         <h1>🌀 Oracle TTU-MC³</h1>
@@ -691,6 +641,8 @@ def main():
         
         st.divider()
         st.subheader("📊 Statistiques textuelles")
+        
+        # Barres de progression simples sans Plotly
         st.markdown(f"""
         <div class="stat-card">
         📝 Mots: {stats['total_words']:,}<br>
@@ -699,18 +651,14 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        if PLOTLY_AVAILABLE and stats["cycles"] > 0:
-            try:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=['Φ_M', 'Φ_C', 'Φ_D'],
-                    y=[triad['M'], triad['C'], triad['D']],
-                    marker_color=['#4CAF50', '#2196F3', '#FF5722']
-                ))
-                fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
-                st.plotly_chart(fig, use_container_width=True, key="sidebar_triad")
-            except:
-                pass
+        # Barres de progression manuelles
+        st.write("**État triadique:**")
+        st.write(f"Φ_M: {triad['M']:.2f}")
+        st.progress(min(1.0, max(0.0, triad['M'])))
+        st.write(f"Φ_C: {triad['C']:.2f}")
+        st.progress(min(1.0, max(0.0, triad['C'])))
+        st.write(f"Φ_D: {triad['D']:.2f}")
+        st.progress(min(1.0, max(0.0, triad['D'])))
         
         st.divider()
         st.json(stats)
@@ -744,7 +692,6 @@ def main():
                             st.success(f"✅ Appris: {cycle_id[:8]}")
                             st.info(f"📊 Cohérence globale: {oracle.global_coherence:.3f}")
                             
-                            # Afficher l'analyse
                             analysis = oracle.analyze_text(texte)
                             with st.expander("📊 Analyse multi-niveaux"):
                                 col_a, col_b, col_c = st.columns(3)
@@ -786,7 +733,6 @@ def main():
                             st.success(f"✅ Document appris: {len(result['cycles'])} cycles principaux + {len(result['chunk_cycles'])} chunks")
                             st.info(f"📊 Métadonnées: {result['metadata']}")
                             
-                            # Afficher l'analyse du document
                             analysis = result.get("analysis", {})
                             with st.expander("📊 Analyse multi-niveaux du document"):
                                 col_a, col_b, col_c = st.columns(3)
@@ -794,11 +740,9 @@ def main():
                                     st.write("**Lettres**")
                                     st.write(f"Total: {analysis.get('letters', {}).get('total_letters', 0)}")
                                     st.write(f"Voyelles: {analysis.get('letters', {}).get('vowels', 0)}")
-                                    st.write(f"Ratio V/C: {analysis.get('letters', {}).get('vowel_consonant_ratio', 0):.2f}")
                                 with col_b:
                                     st.write("**Mots**")
                                     st.write(f"Total: {analysis.get('words', {}).get('total_words', 0)}")
-                                    st.write(f"Uniques: {analysis.get('words', {}).get('unique_words', 0)}")
                                     themes = analysis.get('context', {}).get('main_themes', [])
                                     if themes:
                                         st.write("**Thèmes:**")
@@ -813,10 +757,6 @@ def main():
     
     with tab2:
         st.header("Interrogation Triadique")
-        st.markdown("""
-        Posez vos questions. L'Oracle recherche les connaissances les plus cohérentes
-        et génère une réponse par convergence vers l'attracteur.
-        """)
         
         question = st.text_input("💭 Votre question", key="question_input")
         
@@ -846,58 +786,34 @@ def main():
     
     with tab3:
         st.header("Carte des Attracteurs")
-        st.markdown("Visualisation des connaissances stabilisées sur le cercle unité.")
+        st.markdown("Visualisation tabulaire des connaissances stabilisées.")
         
         df = oracle.get_attractors()
         
-        if not df.empty and PLOTLY_AVAILABLE:
-            try:
-                fig = go.Figure()
-                
-                theta = np.linspace(0, 2*np.pi, 100)
-                fig.add_trace(go.Scatter(
-                    x=np.cos(theta), y=np.sin(theta),
-                    mode='lines',
-                    line=dict(color='gray', dash='dash', width=2),
-                    name='Attracteur (cercle unité)'
-                ))
-                
-                fig.add_trace(go.Scatter(
-                    x=df['cos'].tolist(),
-                    y=df['sin'].tolist(),
-                    mode='markers+text',
-                    marker=dict(
-                        size=[max(10, min(40, c*30 + 5)) for c in df['coherence']],
-                        color=df['coherence'].tolist(),
-                        colorscale='Viridis',
-                        showscale=True,
-                        colorbar=dict(title="Cohérence"),
-                        line=dict(width=1, color='white')
-                    ),
-                    text=df['id'].tolist(),
-                    textposition="top center",
-                    name='Connaissances'
-                ))
-                
-                fig.update_layout(
-                    title="Projection sur l'Attracteur Circulaire",
-                    xaxis_title="cos θ (Φ_M)",
-                    yaxis_title="sin θ (Φ_C)",
-                    xaxis=dict(range=[-1.2, 1.2], scaleanchor="y", scaleratio=1),
-                    yaxis=dict(range=[-1.2, 1.2]),
-                    height=550
-                )
-                
-                st.plotly_chart(fig, use_container_width=True, key="attractor_map")
-                st.dataframe(df, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Erreur d'affichage: {e}")
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+            
+            # Affichage des statistiques des attracteurs
+            st.subheader("Statistiques des attracteurs")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Moyenne cos", f"{df['cos'].mean():.3f}")
+                st.metric("Min cos", f"{df['cos'].min():.3f}")
+                st.metric("Max cos", f"{df['cos'].max():.3f}")
+            with col2:
+                st.metric("Moyenne sin", f"{df['sin'].mean():.3f}")
+                st.metric("Min sin", f"{df['sin'].min():.3f}")
+                st.metric("Max sin", f"{df['sin'].max():.3f}")
+            with col3:
+                st.metric("Moyenne cohérence", f"{df['coherence'].mean():.3f}")
+                st.metric("Min cohérence", f"{df['coherence'].min():.3f}")
+                st.metric("Max cohérence", f"{df['coherence'].max():.3f}")
         else:
             st.info("Aucune connaissance apprise. Commencez par apprendre des textes ou documents.")
     
     with tab4:
         st.header("Analyse Multi-niveaux")
-        st.markdown("Analysez n'importe quel texte à tous les niveaux (lettre, syllabe, mot, phrase, texte, contexte)")
+        st.markdown("Analysez n'importe quel texte à tous les niveaux")
         
         text_to_analyze = st.text_area("Texte à analyser", height=200, key="analyze_text")
         
@@ -906,7 +822,6 @@ def main():
                 with st.spinner("Analyse multi-niveaux en cours..."):
                     analysis = oracle.analyze_text(text_to_analyze)
                     
-                    # Affichage des résultats par niveau
                     tabs = st.tabs(["📝 Mots", "📖 Phrases", "🔤 Lettres", "🎵 Syllabes", "📚 Structure", "🌐 Contexte"])
                     
                     with tabs[0]:
@@ -919,7 +834,7 @@ def main():
                         with col3:
                             st.metric("Diversité lexicale", f"{analysis['words']['lexical_diversity']:.3f}")
                         st.write("**Mots les plus fréquents:**")
-                        for word, count in analysis['words']['most_common_words'][:10]:
+                        for word, count in list(analysis['words']['most_common_words'].items())[:10]:
                             st.write(f"- {word}: {count}")
                     
                     with tabs[1]:
@@ -971,13 +886,9 @@ def main():
                         st.write("**Thèmes principaux:**")
                         for theme, count in analysis['context']['main_themes'][:10]:
                             st.write(f"- {theme}: {count}")
-                        st.write("**Co-occurrences fréquentes:**")
-                        for (w1, w2), count in analysis['context']['top_cooccurrences'][:10]:
-                            st.write(f"- {w1} → {w2}: {count}")
             else:
                 st.warning("Entrez un texte à analyser")
     
-    # Footer
     st.divider()
     st.caption("🌀 Oracle TTU-MC³ - Théorie Triadique Unifiée | Analyse multi-niveaux: lettre → syllabe → mot → phrase → texte → contexte")
 
