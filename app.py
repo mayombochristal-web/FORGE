@@ -1,5 +1,5 @@
 """
-ORACLE TTU-MC³ - Version Stable Sans Erreurs DOM
+ORACLE TTU-MC³ - Version Supabase avec Attracteur Circulaire
 Théorie Triadique Unifiée - Modèle de Cohérence Cubique
 """
 
@@ -10,14 +10,15 @@ import uuid
 import datetime
 import hashlib
 import re
-import sqlite3
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional, Any
 from collections import defaultdict, Counter
-import tempfile
 
-# Désactiver Plotly complètement pour éviter les erreurs DOM
+# Supabase
+from supabase import create_client, Client
+
+# Désactiver Plotly si nécessaire (optionnel)
 PLOTLY_AVAILABLE = False
 
 try:
@@ -42,12 +43,6 @@ except ImportError:
 # ==========================================
 # CONFIGURATION
 # ==========================================
-MEMORY_FOLDER = "ttu_oracle_memory"
-DB_PATH = os.path.join(MEMORY_FOLDER, "ttu_oracle.db")
-
-if not os.path.exists(MEMORY_FOLDER):
-    os.makedirs(MEMORY_FOLDER)
-
 class Config:
     CONVERGENCE_THRESHOLD = 1e-6
     ALPHA_M = 0.618
@@ -55,8 +50,8 @@ class Config:
     ALPHA_D = 0.1
     ATTRACTOR_RADIUS = 1.0
     MAX_ITERATIONS = 50
-    EMBEDDING_DIM = 128
-    CHUNK_SIZE = 1000
+    EMBEDDING_DIM = 128  # Dimension de chaque vecteur phi_M et phi_C
+    CHUNK_SIZE = 1000    # Taille approximative des chunks en caractères
 
 # ==========================================
 # ANALYSEUR MULTI-NIVEAUX
@@ -236,7 +231,7 @@ class TriadicState:
         self.analysis = analysis or {}
 
 # ==========================================
-# FLOT TRIADIQUE
+# FLOT TRIADIQUE AVEC ATTRACTEUR CIRCULAIRE
 # ==========================================
 class TriadicFlow:
     def __init__(self):
@@ -260,6 +255,7 @@ class TriadicFlow:
     
     def flow_equations(self, state: TriadicState, dt: float = 0.01) -> TriadicState:
         try:
+            # Équations différentielles originales
             dM = [-self.alpha_M * m + self.alpha_C * c + self.alpha_D * state.phi_D 
                   for m, c in zip(state.phi_M, state.phi_C)]
             dC = [-self.alpha_C * c + self.alpha_D * state.phi_D + self.alpha_M * m 
@@ -267,16 +263,32 @@ class TriadicFlow:
             dD = (-self.alpha_D * state.phi_D + 
                   self.alpha_M * sum(state.phi_M)/len(state.phi_M) + 
                   self.alpha_C * sum(state.phi_C)/len(state.phi_C))
-            
+
+            # Mise à jour par Euler
             new_M = [m + dt * dm for m, dm in zip(state.phi_M, dM)]
             new_C = [c + dt * dc for c, dc in zip(state.phi_C, dC)]
             new_D = state.phi_D + dt * dD
-            
+
+            # Force d'attracteur vers le cercle unité
+            r = self._norm(new_M) + self._norm(new_C)
+            if r > 1e-6:
+                correction_factor = 1.0 + self.alpha_D * (1.0 - r) * dt * 10
+                new_M = [m * correction_factor for m in new_M]
+                new_C = [c * correction_factor for c in new_C]
+
+            # Renormalisation finale
             new_M = self._normalize(new_M)
             new_C = self._normalize(new_C)
-            
+
+            current_r = self._norm(new_M) + self._norm(new_C)
+            if current_r < 0.95 or current_r > 1.05:
+                final_factor = 1.0 / current_r
+                new_M = [m * final_factor for m in new_M]
+                new_C = [c * final_factor for c in new_C]
+
             return TriadicState(phi_M=new_M, phi_C=new_C, phi_D=new_D, analysis=state.analysis)
-        except:
+        except Exception as e:
+            print(f"Erreur dans flow_equations: {e}")
             return state
     
     def converge(self, initial_state: TriadicState, max_iter: int = None) -> TriadicState:
@@ -305,12 +317,12 @@ class TriadicFlow:
     def attractor_projection(self, state: TriadicState) -> Tuple[float, float]:
         try:
             if state.phi_M and state.phi_C:
-                mag = self._norm(state.phi_M) + self._norm(state.phi_C)
-                if mag > 1e-6:
-                    cos_theta = state.phi_M[0] / mag if state.phi_M else 0.0
-                    sin_theta = state.phi_C[0] / mag if state.phi_C else 0.0
-                else:
-                    cos_theta, sin_theta = 0.0, 0.0
+                cos_theta = state.phi_M[0] / self.radius if self.radius > 0 else 0.0
+                sin_theta = state.phi_C[0] / self.radius if self.radius > 0 else 0.0
+                norm = np.sqrt(cos_theta**2 + sin_theta**2)
+                if norm > 1e-6:
+                    cos_theta /= norm
+                    sin_theta /= norm
             else:
                 cos_theta, sin_theta = 0.0, 0.0
         except:
@@ -318,7 +330,7 @@ class TriadicFlow:
         return (cos_theta, sin_theta)
 
 # ==========================================
-# ORACLE TTU-MC³
+# ORACLE TTU-MC³ AVEC SUPABASE
 # ==========================================
 class TTUOracle:
     def __init__(self):
@@ -333,82 +345,84 @@ class TTUOracle:
         self.analyzer = MultiLevelAnalyzer()
         self.extractor = FileExtractor()
         
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self._init_db()
+        self.supabase: Client = create_client(
+            st.secrets["SUPABASE_URL"],
+            st.secrets["SUPABASE_KEY"]
+        )
+        
         self.states: List[TriadicState] = []
         self.cycles: Dict[str, dict] = {}
         self.global_coherence = 0.0
         self._load_memory()
     
-    def _init_db(self):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS knowledge (
-            id TEXT PRIMARY KEY,
-            text TEXT,
-            phi_M TEXT,
-            phi_C TEXT,
-            phi_D REAL,
-            attractor_cos REAL,
-            attractor_sin REAL,
-            coherence REAL,
-            timestamp REAL,
-            source TEXT,
-            analysis TEXT,
-            word_count INTEGER,
-            sentence_count INTEGER,
-            letter_count INTEGER,
-            main_themes TEXT
-        )""")
-        self.conn.commit()
-    
     def _load_memory(self):
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT id, phi_M, phi_C, phi_D, attractor_cos, attractor_sin, analysis FROM knowledge")
-        for row in cursor.fetchall():
+        try:
+            response = self.supabase.table("knowledge").select("*").execute()
+            for row in response.data:
+                try:
+                    phi_m = self._parse_vector(row.get('phi_m'))
+                    phi_c = self._parse_vector(row.get('phi_c'))
+                    analysis = row.get('metadata', {})
+                    if isinstance(analysis, str):
+                        analysis = json.loads(analysis)
+                    state = TriadicState(phi_M=phi_m, phi_C=phi_c, phi_D=row.get('phi_d', 0.0), analysis=analysis)
+                    
+                    self.cycles[row['id']] = {
+                        "id": row['id'],
+                        "state": state,
+                        "attractor": (row.get('attractor_cos', 0.0), row.get('attractor_sin', 0.0))
+                    }
+                    self.states.append(state)
+                except Exception as e:
+                    print(f"Erreur chargement cycle {row.get('id')}: {e}")
+                    continue
+            self._update_coherence()
+        except Exception as e:
+            st.error(f"Erreur chargement depuis Supabase: {e}")
+    
+    def _parse_vector(self, vec_data):
+        if vec_data is None:
+            return [0.0] * Config.EMBEDDING_DIM
+        if isinstance(vec_data, list):
+            # S'assurer de la bonne dimension
+            if len(vec_data) != Config.EMBEDDING_DIM:
+                vec_data = (vec_data + [0.0] * Config.EMBEDDING_DIM)[:Config.EMBEDDING_DIM]
+            return vec_data
+        if isinstance(vec_data, str):
             try:
-                phi_M = json.loads(row[1]) if row[1] else []
-                phi_C = json.loads(row[2]) if row[2] else []
-                analysis = json.loads(row[6]) if row[6] else {}
-                state = TriadicState(phi_M=phi_M, phi_C=phi_C, phi_D=row[3], analysis=analysis)
-                self.cycles[row[0]] = {
-                    "id": row[0],
-                    "state": state,
-                    "attractor": (row[4], row[5])
-                }
-                self.states.append(state)
+                vec_str = vec_data.strip('[]')
+                vec = [float(x) for x in vec_str.split(',') if x.strip()]
+                if len(vec) != Config.EMBEDDING_DIM:
+                    vec = (vec + [0.0] * Config.EMBEDDING_DIM)[:Config.EMBEDDING_DIM]
+                return vec
             except:
-                continue
-        self._update_coherence()
+                return [0.0] * Config.EMBEDDING_DIM
+        return [0.0] * Config.EMBEDDING_DIM
     
     def _encode_text_with_analysis(self, text: str, analysis: Dict = None) -> Tuple[List[float], List[float], float]:
         try:
+            # Génération de l'embedding brut
             if self.model:
-                embedding = self.model.encode(text[:500])
-                if len(embedding) > Config.EMBEDDING_DIM:
-                    embedding = embedding[:Config.EMBEDDING_DIM]
-                elif len(embedding) < Config.EMBEDDING_DIM:
-                    embedding = np.pad(embedding, (0, Config.EMBEDDING_DIM - len(embedding)))
+                embedding_raw = self.model.encode(text[:500])
             else:
                 hash_val = int(hashlib.sha256(text.encode()).hexdigest(), 16)
                 np.random.seed(hash_val % 2**32)
-                embedding = np.random.randn(Config.EMBEDDING_DIM)
+                embedding_raw = np.random.randn(256)
             
-            if analysis:
-                features = np.array([
-                    analysis.get("words", {}).get("lexical_diversity", 0),
-                    analysis.get("sentences", {}).get("avg_sentence_length", 0) / 50,
-                    analysis.get("letters", {}).get("vowel_consonant_ratio", 0),
-                    min(1.0, analysis.get("structure", {}).get("total_paragraphs", 0) / 100)
-                ])
-                if len(features) < len(embedding):
-                    embedding[:len(features)] = embedding[:len(features)] * (1 + features)
+            # Création de deux vecteurs de taille Config.EMBEDDING_DIM (128)
+            phi_M = embedding_raw[:Config.EMBEDDING_DIM].tolist()
+            if len(embedding_raw) >= 2 * Config.EMBEDDING_DIM:
+                phi_C = embedding_raw[Config.EMBEDDING_DIM:2*Config.EMBEDDING_DIM].tolist()
+            else:
+                phi_C = np.roll(phi_M, 10).tolist()
             
-            split = Config.EMBEDDING_DIM // 2
-            phi_M = embedding[:split].tolist()
-            phi_C = embedding[split:].tolist()
-            phi_D = float(np.mean(embedding))
+            # Padding si nécessaire
+            phi_M = (phi_M + [0.0] * Config.EMBEDDING_DIM)[:Config.EMBEDDING_DIM]
+            phi_C = (phi_C + [0.0] * Config.EMBEDDING_DIM)[:Config.EMBEDDING_DIM]
             
+            phi_D = float(np.mean(embedding_raw))
+            
+            # Normalisation sur la sphère unité
             norm_M = np.sqrt(sum(v*v for v in phi_M))
             norm_C = np.sqrt(sum(v*v for v in phi_C))
             if norm_M > 0:
@@ -416,9 +430,24 @@ class TTUOracle:
             if norm_C > 0:
                 phi_C = [v / norm_C for v in phi_C]
             
+            # Intégration de l'analyse multi-niveaux
+            if analysis:
+                features = np.array([
+                    analysis.get("words", {}).get("lexical_diversity", 0),
+                    analysis.get("sentences", {}).get("avg_sentence_length", 0) / 50,
+                    analysis.get("letters", {}).get("vowel_consonant_ratio", 0),
+                    min(1.0, analysis.get("structure", {}).get("total_paragraphs", 0) / 100)
+                ])
+                for i, f in enumerate(features):
+                    if i < len(phi_M):
+                        phi_M[i] = phi_M[i] * (1 + f * 0.1)
+                    if i < len(phi_C):
+                        phi_C[i] = phi_C[i] * (1 + f * 0.1)
+            
             return phi_M, phi_C, phi_D
-        except:
-            return [0.0] * (Config.EMBEDDING_DIM // 2), [0.0] * (Config.EMBEDDING_DIM // 2), 0.5
+        except Exception as e:
+            print(f"Erreur encodage: {e}")
+            return [0.0]*Config.EMBEDDING_DIM, [0.0]*Config.EMBEDDING_DIM, 0.5 
     
     def learn(self, text: str, source: str = "text", analysis: Dict = None) -> Optional[str]:
         try:
@@ -433,60 +462,77 @@ class TTUOracle:
             coherence = 1.0 - abs(attractor[0]) - abs(attractor[1])
             coherence = max(0.0, min(1.0, coherence))
             
-            cycle_id = str(uuid.uuid4())
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO knowledge 
-                (id, text, phi_M, phi_C, phi_D, attractor_cos, attractor_sin, 
-                 coherence, timestamp, source, analysis, word_count, sentence_count, 
-                 letter_count, main_themes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                cycle_id, text[:5000],
-                json.dumps(converged.phi_M), json.dumps(converged.phi_C),
-                converged.phi_D, attractor[0], attractor[1], coherence,
-                datetime.datetime.now().timestamp(), source,
-                json.dumps(analysis),
-                analysis.get("words", {}).get("total_words", 0),
-                analysis.get("sentences", {}).get("total_sentences", 0),
-                analysis.get("letters", {}).get("total_letters", 0),
-                json.dumps(analysis.get("context", {}).get("main_themes", []))
-            ))
-            self.conn.commit()
+            data = {
+                "content": text[:5000],
+                "source": source,
+                "phi_m": converged.phi_M,
+                "phi_c": converged.phi_C,
+                "phi_d": converged.phi_D,
+                "attractor_cos": attractor[0],
+                "attractor_sin": attractor[1],
+                "coherence": coherence,
+                "metadata": analysis,
+                "word_count": analysis.get("words", {}).get("total_words", 0),
+                "sentence_count": analysis.get("sentences", {}).get("total_sentences", 0),
+                "letter_count": analysis.get("letters", {}).get("total_letters", 0),
+                "main_themes": json.dumps(analysis.get("context", {}).get("main_themes", []))
+            }
             
-            self.cycles[cycle_id] = {"id": cycle_id, "state": converged, "attractor": attractor}
-            self.states.append(converged)
-            self._update_coherence()
-            return cycle_id
+            response = self.supabase.table("knowledge").insert(data).execute()
+            if response.data:
+                cycle_id = response.data[0]['id']
+                self.cycles[cycle_id] = {"id": cycle_id, "state": converged, "attractor": attractor}
+                self.states.append(converged)
+                self._update_coherence()
+                return cycle_id
+            return None
         except Exception as e:
+            st.error(f"Erreur d'apprentissage: {e}")
             return None
     
-    def learn_document(self, uploaded_file) -> Dict[str, Any]:
+    def learn_document(self, uploaded_file, progress_callback=None) -> Dict[str, Any]:
         try:
             text, metadata = self.extractor.extract_text(uploaded_file)
             
             if not text.strip():
                 return {"success": False, "error": "Texte vide", "cycles": []}
             
-            full_analysis = self.analyzer.full_analysis(text[:5000])
-            cycle_id = self.learn(text[:5000], source=uploaded_file.name, analysis=full_analysis)
+            # Découpage en paragraphes
+            paragraphs = re.split(r'\n\s*\n', text)
+            paragraphs = [p.strip() for p in paragraphs if p.strip()]
             
-            chunks = self.extractor.extract_by_chunks(uploaded_file)
+            # Regroupement en chunks de taille raisonnable
+            chunks = []
+            current_chunk = ""
+            for para in paragraphs:
+                if len(current_chunk) + len(para) < Config.CHUNK_SIZE:
+                    current_chunk += para + "\n\n"
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = para + "\n\n"
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            
+            # Apprentissage de chaque chunk
             chunk_cycles = []
-            
-            for i, chunk in enumerate(chunks[:5]):
+            total_chunks = len(chunks)
+            for i, chunk in enumerate(chunks):
+                if progress_callback:
+                    progress_callback(i, total_chunks)
                 if chunk.strip():
                     chunk_analysis = self.analyzer.full_analysis(chunk[:5000])
-                    chunk_id = self.learn(chunk[:5000], source=f"{uploaded_file.name} (chunk {i+1})", analysis=chunk_analysis)
+                    chunk_id = self.learn(chunk[:5000],
+                                          source=f"{uploaded_file.name} (chunk {i+1})",
+                                          analysis=chunk_analysis)
                     if chunk_id:
                         chunk_cycles.append(chunk_id)
             
             return {
                 "success": True,
-                "cycles": [cycle_id] if cycle_id else [],
-                "chunk_cycles": chunk_cycles,
+                "cycles": chunk_cycles,
                 "metadata": metadata,
-                "analysis": full_analysis,
+                "analysis": self.analyzer.full_analysis(text[:5000]),
                 "total_chunks": len(chunks)
             }
         except Exception as e:
@@ -505,20 +551,26 @@ class TTUOracle:
     def search(self, query: str, top_k: int = 3) -> List[dict]:
         try:
             phi_M_q, phi_C_q, _ = self._encode_text_with_analysis(query)
-            q_mag = np.sqrt(sum(v*v for v in phi_M_q) + sum(v*v for v in phi_C_q))
+            response = self.supabase.rpc(
+                'match_knowledge_triadic',
+                {
+                    'query_embedding_m': phi_M_q,
+                    'query_embedding_c': phi_C_q,
+                    'match_threshold': 0.5,
+                    'match_count': top_k
+                }
+            ).execute()
+            
             results = []
-            for cycle_id, cycle in self.cycles.items():
-                try:
-                    dot = sum(a*b for a,b in zip(phi_M_q, cycle["state"].phi_M)) + \
-                          sum(a*b for a,b in zip(phi_C_q, cycle["state"].phi_C))
-                    mag = self.flow._norm(cycle["state"].phi_M) + self.flow._norm(cycle["state"].phi_C)
-                    similarity = dot / (q_mag * mag) if (mag > 0 and q_mag > 0) else 0.0
-                    results.append({"id": cycle_id, "similarity": similarity, "attractor": cycle["attractor"]})
-                except:
-                    continue
-            results.sort(key=lambda x: x["similarity"], reverse=True)
-            return results[:top_k]
-        except:
+            for row in response.data:
+                results.append({
+                    "id": row['id'],
+                    "similarity": row['combined_similarity'],
+                    "attractor": None
+                })
+            return results
+        except Exception as e:
+            print(f"Erreur recherche: {e}")
             return []
     
     def reason(self, question: str) -> Dict[str, Any]:
@@ -526,19 +578,21 @@ class TTUOracle:
         if not results:
             return {"response": "Aucune connaissance trouvée.", "coherence": 0.0, "sources": [], "analysis": {}}
         
-        cursor = self.conn.cursor()
         knowledge = []
         for r in results[:2]:
-            cursor.execute("SELECT text, coherence, analysis, source FROM knowledge WHERE id = ?", (r["id"],))
-            row = cursor.fetchone()
-            if row:
-                knowledge.append({
-                    "text": row[0][:500], 
-                    "coherence": row[1], 
-                    "similarity": r["similarity"],
-                    "analysis": json.loads(row[2]) if row[2] else {},
-                    "source": row[3]
-                })
+            try:
+                row = self.supabase.table("knowledge").select("content, coherence, metadata, source").eq("id", r["id"]).execute()
+                if row.data:
+                    item = row.data[0]
+                    knowledge.append({
+                        "text": item["content"][:500],
+                        "coherence": item["coherence"],
+                        "similarity": r["similarity"],
+                        "analysis": item.get("metadata", {}),
+                        "source": item.get("source", "inconnu")
+                    })
+            except Exception as e:
+                print(f"Erreur récupération source: {e}")
         
         coherence = knowledge[0]["coherence"] if knowledge else 0.0
         return {
@@ -560,18 +614,24 @@ class TTUOracle:
         return "\n\n---\n\n".join(parts) + f"\n\n---\n🌀 **Cohérence:** {coherence_ind} {coherence:.2f}"
     
     def get_stats(self) -> Dict:
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT COUNT(*), SUM(word_count), SUM(sentence_count), SUM(letter_count) FROM knowledge")
-        row = cursor.fetchone()
-        total, total_words, total_sentences, total_letters = row if row else (0, 0, 0, 0)
+        try:
+            response = self.supabase.table("knowledge").select("word_count, sentence_count, letter_count", count="exact").execute()
+            total_cycles = len(response.data)
+            total_words = sum(row.get('word_count', 0) for row in response.data)
+            total_sentences = sum(row.get('sentence_count', 0) for row in response.data)
+            total_letters = sum(row.get('letter_count', 0) for row in response.data)
+        except Exception as e:
+            total_cycles = len(self.cycles)
+            total_words = total_sentences = total_letters = 0
         
+        stable = sum(1 for s in self.states if s.stability < 0.1)
         return {
-            "cycles": len(self.cycles),
+            "cycles": total_cycles,
             "coherence": self.global_coherence,
-            "stable": sum(1 for s in self.states if s.stability < 0.1),
-            "total_words": total_words or 0,
-            "total_sentences": total_sentences or 0,
-            "total_letters": total_letters or 0
+            "stable": stable,
+            "total_words": total_words,
+            "total_sentences": total_sentences,
+            "total_letters": total_letters
         }
     
     def get_attractors(self) -> pd.DataFrame:
@@ -598,7 +658,7 @@ class TTUOracle:
         return self.analyzer.full_analysis(text[:5000])
 
 # ==========================================
-# APPLICATION STREAMLIT SANS PLOTLY
+# APPLICATION STREAMLIT
 # ==========================================
 def main():
     st.set_page_config(page_title="Oracle TTU-MC³", page_icon="🌀", layout="wide")
@@ -642,7 +702,6 @@ def main():
         st.divider()
         st.subheader("📊 Statistiques textuelles")
         
-        # Barres de progression simples sans Plotly
         st.markdown(f"""
         <div class="stat-card">
         📝 Mots: {stats['total_words']:,}<br>
@@ -651,7 +710,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Barres de progression manuelles
         st.write("**État triadique:**")
         st.write(f"Φ_M: {triad['M']:.2f}")
         st.progress(min(1.0, max(0.0, triad['M'])))
@@ -727,33 +785,45 @@ def main():
                 st.info(f"Fichier: {uploaded_file.name}")
                 
                 if st.button("📚 Apprendre le document", type="primary", key="learn_doc_btn"):
-                    with st.spinner("Extraction, analyse multi-niveaux et convergence..."):
-                        result = oracle.learn_document(uploaded_file)
-                        if result["success"]:
-                            st.success(f"✅ Document appris: {len(result['cycles'])} cycles principaux + {len(result['chunk_cycles'])} chunks")
-                            st.info(f"📊 Métadonnées: {result['metadata']}")
-                            
-                            analysis = result.get("analysis", {})
-                            with st.expander("📊 Analyse multi-niveaux du document"):
-                                col_a, col_b, col_c = st.columns(3)
-                                with col_a:
-                                    st.write("**Lettres**")
-                                    st.write(f"Total: {analysis.get('letters', {}).get('total_letters', 0)}")
-                                    st.write(f"Voyelles: {analysis.get('letters', {}).get('vowels', 0)}")
-                                with col_b:
-                                    st.write("**Mots**")
-                                    st.write(f"Total: {analysis.get('words', {}).get('total_words', 0)}")
-                                    themes = analysis.get('context', {}).get('main_themes', [])
-                                    if themes:
-                                        st.write("**Thèmes:**")
-                                        for t in themes[:3]:
-                                            st.write(f"- {t[0]}")
-                                with col_c:
-                                    st.write("**Structure**")
-                                    st.write(f"Paragraphes: {analysis.get('structure', {}).get('total_paragraphs', 0)}")
-                                    st.write(f"Phrases: {analysis.get('sentences', {}).get('total_sentences', 0)}")
-                        else:
-                            st.error(f"Erreur: {result.get('error', 'Inconnue')}")
+                    # Barre de progression personnalisée
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def update_progress(i, total):
+                        progress_bar.progress((i + 1) / total)
+                        status_text.text(f"Traitement chunk {i+1}/{total}")
+                    
+                    with st.spinner("Extraction et découpage..."):
+                        result = oracle.learn_document(uploaded_file, progress_callback=update_progress)
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    if result["success"]:
+                        st.success(f"✅ Document appris: {len(result['cycles'])} cycles créés")
+                        st.info(f"📊 Métadonnées: {result['metadata']}")
+                        
+                        analysis = result.get("analysis", {})
+                        with st.expander("📊 Analyse multi-niveaux du document"):
+                            col_a, col_b, col_c = st.columns(3)
+                            with col_a:
+                                st.write("**Lettres**")
+                                st.write(f"Total: {analysis.get('letters', {}).get('total_letters', 0)}")
+                                st.write(f"Voyelles: {analysis.get('letters', {}).get('vowels', 0)}")
+                            with col_b:
+                                st.write("**Mots**")
+                                st.write(f"Total: {analysis.get('words', {}).get('total_words', 0)}")
+                                themes = analysis.get('context', {}).get('main_themes', [])
+                                if themes:
+                                    st.write("**Thèmes:**")
+                                    for t in themes[:3]:
+                                        st.write(f"- {t[0]}")
+                            with col_c:
+                                st.write("**Structure**")
+                                st.write(f"Paragraphes: {analysis.get('structure', {}).get('total_paragraphs', 0)}")
+                                st.write(f"Phrases: {analysis.get('sentences', {}).get('total_sentences', 0)}")
+                    else:
+                        st.error(f"Erreur: {result.get('error', 'Inconnue')}")
     
     with tab2:
         st.header("Interrogation Triadique")
@@ -793,7 +863,6 @@ def main():
         if not df.empty:
             st.dataframe(df, use_container_width=True)
             
-            # Affichage des statistiques des attracteurs
             st.subheader("Statistiques des attracteurs")
             col1, col2, col3 = st.columns(3)
             with col1:
